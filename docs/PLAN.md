@@ -192,7 +192,7 @@ Rules:
 ## 5. Phased plan
 
 Each phase ends with a usable, tested app. Development and acceptance testing happen **on macOS**;
-CI runs on macOS; Linux and Windows join it in phase 10.
+CI runs on macOS; Linux and Windows join it once they are planned (see Later).
 
 ### Phase 0 — Foundations
 
@@ -401,15 +401,11 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
   gradient; so does Arbalete's on macOS, through its native interface, as CEF paints its windowed browsers
   opaque. Linux and Windows would need their own native interface, or the web one rendered off screen.
 
-### Phase 10 — Linux and Windows
-- CI on Linux and Windows: system libraries CEF needs, loading `libcef` in tests, Windows sandbox bootstrap.
-- Full acceptance testing on each OS, signed installers, automatic updates.
-
-### Phase 11 — Developer mode
+### Phase 10 — Developer mode
 - A view for working on a site under development, like Arc's developer mode: to be studied (behavior and
   layout) when the phase starts.
 
-### Phase 12 — Incognito
+### Phase 11 — Incognito
 - ⌘⇧N (and File › New Incognito Window) opens a separate window on an off-the-record request context: cookies,
   cache and storage in memory only, discarded when the window closes; nothing written to history, the session or
   the sidebar state.
@@ -417,7 +413,7 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
   Favorites, pinned tabs, Spaces or profiles); a dark theme that sets it apart.
 - Extensions disabled unless allowed in incognito; downloads still saved.
 
-### Phase 13 — Arc feature audit
+### Phase 12 — Arc feature audit
 - Use Arc as a user, systematically, to find the features this plan misses: every menu and submenu, keyboard
   shortcut, context menu, setting and empty state, with edge cases (many tabs, long titles, drag and drop
   everywhere, several windows and profiles).
@@ -459,7 +455,7 @@ from Arc rely on them. Items that belong to a phase above stay there.
 - Onboarding: the audit was done with a signed-in account, which skipped the setup screens. Arbalete's first
   launch will be designed later, from an account-free path, taking inspiration from Dia (Arc's successor).
 
-### Phase 14 — Pixel-perfect design comparison
+### Phase 13 — Pixel-perfect design comparison
 - Last, once every feature is in: Arbalete matches Arc's look exactly, everywhere, in light and dark themes.
 - Every screen, state and motion side by side with Arc, at the same window size and scale:
   - the sidebar in each mode (docked, hidden, revealed), the library, the Command Bar, the site controls'
@@ -472,6 +468,9 @@ from Arc rely on them. Items that belong to a phase above stay there.
   no asset.
 
 ### Later
+- **Linux and Windows**, last and not planned for now: CI on both (system libraries CEF needs, loading `libcef`
+  in tests, Windows sandbox bootstrap), an interface of their own, full acceptance testing on each OS, signed
+  installers, automatic updates.
 - **Sync through a folder the user already syncs.** No Arbalete account and no server: the user picks a folder
   synced by a service they already use (iCloud Drive, Google Drive for desktop, Dropbox, OneDrive, Nextcloud or
   Syncthing).
