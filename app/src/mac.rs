@@ -1071,6 +1071,17 @@ pub fn share(url: &str) {
     picker.showRelativeToRect_ofView_preferredEdge(rect, &view, NSRectEdge::MinY);
 }
 
+/// How far down the main window the pointer is, in points, if over it.
+pub fn pointer_y() -> Option<i32> {
+    let mtm = MainThreadMarker::new()?;
+    let window = NSApplication::sharedApplication(mtm).mainWindow()?;
+    let point = window.mouseLocationOutsideOfEventStream();
+    let height = window.frame().size.height;
+    (0.0..=height)
+        .contains(&point.y)
+        .then_some((height - point.y) as i32)
+}
+
 /// Puts a link on the clipboard.
 pub fn copy(url: &str) {
     let pasteboard = NSPasteboard::generalPasteboard();

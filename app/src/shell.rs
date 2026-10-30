@@ -192,6 +192,8 @@ thread_local! {
     /// A Space's theme picker, beside the sidebar.
     static THEME_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static THEME: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
+    /// How far down the window the pointer was as the theme picker opened, which it centers on.
+    static THEME_AT: Cell<Option<i32>> = const { Cell::new(None) };
     /// The site controls' panel, under their button.
     static SITE_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static SITE: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
@@ -2342,7 +2344,7 @@ const THEME_SIZE: Size = Size {
     height: 520,
 };
 
-/// Shows a Space's theme picker beside the sidebar, at the window's bottom, like Arc's, with the
+/// Shows a Space's theme picker beside the sidebar, like Arc's, centered on the pointer, with the
 /// Space's theme to edit.
 fn show_theme_picker(id: SpaceId) {
     let theme = STATE.with_borrow(|state| {
@@ -2357,6 +2359,8 @@ fn show_theme_picker(id: SpaceId) {
         &THEME_VIEW,
         &format!(r#"new CustomEvent("arbalete:theme", {{ detail: {detail} }})"#),
     );
+    #[cfg(target_os = "macos")]
+    THEME_AT.set(crate::mac::pointer_y());
     controller.set_visible(1);
     place_theme_picker();
     // On macOS, the native surface takes the keyboard instead.
@@ -2366,7 +2370,8 @@ fn show_theme_picker(id: SpaceId) {
     }
 }
 
-/// Puts the theme picker, if it shows, just right of the sidebar, above the window's bottom edge.
+/// Puts the theme picker, if it shows, just right of the sidebar, centered on where the pointer
+/// was, or else above the window's bottom edge; within the window.
 fn place_theme_picker() {
     let (Some(controller), Some(size)) = (
         THEME.with_borrow(Clone::clone),
@@ -2379,9 +2384,13 @@ fn place_theme_picker() {
     }
     let card = SIDEBAR_MODE.get().layout(&size).card;
     let height = THEME_SIZE.height.min(size.height - 2 * CARD_MARGIN);
+    let lowest = size.height - height - 2 * CARD_MARGIN;
+    let y = THEME_AT
+        .get()
+        .map_or(lowest, |at| (at - height / 2).clamp(CARD_MARGIN, lowest));
     controller.set_bounds(Some(&Rect {
         x: card.x + 6,
-        y: size.height - height - 2 * CARD_MARGIN,
+        y,
         width: THEME_SIZE.width,
         height,
     }));
