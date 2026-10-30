@@ -210,6 +210,10 @@ final class SiteControls: ObservableObject {
             var pinned: Bool
         }
         var url: String
+        /// The url's host, and whether its tabs are kept awake while tabs are suspended.
+        var site: String
+        var awake: Bool
+        var suspends: Bool
         var extensions: [SiteExtension]
     }
 
@@ -287,6 +291,13 @@ struct SiteView: View {
                     } content: {
                         Image(systemName: "plus").font(.system(size: 15))
                     }
+                }
+                if site.suspends {
+                    Toggle("Keep this site awake", isOn: Binding(
+                        get: { site.awake },
+                        set: { app.run("awake/\($0 ? "on" : "off")/\(percentEncoded(site.site))") }
+                    ))
+                    .font(.system(size: 12))
                 }
                 Divider()
                 let secure = site.url.hasPrefix("https://")

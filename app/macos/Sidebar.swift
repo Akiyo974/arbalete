@@ -505,11 +505,11 @@ struct TabRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Favicon(url: tab.favicon, size: 16)
+            Favicon(url: tab.favicon, size: 16).opacity(tab.asleep == true ? 0.55 : 1)
             if model.renaming == tab.id {
                 NameField(model: model, id: tab.id, title: tab.label, blank: true)
             } else {
-                Text(tab.label).lineLimit(1)
+                Text(tab.label).lineLimit(1).opacity(tab.asleep == true ? 0.55 : 1)
                 if tab.muted == true {
                     Image(systemName: "speaker.slash").font(.system(size: 11))
                         .foregroundStyle(.secondary)

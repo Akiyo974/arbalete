@@ -9,6 +9,8 @@ struct SettingsDetail: Decodable {
     struct General: Decodable {
         var warnBeforeQuit: Bool
         var restoreSession: Bool
+        var suspendTabs: Bool
+        var awakeSites: [String]
     }
     struct Choice: Decodable, Identifiable, Hashable {
         var id: String
@@ -147,6 +149,29 @@ private struct General: View {
                 Toggle(isOn: binding(general.restoreSession, "restore-session")) {
                     Text("Restore the previous session")
                     Text("Reopens the “Today” tabs left open at the last quit. Pinned tabs and favorites always stay.")
+                }
+                Toggle(isOn: binding(general.suspendTabs, "suspend-tabs")) {
+                    Text("Save memory with tabs left aside")
+                    Text("A tab hidden for 5 minutes is paused, then unloaded after an hour. Tabs playing media, using the camera or the microphone, and the sites kept awake never are.")
+                }
+                if general.suspendTabs && !general.awakeSites.isEmpty {
+                    Section("Sites kept awake") {
+                        ForEach(general.awakeSites, id: \.self) { site in
+                            HStack {
+                                Text(site)
+                                Spacer()
+                                Button {
+                                    settings.app.run("awake/off/\(percentEncoded(site))")
+                                } label: {
+                                    Image(systemName: "xmark")
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.secondary)
+                                .help("Let it sleep")
+                                .accessibilityLabel("Let \(site) sleep")
+                            }
+                        }
+                    }
                 }
             }
             .formStyle(.grouped)
