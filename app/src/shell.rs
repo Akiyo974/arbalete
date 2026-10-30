@@ -4560,7 +4560,7 @@ wrap_window_delegate! {
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
             CLOSING.set(true);
             let current = win();
-            let mut views: Vec<_> = [&current.sidebar, &current.reveal_view, &current.overlay_view, &current.find_view, &current.toolbar_view, &current.site_view]
+            let mut views: Vec<_> = [&current.sidebar, &current.reveal_view, &current.overlay_view, &current.find_view, &current.toolbar_view, &current.site_view, &current.theme_view]
                 .into_iter()
                 .filter_map(|view| view.with_borrow(Clone::clone))
                 .collect();
