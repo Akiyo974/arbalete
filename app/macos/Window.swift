@@ -56,6 +56,7 @@ final class SidebarHost {
     private let edge = Tracking()
     private var watch: AnyCancellable?
     private var revealed = false
+    private var rightClicks: Any?
 
     init(window: NSWindow, model: AppModel) {
         self.window = window
@@ -84,6 +85,16 @@ final class SidebarHost {
         edge.isHidden = true
         edge.autoresizingMask = [.height]
         window.contentView?.addSubview(edge)
+        // Right clicks never reach the views under the pointer that want them, the rows and
+        // Spaces whose menus they open, only their release does: this hands it over.
+        rightClicks = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseUp]) { [weak self] event in
+            guard let self, event.window === self.panel,
+                let root = self.panel.contentView?.superview ?? self.panel.contentView,
+                let catcher = root.hitTest(event.locationInWindow) as? RightClick.Catcher
+            else { return event }
+            catcher.action()
+            return nil
+        }
         watch = model.$state.sink { [container] _ in
             container.appearance = NSAppearance(
                 named: isDark(model.space?.theme) ? .darkAqua : .aqua)

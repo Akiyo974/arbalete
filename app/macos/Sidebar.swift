@@ -31,6 +31,10 @@ struct SidebarView: View {
             }
             .padding(.horizontal, 6)
             .foregroundStyle(.primary)
+            // Like Arc's, the sidebar's empty room offers the displayed Space's menu.
+            .overlay(RightClick(underOthers: true) {
+                if let page = model.page { model.run("menu/space/\(page.space)") }
+            })
         }
     }
 }
@@ -708,8 +712,8 @@ struct Footer: View {
     }
 }
 
-/// A Space's emoji, or a dot without one: a click displays the Space, or edits its theme when
-/// it is the displayed one.
+/// A Space's emoji, or a dot without one: a click displays the Space, a right click opens its
+/// menu, like Arc's.
 struct SpaceIcon: View {
     @ObservedObject var model: AppModel
     let space: Space
@@ -722,7 +726,7 @@ struct SpaceIcon: View {
 
     var body: some View {
         Button {
-            model.run(displayed ? "theme/show/\(space.id)" : "space/\(space.id)")
+            model.run("space/\(space.id)")
         } label: {
             Group {
                 if let emoji = space.emoji {
@@ -754,11 +758,14 @@ extension View {
 
 /// Catches right clicks only, letting every other event through to the views under it.
 struct RightClick: NSViewRepresentable {
+    /// Over views that catch their own right clicks, it lets them have them.
+    var underOthers = false
     let action: () -> Void
 
     func makeNSView(context: Context) -> Catcher {
         let view = Catcher()
         view.action = action
+        view.underOthers = underOthers
         return view
     }
 
@@ -768,13 +775,20 @@ struct RightClick: NSViewRepresentable {
 
     final class Catcher: NSView {
         var action: () -> Void = {}
+        var underOthers = false
 
         override func hitTest(_ point: NSPoint) -> NSView? {
             let type = NSApp.currentEvent?.type
             let right =
-                type == .rightMouseDown
+                type == .rightMouseDown || type == .rightMouseUp
                 || (type == .leftMouseDown && NSApp.currentEvent?.modifierFlags.contains(.control) == true)
-            return right ? super.hitTest(point) : nil
+            guard right, let hit = super.hitTest(point) else { return nil }
+            if underOthers, let root = window?.contentView?.superview {
+                isHidden = true
+                defer { isHidden = false }
+                if root.hitTest(superview?.convert(point, to: nil) ?? point) is Catcher { return nil }
+            }
+            return hit
         }
 
         override func rightMouseDown(with event: NSEvent) { action() }
