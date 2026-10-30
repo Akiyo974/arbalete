@@ -3,7 +3,7 @@
 Goal: a browser that brings back the ideas that made Arc popular (vertical sidebar, Spaces, profiles, link
 routing…), **cross-platform (macOS, Linux, Windows)**, starting with macOS.
 Stack: **Rust on Chromium, through CEF in Alloy style** (see [decision 0001](decisions/0001-web-engine.md)), with a
-**native SwiftUI interface on macOS** and a React/TypeScript one for the other platforms, for now.
+**native SwiftUI interface on macOS**. Linux and Windows come later, with an interface of their own.
 
 Arbalete is an independent project, not affiliated with The Browser Company. Arc is mentioned only to describe
 the features we take inspiration from and to import user data.
@@ -37,14 +37,14 @@ the features we take inspiration from and to import user data.
   extensions, content view management.
 - **SwiftUI, on macOS** (`app/macos`): sidebar, library, Command Bar, panels above the page, settings. CEF paints
   its windowed browsers opaque, so a web sidebar cannot show the desktop through the window like Arc's; a native
-  one blurs it (`NSVisualEffectView`). It gets the same state and events as the web interface and sends the same
-  commands (`app/src/native.rs`), through a C interface. The page is a child window of the main one, and Chromium
+  one blurs it (`NSVisualEffectView`). It gets the app's state and events and sends it commands
+  (`app/src/native.rs`), through a C interface. The page is a child window of the main one, and Chromium
   keeps every click from views inside its windows: the sidebar and the panels are child windows too, which the
-  app shows where it shows the web overlays they stand for (`sync_native_surfaces` in `app/src/shell.rs`).
+  app places where it places the blank web views they stand for (`sync_native_surfaces` in `app/src/shell.rs`).
   `app/build.rs` compiles it with the Command Line Tools' `swiftc`, which cannot expand SwiftUI's macros: views
   spell their `State` out.
-- **React/TypeScript**, elsewhere: the same surfaces, as web views. It displays state and sends commands to Rust.
-  Linux and Windows come later; how they get a translucent interface is still open.
+- **Linux and Windows** come later; their interface, and how it shows the desktop through the window, is still
+  open. The React/TypeScript interface of the first phases was removed once macOS went native.
 - **Tabs**: each tab is a content view of the window, placed to the right of the UI view.
 
 ### The web engine
@@ -118,14 +118,13 @@ Start with the minimum and split when the code calls for it (doctrine, rule 10):
 app/                           desktop app: windows, commands, engine module
 app/macos/                     native macOS interface (SwiftUI)
 crates/arbalete-core/         model (profiles, Spaces, node tree, Favorites) and pure logic, no engine
-ui/                            React + TypeScript (Vite), the interface on the other platforms
 ```
 
 `arbalete-core` is separate from the start for one reason only: the logic must be testable without launching
 the app or the engine. Persistence, auto-archive, link routing and imports start as modules of these two crates; a module becomes
 a crate only if it grows enough to hurt readability or build times.
 
-Tooling: pnpm, Vite, Vitest + Testing Library, `cargo test` / `clippy` / `rustfmt`, `cargo-deny` for dependency
+Tooling: `cargo test` / `clippy` / `rustfmt`, `cargo-deny` for dependency
 licenses and advisories, GitHub Actions CI (macOS first, then Linux and Windows), installers (dmg, AppImage/deb, msi),
 macOS signing and notarization.
 

@@ -2204,7 +2204,7 @@ fn show_find() {
 /// take the keyboard from the native find bar.
 fn make_find(window: &Window) {
     if FIND.with_borrow(Option::is_none) {
-        let view = browser_view(UiClient::new(), &web_surface("#find"), no_width, None);
+        let view = browser_view(UiClient::new(), "about:blank", no_width, None);
         let controller = window
             .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
             .expect("find");
@@ -2670,7 +2670,7 @@ fn send_sources() {
 /// Makes the import assistant's overlay, once: with the window on macOS, like the find bar's.
 fn make_import(window: &Window) {
     if IMPORT.with_borrow(Option::is_none) {
-        let view = browser_view(UiClient::new(), &web_surface("#import"), no_width, None);
+        let view = browser_view(UiClient::new(), "about:blank", no_width, None);
         let controller = window
             .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
             .expect("import");
@@ -4248,7 +4248,7 @@ wrap_window_delegate! {
                     ..Default::default()
                 }))
                 .expect("box layout");
-            let sidebar = browser_view(UiClient::new(), &web_surface(""), docked_width, None);
+            let sidebar = browser_view(UiClient::new(), "about:blank", docked_width, None);
             // On macOS, the native sidebar stands in for it (app/macos).
             sidebar.set_visible((!cfg!(target_os = "macos")).into());
             let mut view = View::from(&sidebar);
@@ -4269,7 +4269,7 @@ wrap_window_delegate! {
                 .expect("box layout");
             // Any width: the layout stretches it across the card. A zero one would make its size
             // "empty", which CEF ignores, with its height.
-            let toolbar = browser_view_sized(UiClient::new(), &web_surface("#toolbar"), || 1, PAGE_TOOLBAR_HEIGHT, None);
+            let toolbar = browser_view_sized(UiClient::new(), "about:blank", || 1, PAGE_TOOLBAR_HEIGHT, None);
             toolbar.set_visible(app_settings().show_toolbar.into());
             let mut view = View::from(&toolbar);
             card.add_child_view(Some(&mut view));
@@ -4283,14 +4283,14 @@ wrap_window_delegate! {
             controller.set_visible(0);
             CARD.set(Some(controller));
             // Below the overlay, which is added after it.
-            let reveal = browser_view(UiClient::new(), &web_surface("#reveal"), no_width, None);
+            let reveal = browser_view(UiClient::new(), "about:blank", no_width, None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&reveal)), DockingMode::CUSTOM, 1)
                 .expect("reveal");
             controller.set_visible(0);
             REVEAL_VIEW.set(Some(reveal));
             REVEAL.set(Some(controller));
-            let overlay = browser_view(UiClient::new(), &web_surface("#overlay"), no_width, None);
+            let overlay = browser_view(UiClient::new(), "about:blank", no_width, None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&overlay)), DockingMode::CUSTOM, 1)
                 .expect("overlay");
@@ -4298,14 +4298,14 @@ wrap_window_delegate! {
             OVERLAY_VIEW.set(Some(overlay));
             OVERLAY.set(Some(controller));
             // Made with the window, so that its page listens by the first time it shows.
-            let site = browser_view(UiClient::new(), &web_surface("#site"), no_width, None);
+            let site = browser_view(UiClient::new(), "about:blank", no_width, None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&site)), DockingMode::CUSTOM, 1)
                 .expect("site controls");
             controller.set_visible(0);
             SITE_VIEW.set(Some(site));
             SITE.set(Some(controller));
-            let theme = browser_view(UiClient::new(), &web_surface("#theme"), no_width, None);
+            let theme = browser_view(UiClient::new(), "about:blank", no_width, None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&theme)), DockingMode::CUSTOM, 1)
                 .expect("theme picker");
@@ -4401,8 +4401,7 @@ wrap_window_delegate! {
             let window = window.expect("window").clone();
             window.set_title(Some(&CefString::from("Settings")));
             window.set_to_fill_layout();
-            let url = format!("{UI_ORIGIN}index.html#settings");
-            let view = browser_view(UiClient::new(), &url, no_width, None);
+            let view = browser_view(UiClient::new(), "about:blank", no_width, None);
             window.add_child_view(Some(&mut View::from(&view)));
             SETTINGS_VIEW.set(Some(view));
             window.center_window(Some(&SETTINGS_SIZE));
@@ -4524,8 +4523,7 @@ wrap_window_delegate! {
                     ..Default::default()
                 }))
                 .expect("box layout");
-            let url = web_surface(&format!("#little/{}", self.id));
-            let bar = browser_view_sized(UiClient::new(), &url, || 1, LITTLE_BAR_HEIGHT, None);
+            let bar = browser_view_sized(UiClient::new(), "about:blank", || 1, LITTLE_BAR_HEIGHT, None);
             window.add_child_view(Some(&mut View::from(&bar)));
             let mut context = profile_context(self.profile);
             let start = if self.url.is_empty() { "about:blank" } else { &self.url };
@@ -4627,16 +4625,6 @@ fn browser_view_sized(
         Some(&mut AlloyViewDelegate::new(width, height)),
     )
     .expect("browser view")
-}
-
-/// A surface of the web UI, like "#overlay"; blank on macOS, where the native interface stands
-/// in for it, so that its page sends no command.
-fn web_surface(hash: &str) -> String {
-    if cfg!(target_os = "macos") {
-        "about:blank".to_string()
-    } else {
-        format!("{UI_ORIGIN}index.html{hash}")
-    }
 }
 
 fn no_width() -> i32 {
@@ -5427,15 +5415,11 @@ wrap_resource_request_handler! {
                 let stream = stream_reader_create_for_file(Some(&file))?;
                 return Some(StreamResourceHandler::new(200, "OK".to_string(), mime.to_string(), None, Some(stream)));
             }
-            let (mime, body) = match path.strip_prefix("command/").and_then(Command::parse) {
-                Some(command) => {
-                    post_task(ThreadId::UI, Some(&mut RunCommand::new(command)));
-                    ("application/json", b"{}".as_slice())
-                }
-                None => ui_file(path)?,
-            };
+            let command = path.strip_prefix("command/").and_then(Command::parse)?;
+            post_task(ThreadId::UI, Some(&mut RunCommand::new(command)));
+            let body = b"{}";
             let stream = stream_reader_create_for_data(body.as_ptr() as *mut u8, body.len());
-            Some(StreamResourceHandler::new(200, "OK".to_string(), mime.to_string(), None, stream))
+            Some(StreamResourceHandler::new(200, "OK".to_string(), "application/json".to_string(), None, stream))
         }
     }
 }
@@ -5474,26 +5458,13 @@ fn favicon_file(path: &str) -> Option<PathBuf> {
     favicon::is_file_name(name).then(|| profile_dir(profile).join(favicon::DIR).join(name))
 }
 
-/// The built UI (`mise run ui`), embedded in the app.
-fn ui_file(path: &str) -> Option<(&'static str, &'static [u8])> {
-    match path {
-        "index.html" => Some(("text/html", include_bytes!("../../ui/dist/index.html"))),
-        "assets/index.js" => Some((
-            "text/javascript",
-            include_bytes!("../../ui/dist/assets/index.js"),
-        )),
-        "assets/index.css" => Some(("text/css", include_bytes!("../../ui/dist/assets/index.css"))),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         CARD_MARGIN, DraggableRegion, EDGE_WIDTH, FLOAT_INSET, LIBRARY, LIBRARY_WIDTH,
         MemoryPressure, RECENT_TABS, Rect, SIDEBAR_WIDTH, SidebarMode, Size, UiState, favicon_file,
         lerp_rect, margin_regions, origin, remember, site, slide_duration, step, suspend_delays,
-        toggled, ui_file, ui_path,
+        toggled, ui_path,
     };
     use arbalete_core::sidebar::NodeId;
 
@@ -5966,20 +5937,6 @@ mod tests {
         assert_eq!(at(180.0), Some(format!("{:?}", targets[1].target)));
         assert_eq!(at(135.0), None);
         assert_eq!(at(181.0), None);
-    }
-
-    #[test]
-    fn serves_the_built_ui() {
-        let (mime, body) = ui_file("index.html").unwrap();
-        assert_eq!(mime, "text/html");
-        assert!(String::from_utf8_lossy(body).contains("/assets/index.js"));
-        assert!(ui_file("assets/index.js").is_some());
-        assert!(ui_file("assets/index.css").is_some());
-    }
-
-    #[test]
-    fn serves_nothing_else() {
-        assert!(ui_file("../Cargo.toml").is_none());
     }
 
     #[test]

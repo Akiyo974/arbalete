@@ -1,7 +1,7 @@
 # Arbalete
 
-Browser inspired by Arc: Rust on Chromium (CEF), with a native SwiftUI interface on macOS (`app/macos`) and a
-React/TypeScript one (`ui/`) for the other platforms. Plan: [docs/PLAN.md](docs/PLAN.md).
+Browser inspired by Arc: Rust on Chromium (CEF), with a native SwiftUI interface (`app/macos`), macOS only for
+now. Plan: [docs/PLAN.md](docs/PLAN.md).
 
 ## Mandatory rules
 

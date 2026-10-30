@@ -1,7 +1,5 @@
 [tools]
 rust = { version = "1.99.1", components = "rustfmt,clippy" }
-node = "24.22.0"
-pnpm = "12.15.0"
 # Needed by the cef crate to build CEF's C++ wrapper.
 cmake = "4.4.4"
 ninja = "1.13.2"
@@ -23,17 +21,9 @@ description = "Download CEF and install the CEF bundling tool"
 depends = ["cef"]
 run = "cargo install --locked cef --version =156.0.0 --features build-util --bin bundle-cef-app"
 
-[tasks.ui]
-description = "Build the UI"
-dir = "ui"
-run = ["pnpm install --frozen-lockfile", "pnpm build"]
-
 [tasks.check]
 description = "Run every check listed in CONTRIBUTING.md"
-depends = ["ui"]
 run = [
-  "pnpm --dir ui lint",
-  "pnpm --dir ui test",
   "cargo fmt --all --check",
   "cargo clippy --workspace --all-targets -- -D warnings",
   "cargo test --workspace",
@@ -41,8 +31,7 @@ run = [
 ]
 
 [tasks.app]
-description = "Build the UI and bundle the app"
-depends = ["ui"]
+description = "Bundle the app"
 run = [
   # Bundling in place over a previous build invalidates its code signature on macOS.
   "rm -rf target/bundle",
@@ -67,27 +56,3 @@ run = [
 description = "Build and run the app"
 depends = ["app"]
 run = "target/bundle/Arbalete.app/Contents/MacOS/arbalete"
-
-[tasks.bench]
-description = "Measure the performance prototype (docs/PLAN.md, phase 0)"
-depends = ["app"]
-run = [
-  # Outside the repository: macOS asks before an app reads the Documents folder.
-  "rm -rf \"$TMPDIR/arbalete-bench\"",
-  "cargo run -q -p arbalete-core --example bench-session -- \"$TMPDIR/arbalete-bench\"",
-  "node perf/measure.mjs \"$TMPDIR/arbalete-bench\"",
-]
-
-[tasks.e2e]
-description = "Check the app end to end through DevTools (opens a window)"
-depends = ["app"]
-run = [
-  # Outside the repository: macOS asks before an app reads the Documents folder.
-  "rm -rf \"$TMPDIR/arbalete-e2e\"",
-  "cargo run -q -p arbalete-core --example bench-session -- \"$TMPDIR/arbalete-e2e\"",
-  "node e2e/tabs.mjs \"$TMPDIR/arbalete-e2e\"",
-  "rm -rf \"$TMPDIR/arbalete-e2e-import\"",
-  "node e2e/import.mjs \"$TMPDIR/arbalete-e2e-import\"",
-  "rm -rf \"$TMPDIR/arbalete-e2e-favicons\"",
-  "node e2e/favicons.mjs \"$TMPDIR/arbalete-e2e-favicons\"",
-]

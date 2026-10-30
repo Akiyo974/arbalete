@@ -1,6 +1,6 @@
 # Phase 0 performance measurements
 
-Measured on 2026-10-24 with `mise run bench` ([perf/measure.mjs](../../perf/measure.mjs)): Apple M5, 32 GB,
+Measured on 2026-10-24 with `mise run bench` (`perf/measure.mjs`, removed with the web interface): Apple M5, 32 GB,
 macOS 27.0.1, on mains power. CEF 156.0.7 and the UI are release builds; `bundle-cef-app` only builds the
 Rust app in the debug profile on macOS, which does not take part in the UI's rendering.
 

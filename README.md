@@ -20,14 +20,14 @@ See [docs/PLAN.md](docs/PLAN.md) for the full plan.
 
 ## Development
 
-The tools (Rust, Node.js, pnpm, CMake, Ninja) are pinned in [.config/mise.toml](.config/mise.toml). On macOS,
+The tools (Rust, CMake, Ninja) are pinned in [.config/mise.toml](.config/mise.toml). On macOS,
 the native interface also needs Swift, from the Xcode Command Line Tools (`xcode-select --install`).
 With [mise](https://mise.jdx.dev/) installed:
 
 ```sh
 mise install     # install the tools
 mise run setup   # download CEF and install bundle-cef-app, the CEF bundling tool
-mise run run     # build the UI, bundle the app and run it
+mise run run     # bundle the app and run it
 ```
 
 `mise run setup` downloads CEF (about 350 MB) to `~/cef` once; every build uses it through `CEF_PATH`.
