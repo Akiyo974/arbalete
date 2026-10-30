@@ -213,6 +213,9 @@ struct Win {
     cascade: Cell<Option<Rect>>,
     /// Opened from another window, it shows the Command Bar once in front, like Arc's.
     fresh: Cell<bool>,
+    /// The content view of its card's window, once it has shown a page, which a picture of the
+    /// page covers while another window shows it.
+    card_view: Cell<Option<*mut std::ffi::c_void>>,
     window: RefCell<Option<Window>>,
     /// Beside the card, at the window's left edge. It must not reach under the card: a web view
     /// below the overlays receives no real mouse event on macOS, only synthesized ones.
@@ -290,6 +293,7 @@ impl Win {
             view: RefCell::new(None),
             cascade: Cell::new(None),
             fresh: Cell::new(false),
+            card_view: Cell::new(None),
             window: RefCell::new(None),
             sidebar: RefCell::new(None),
             card: RefCell::new(None),
@@ -3620,7 +3624,7 @@ fn cover_revived(browser: Option<&Browser>, loading: bool) {
     } else if REVIVED.with_borrow_mut(|revived| revived.remove(&tab))
         && let Some(jpeg) = SNAPSHOTS.with_borrow(|snapshots| snapshots.get(&tab).cloned())
     {
-        crate::mac::cover_page(host.window_handle(), &jpeg);
+        crate::mac::cover_page(host.window_handle(), &jpeg, None);
     }
 }
 
@@ -3844,15 +3848,26 @@ fn show_content(tab: NodeId, view: &BrowserView) {
         return;
     }
     hide_content();
-    // A page shows in one window at a time, like Arc's: this one takes it from another.
+    // A page shows in one window at a time, like Arc's: this one takes it from another, which
+    // shows its picture instead, dimmed by its Space's color.
     let current = FOCUSED.get();
-    WINDOWS.with_borrow(|windows| {
-        for other in windows.iter().filter(|other| other.id != current) {
-            if other.shown.get() == Some(tab) {
-                other.shown.set(None);
-            }
-        }
+    let others: Vec<_> = WINDOWS.with_borrow(|windows| {
+        windows
+            .iter()
+            .filter(|other| other.id != current && other.shown.get() == Some(tab))
+            .cloned()
+            .collect()
     });
+    for other in others {
+        other.shown.set(None);
+        #[cfg(target_os = "macos")]
+        if let (Some(card), Some(jpeg)) = (
+            other.card_view.get(),
+            SNAPSHOTS.with_borrow(|snapshots| snapshots.get(&tab).cloned()),
+        ) {
+            crate::mac::cover_page(card, &jpeg, Some(space_tint(tab)));
+        }
+    }
     if let Some(card) = card_panel() {
         let here = view
             .parent_view()
@@ -3885,8 +3900,26 @@ fn show_content(tab: NodeId, view: &BrowserView) {
     #[cfg(target_os = "macos")]
     if let Some(host) = view.browser().and_then(|browser| browser.host()) {
         crate::mac::round_card(host.window_handle());
+        win()
+            .card_view
+            .set(crate::mac::window_content(host.window_handle()));
     }
     send_page_state();
+}
+
+/// The color dimming a picture of a tab's page in a window that does not show it: its Space's
+/// leading one, or gray.
+#[cfg(target_os = "macos")]
+fn space_tint(tab: NodeId) -> u32 {
+    STATE
+        .with_borrow(|state| {
+            let sidebar = &state.sidebar;
+            let space = sidebar.space_of(tab)?;
+            let space = sidebar.spaces().iter().find(|s| s.id == space)?;
+            let lead = space.theme.colors.first()?;
+            u32::from_str_radix(lead.trim_start_matches('#'), 16).ok()
+        })
+        .unwrap_or(0x80_8080)
 }
 
 /// Tells the UI how the shown page stands: its progress and history are its own.
@@ -3912,6 +3945,11 @@ fn send_page_state() {
 fn hide_content() {
     if let Some(shown) = content() {
         shown.set_visible(0);
+    }
+    // A picture of a page another window took no longer stands in for it.
+    #[cfg(target_os = "macos")]
+    if let Some(card) = win().card_view.get() {
+        crate::mac::uncover_page(card);
     }
     if let Some(tab) = win().shown.take() {
         PAGES.with_borrow_mut(|pages| {
@@ -4740,11 +4778,15 @@ wrap_window_delegate! {
             }
         }
 
-        // The window in front shows the live page of its tab, taking it from another window.
+        // The window in front shows the live page of its tab, taking it from another window. One
+        // going to the background takes a picture of its page, which still draws, for the window
+        // that may take it.
         fn on_window_activation_changed(&self, _window: Option<&mut Window>, active: i32) {
+            focus(self.id);
             if active == 1 {
-                focus(self.id);
                 show_selected();
+            } else {
+                snapshot_shown();
             }
         }
 

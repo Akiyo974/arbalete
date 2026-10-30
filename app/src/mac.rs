@@ -1107,9 +1107,21 @@ pub fn round_card(view: *mut c_void) {
     round(view, CARD_RADIUS);
 }
 
-/// Covers a page's view, which CEF gives, with a picture of it, a JPEG in base64, until
-/// uncover_page.
-pub fn cover_page(view: *mut c_void, jpeg: &str) {
+/// The content view of the window a view, which CEF gives, is in.
+pub fn window_content(view: *mut c_void) -> Option<*mut c_void> {
+    // SAFETY: CEF gives a live NSView, which its window keeps alive.
+    let view = unsafe { view.cast::<NSView>().as_ref() }?;
+    let content = view.window()?.contentView()?;
+    Some(Retained::as_ptr(&content).cast_mut().cast())
+}
+
+/// How much of a Space's leading color dims a picture standing for a page shown in another window
+/// (cover_page).
+const PLACEHOLDER_TINT: f64 = 0.45;
+
+/// Covers a view, which CEF gives, with a picture of its page, a JPEG in base64, until
+/// uncover_page; dimmed by an RGB `tint` when the page shows in another window, like Arc's.
+pub fn cover_page(view: *mut c_void, jpeg: &str, tint: Option<u32>) {
     // SAFETY: CEF gives the page's NSView, which its window keeps alive.
     let Some(view) = (unsafe { view.cast::<NSView>().as_ref() }) else {
         return;
@@ -1137,6 +1149,25 @@ pub fn cover_page(view: *mut c_void, jpeg: &str) {
             NSAutoresizingMaskOptions::ViewWidthSizable
                 | NSAutoresizingMaskOptions::ViewHeightSizable,
         );
+        // Above the picture: a view drawing over the image view, which keeps its own layer.
+        if let Some(rgb) = tint {
+            let [_, red, green, blue] = rgb.to_be_bytes().map(|c| f64::from(c) / 255.0);
+            let color =
+                NSColor::colorWithSRGBRed_green_blue_alpha(red, green, blue, PLACEHOLDER_TINT);
+            let color: *const CGColor = msg_send![&*color, CGColor];
+            let wash = NSView::initWithFrame(
+                NSView::alloc(MainThreadMarker::new_unchecked()),
+                cover.bounds(),
+            );
+            wash.setAutoresizingMask(
+                NSAutoresizingMaskOptions::ViewWidthSizable
+                    | NSAutoresizingMaskOptions::ViewHeightSizable,
+            );
+            wash.setWantsLayer(true);
+            let layer: Retained<AnyObject> = msg_send![&*wash, layer];
+            let _: () = msg_send![&*layer, setBackgroundColor: color];
+            cover.addSubview(&wash);
+        }
         view.addSubview(&cover);
     }
 }
