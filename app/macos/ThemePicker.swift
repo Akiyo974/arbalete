@@ -17,7 +17,7 @@ let palettes: [[String]] = [
 
 let maxColors = 3
 
-/// A color's hue, from 0 to 360, saturation and lightness, from 0 to 1.
+/// A color's hue, from 0 to 360, saturation and lightness, from 0 to 1, in Display P3, like Arc's.
 struct Hsl {
     var h: Double
     var s: Double
@@ -25,8 +25,12 @@ struct Hsl {
 }
 
 func toHsl(_ hex: String) -> Hsl {
-    let rgb = channels(hex)
-    let (r, g, b) = (rgb[0], rgb[1], rgb[2])
+    let srgb = channels(hex)
+    let p3 = NSColor(srgbRed: srgb[0], green: srgb[1], blue: srgb[2], alpha: 1)
+        .usingColorSpace(.displayP3)
+    let (r, g, b) = (
+        p3.map { Double($0.redComponent) } ?? srgb[0], p3.map { Double($0.greenComponent) } ?? srgb[1],
+        p3.map { Double($0.blueComponent) } ?? srgb[2])
     let (high, low) = (max(r, g, b), min(r, g, b))
     let l = (high + low) / 2
     if high == low { return Hsl(h: 0, s: 0, l: l) }
@@ -37,14 +41,19 @@ func toHsl(_ hex: String) -> Hsl {
     return Hsl(h: h * 60, s: s, l: l)
 }
 
+/// A color from its Display P3 hue, saturation and lightness, as the #rrggbb in sRGB nearest to it.
 func fromHsl(_ hsl: Hsl) -> String {
     let a = hsl.s * min(hsl.l, 1 - hsl.l)
-    func channel(_ n: Double) -> Int {
+    func channel(_ n: Double) -> Double {
         let k = (n + hsl.h / 30).truncatingRemainder(dividingBy: 12)
-        let value = hsl.l - a * max(-1, min(k - 3, 9 - k, 1))
-        return Int((value * 255).rounded())
+        return hsl.l - a * max(-1, min(k - 3, 9 - k, 1))
     }
-    return String(format: "#%02x%02x%02x", channel(0), channel(8), channel(4))
+    let p3 = NSColor(displayP3Red: channel(0), green: channel(8), blue: channel(4), alpha: 1)
+    let srgb = p3.usingColorSpace(.sRGB) ?? p3
+    let byte = { (value: CGFloat) in Int((min(1, max(0, value)) * 255).rounded()) }
+    return String(
+        format: "#%02x%02x%02x", byte(srgb.redComponent), byte(srgb.greenComponent),
+        byte(srgb.blueComponent))
 }
 
 /// The pad: a dot's angle around the center is the color's hue, clockwise from the right, and
@@ -57,21 +66,21 @@ struct Wheel {
 /// A dot at the pad's edge sits this far from the center, its radius being 1.
 private let edge = 0.99
 
-/// The pad for a theme, from its leading color: as saturated, and its lightness ±0.25 in auto
-/// mode, or within the light or dark half the mode forces. Without colors, the whole range.
-func wheelFor(_ theme: Theme) -> Wheel {
+/// The pad for colors, from the leading one, as Arc's opens: as saturated, its lightness ±0.25.
+/// Without colors, the whole range.
+func wheelFor(_ colors: [String]) -> Wheel {
     let (lowest, highest) = (0.01, 0.97)
-    guard let lead = theme.colors.first else {
+    guard let lead = colors.first else {
         return Wheel(saturation: 0.8, range: (lowest, highest))
     }
     let hsl = toHsl(lead)
-    let saturation = max(0.01, hsl.s)
-    if theme.mode == "auto" {
-        return Wheel(
-            saturation: saturation, range: (max(lowest, hsl.l - 0.25), min(highest, hsl.l + 0.25)))
-    }
-    let (low, high) = theme.mode == "dark" ? (lowest, 0.425) : (0.575, highest)
-    return Wheel(saturation: saturation, range: (min(low, hsl.l), max(high, hsl.l)))
+    return Wheel(
+        saturation: max(0.01, hsl.s), range: (max(lowest, hsl.l - 0.25), min(highest, hsl.l + 0.25)))
+}
+
+/// The lightness a light or a dark appearance keeps the pad to.
+func forcedRange(dark: Bool) -> (Double, Double) {
+    dark ? (0.01, 0.425) : (0.575, 0.97)
 }
 
 /// The color at a point of the pad, from its center, its radius being 1.
@@ -92,12 +101,14 @@ func pointOf(_ wheel: Wheel, _ color: String) -> CGPoint {
     return CGPoint(x: cos(angle) * t * edge, y: sin(angle) * t * edge)
 }
 
-/// The colors that go with a leading one, as many as the theme holds: its complement for two,
-/// both sides of it for three, as far from the center.
+/// The hues, from the leading color's, of a theme's colors: its complement for two, both sides of
+/// it for three.
+private let harmonies: [[Double]] = [[], [0], [0, 180], [0, 150, 210]]
+
+/// The colors that go with a leading one, as many as the theme holds, as far from the center.
 func harmony(_ color: String, _ count: Int) -> [String] {
     let hsl = toHsl(color)
-    let offsets: [Double] = [[], [0], [0, 180], [0, 150, 210]][min(count, 3)]
-    return offsets.map { offset in
+    return harmonies[min(count, maxColors)].map { offset in
         offset == 0
             ? color
             : fromHsl(Hsl(h: (hsl.h + offset).truncatingRemainder(dividingBy: 360), s: hsl.s, l: hsl.l))
@@ -130,8 +141,25 @@ final class ThemePickerModel: ObservableObject {
         guard let shown = try? JSONDecoder().decode(Shown.self, from: detail) else { return }
         space = shown.space
         theme = shown.theme
-        wheel = wheelFor(shown.theme)
+        wheel = wheelFor(shown.theme.colors)
         points = shown.theme.colors.map { pointOf(wheel, $0) }
+    }
+
+    /// Like Arc's, a light or a dark appearance keeps the pad to its half of the lightness, the
+    /// dots staying where they are and their colors following; the automatic one centers it on
+    /// the leading color again.
+    func setMode(_ mode: String) {
+        guard mode != "auto" else {
+            change({ $0.mode = mode }, rewheel: true)
+            return
+        }
+        wheel.range = forcedRange(dark: mode == "dark")
+        let (wheel, points) = (wheel, points)
+        change(
+            {
+                $0.mode = mode
+                $0.colors = points.map { colorAt(wheel, $0.x, $0.y) }
+            }, at: points)
     }
 
     /// Changes the theme; dots `at` points give its colors, other new colors place their dots.
@@ -140,7 +168,7 @@ final class ThemePickerModel: ObservableObject {
     ) {
         let colors = theme.colors
         update(&theme)
-        if rewheel { wheel = wheelFor(theme) }
+        if rewheel { wheel = wheelFor(theme.colors) }
         if let points {
             self.points = points
         } else if rewheel || theme.colors != colors {
@@ -164,12 +192,8 @@ struct ThemePickerView: View {
     var body: some View {
         let theme = picker.theme
         let dark = isDark(theme)
-        let neutral = dark ? "#1b1820" : "#eeebf3"
-        let stops = theme.colors.isEmpty
-            ? [neutral] : theme.colors.map { mix($0, neutral, theme.intensity) }
         VStack(spacing: 10) {
             Pad(picker: picker)
-            ModeButtons(picker: picker)
             Palette(picker: picker)
             HStack {
                 SineSlider(value: theme.intensity, enabled: !theme.colors.isEmpty) { intensity in
@@ -183,30 +207,36 @@ struct ThemePickerView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // The window's colors, through the panel's blur, darkened for its light controls.
         .background(
             ZStack {
-                LinearGradient(
-                    colors: stops.map(color), startPoint: .topLeading, endPoint: .bottomTrailing)
-                Color(red: 0.15, green: 0.13, blue: 0.18).opacity(dark ? 0.8 : 0.35)
+                Tint(theme: theme)
+                Color.black.opacity(dark ? 0.45 : 0.3)
             })
         .foregroundStyle(.white)
         .environment(\.colorScheme, .dark)
     }
 }
 
-/// The pad's dots: a click on an empty pad picks the first color, a drag moves a dot, the
-/// leading one taking the others along; − and + remove the last color and add one that goes
-/// with the others.
+/// The dots of `count` colors that go with a leading one at `lead`, like `harmony`: turned by
+/// their hues, as far from the center.
+func arranged(_ lead: CGPoint, _ count: Int) -> [CGPoint] {
+    harmonies[min(count, maxColors)].map { offset in
+        let (c, s) = (cos(offset * .pi / 180), sin(offset * .pi / 180))
+        return CGPoint(x: lead.x * c - lead.y * s, y: lead.x * s + lead.y * c)
+    }
+}
+
+/// The pad's dots, which keep in harmony, like Arc's: a click on an empty pad picks the first
+/// color, and the dot a drag takes leads, the others turning around with it; − and + remove a
+/// color and add one.
 struct Pad: View {
     @ObservedObject var picker: ThemePickerModel
-    private let dragged = State<Int?>(initialValue: nil)
-    /// The dots where the drag found them, which the others keep their place from as the leading
-    /// one turns and stretches them.
-    private let start = State<[CGPoint]>(initialValue: [])
+    /// Where the dot a drag took was, which moves by the drag's distance; none elsewhere.
+    private let taken = State<CGPoint?>(initialValue: nil)
 
     var body: some View {
         let colors = picker.theme.colors
-        let wheel = picker.wheel
         GeometryReader { geometry in
             let size = geometry.size
             let radius = min(size.width, size.height) / 2
@@ -227,8 +257,8 @@ struct Pad: View {
                     let (hex, at) = dot
                     Circle()
                         .fill(color(hex))
-                        .overlay(Circle().strokeBorder(.white, lineWidth: index == 0 ? 3 : 2))
-                        .frame(width: index == 0 ? 30 : 22, height: index == 0 ? 30 : 22)
+                        .overlay(Circle().strokeBorder(.white, lineWidth: index == 0 ? 5 : 3))
+                        .frame(width: index == 0 ? 40 : 24, height: index == 0 ? 40 : 24)
                         .shadow(radius: 2)
                         .position(
                             x: size.width / 2 + at.x * radius, y: size.height / 2 + at.y * radius)
@@ -238,30 +268,37 @@ struct Pad: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { drag in
-                        let at = onPad(point(drag.location))
-                        if dragged.wrappedValue == nil {
-                            dragged.wrappedValue = dotUnder(drag.startLocation, size, radius)
-                            start.wrappedValue = picker.points
-                            if colors.isEmpty {
-                                picker.change({ $0.colors = [colorAt(wheel, at.x, at.y)] }, at: [at])
-                                return
+                        // The dot taken leads, moving from where it was; elsewhere, the leading
+                        // one comes under the pointer.
+                        if drag.translation == .zero {
+                            let start = point(drag.startLocation)
+                            taken.wrappedValue = picker.points.last { dot in
+                                hypot(dot.x - start.x, dot.y - start.y) * radius < 20
                             }
                         }
-                        move(dragged.wrappedValue ?? 0, at)
+                        let at = taken.wrappedValue.map { dot in
+                            CGPoint(
+                                x: dot.x + drag.translation.width / radius,
+                                y: dot.y + drag.translation.height / radius)
+                        } ?? point(drag.location)
+                        arrange(onPad(at), max(1, colors.count))
                     }
-                    .onEnded { _ in dragged.wrappedValue = nil })
-            .overlay(alignment: .bottomTrailing) {
+                    .onEnded { _ in taken.wrappedValue = nil })
+            .overlay(alignment: .top) {
+                ModeButtons(picker: picker).padding(8)
+            }
+            .overlay(alignment: .bottom) {
                 HStack(spacing: 6) {
                     PickerButton(symbol: "minus", label: "Remove a color") {
-                        picker.change({ $0.colors.removeLast() }, at: picker.points.dropLast())
+                        if colors.count == 1 {
+                            picker.change({ $0.colors = [] }, at: [])
+                        } else {
+                            arrange(picker.points[0], colors.count - 1)
+                        }
                     }
                     .disabled(colors.isEmpty)
                     PickerButton(symbol: "plus", label: "Add a color") {
-                        let lead = colors.first ?? colorAt(wheel, 0, -0.5)
-                        let added = harmony(lead, colors.count + 1).dropFirst(colors.count)
-                        picker.change(
-                            { $0.colors += added },
-                            at: picker.points + added.map { pointOf(wheel, $0) })
+                        arrange(picker.points.first ?? CGPoint(x: 0, y: -0.5), colors.count + 1)
                     }
                     .disabled(colors.count == maxColors)
                 }
@@ -271,32 +308,10 @@ struct Pad: View {
         .aspectRatio(1, contentMode: .fit)
     }
 
-    /// The dot under a point, the last drawn first; the leading one elsewhere.
-    private func dotUnder(_ location: CGPoint, _ size: CGSize, _ radius: CGFloat) -> Int {
-        for (index, at) in picker.points.enumerated().reversed() {
-            let center = CGPoint(x: size.width / 2 + at.x * radius, y: size.height / 2 + at.y * radius)
-            if hypot(location.x - center.x, location.y - center.y) < 16 { return index }
-        }
-        return 0
-    }
-
-    private func move(_ index: Int, _ at: CGPoint) {
+    /// Places `count` dots in harmony, the leading one at `lead`.
+    private func arrange(_ lead: CGPoint, _ count: Int) {
         let wheel = picker.wheel
-        var points = start.wrappedValue
-        guard index < points.count, points.count == picker.theme.colors.count else { return }
-        if index > 0 {
-            points[index] = at
-        } else {
-            // The other dots turn and stretch with the leading one, from where the drag found them.
-            let from = points[0]
-            let turn = atan2(at.y, at.x) - atan2(from.y, from.x)
-            let length = hypot(from.x, from.y)
-            let stretch = length > 0.01 ? hypot(at.x, at.y) / length : 1
-            let (c, s) = (cos(turn), sin(turn))
-            points = [at] + points.dropFirst().map { p in
-                onPad(CGPoint(x: (p.x * c - p.y * s) * stretch, y: (p.x * s + p.y * c) * stretch))
-            }
-        }
+        let points = arranged(lead, count)
         picker.change({ $0.colors = points.map { colorAt(wheel, $0.x, $0.y) } }, at: points)
     }
 }
@@ -356,7 +371,7 @@ struct ModeButtons: View {
                  ("dark", "Dark appearance", "moon.stars")], id: \.0
             ) { mode, label, symbol in
                 PickerButton(symbol: symbol, label: label, pressed: picker.theme.mode == mode) {
-                    picker.change({ $0.mode = mode }, rewheel: true)
+                    picker.setMode(mode)
                 }
             }
         }
@@ -379,7 +394,8 @@ struct Palette: View {
             ForEach(palettes[picker.page], id: \.self) { hex in
                 Button {
                     let colors = harmony(hex, max(1, picker.theme.colors.count))
-                    picker.change({ $0.colors = colors }, rewheel: true)
+                    // A light or a dark appearance keeps its lightness, like Arc's.
+                    picker.change({ $0.colors = colors }, rewheel: picker.theme.mode == "auto")
                 } label: {
                     Circle().fill(color(hex)).frame(width: 24, height: 24)
                         .overlay(Circle().strokeBorder(.white.opacity(0.3)))

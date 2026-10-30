@@ -3,14 +3,14 @@
 import AppKit
 import SwiftUI
 
-/// Whether a theme shows light text: as its mode forces, or as its colors are, and as the system
-/// is without colors.
+/// Whether a theme shows light text: as its mode forces, or, like Arc, when its leading color is
+/// too dark for black text to stand out more than white; as the system is without colors.
 @MainActor func isDark(_ theme: Theme?) -> Bool {
     guard let theme else { return systemDark() }
     if theme.mode != "auto" { return theme.mode == "dark" }
-    if theme.colors.isEmpty { return systemDark() }
-    let total = theme.colors.reduce(0) { $0 + luminance($1) }
-    return total / Double(theme.colors.count) < 0.4
+    guard let lead = theme.colors.first else { return systemDark() }
+    // Black and white text contrast alike on a luminance of 0.179.
+    return luminance(lead) < 0.179
 }
 
 @MainActor func systemDark() -> Bool {
@@ -41,25 +41,30 @@ func color(_ hex: String) -> Color {
     return Color(red: rgb[0], green: rgb[1], blue: rgb[2])
 }
 
-/// A theme's colors over the blur: a gradient from the top left corner to the bottom right one,
-/// a third color rising from the bottom left corner, the stronger the more intense.
+/// A theme's colors over the blur, like Arc's: a gradient from the left edge to the right one,
+/// a third color rising from the bottom edge, from faint to opaque as the theme is more intense,
+/// and dimmed while the window is in the background.
 struct Tint: View {
     let theme: Theme?
+    @Environment(\.controlActiveState) private var active
 
     var body: some View {
         if let theme, let first = theme.colors.first {
             let second = theme.colors.count > 1 ? theme.colors[1] : first
             ZStack {
                 LinearGradient(
-                    colors: [color(first), color(second)], startPoint: .topLeading,
-                    endPoint: .bottomTrailing)
+                    colors: [color(first), color(second)], startPoint: .leading,
+                    endPoint: .trailing)
                 if theme.colors.count > 2 {
+                    // Whole from four fifths of the way down, as much as Arc's shows.
                     LinearGradient(
-                        colors: [color(theme.colors[2]).opacity(0), color(theme.colors[2])],
-                        startPoint: .bottomLeading, endPoint: .topTrailing)
+                        stops: [
+                            .init(color: color(theme.colors[2]).opacity(0), location: 0),
+                            .init(color: color(theme.colors[2]), location: 0.8),
+                        ], startPoint: .top, endPoint: .bottom)
                 }
             }
-            .opacity(0.15 + 0.7 * theme.intensity)
+            .opacity((0.3 + 0.7 * theme.intensity) * (active == .inactive ? 0.65 : 1))
         }
     }
 }
