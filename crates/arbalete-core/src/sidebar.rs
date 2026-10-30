@@ -319,6 +319,14 @@ pub enum Error {
     InvalidTheme,
 }
 
+/// What a window shows of the sidebar: its displayed Space and each Space's selected tab, which
+/// another window, showing the same Spaces and tabs, keeps apart.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct View {
+    displayed: Option<SpaceId>,
+    selected: Vec<(SpaceId, Option<NodeId>)>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sidebar {
     profiles: Vec<Profile>,
@@ -380,6 +388,41 @@ impl Sidebar {
         self.space(space)?;
         self.displayed = Some(space);
         Ok(())
+    }
+
+    /// What the sidebar shows now, to show again with `set_view`.
+    pub fn view(&self) -> View {
+        View {
+            displayed: self.displayed,
+            selected: self.spaces.iter().map(|s| (s.id, s.selected)).collect(),
+        }
+    }
+
+    /// Shows what `view` holds, but the Spaces and tabs gone since; a Space it did not know
+    /// shows no tab.
+    pub fn set_view(&mut self, view: &View) {
+        self.displayed = view.displayed.filter(|&id| self.space(id).is_ok());
+        let selected: HashMap<_, _> = view.selected.iter().copied().collect();
+        let tabs: Vec<_> = self
+            .spaces
+            .iter()
+            .map(|s| selected.get(&s.id).copied().flatten())
+            .collect();
+        for (space, tab) in self.spaces.iter_mut().zip(tabs) {
+            space.selected = tab.filter(|tab| self.nodes.contains_key(tab));
+        }
+    }
+
+    /// What a new window shows: the displayed Space, without a selected tab.
+    pub fn new_window_view(&self) -> View {
+        let mut view = self.view();
+        let displayed = self.displayed().id;
+        for (space, tab) in &mut view.selected {
+            if *space == displayed {
+                *tab = None;
+            }
+        }
+        view
     }
 
     /// The Space at `number` in sidebar order, counted from 1.
@@ -2140,6 +2183,32 @@ mod tests {
         assert_eq!(sidebar.displayed().id, work);
         assert_eq!(sidebar.display(SpaceId(999)), Err(Error::UnknownSpace));
         assert_eq!(sidebar.displayed().id, work);
+    }
+
+    #[test]
+    fn a_view_shows_its_space_and_tabs_again_but_those_gone() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let work = sidebar.add_space("Work", home.profile).unwrap();
+        let first = sidebar.add_tab(home.today, "https://a.test/", "a").unwrap();
+        let second = sidebar.add_tab(home.today, "https://b.test/", "b").unwrap();
+        sidebar.select(home.id, first).unwrap();
+        sidebar.display(work).unwrap();
+        let view = sidebar.view();
+        // A new window shows the same Space, without a tab.
+        let new = sidebar.new_window_view();
+        sidebar.display(home.id).unwrap();
+        sidebar.select(home.id, second).unwrap();
+        sidebar.set_view(&new);
+        assert_eq!(sidebar.displayed().id, work);
+        sidebar.set_view(&view);
+        assert_eq!(sidebar.displayed().id, work);
+        assert_eq!(sidebar.space(home.id).unwrap().selected, Some(first));
+        // A tab closed meanwhile is no longer selected.
+        sidebar.remove(first).unwrap();
+        sidebar.select(home.id, second).unwrap();
+        sidebar.set_view(&view);
+        assert_eq!(sidebar.space(home.id).unwrap().selected, None);
     }
 
     #[test]
