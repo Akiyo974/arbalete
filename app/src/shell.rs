@@ -211,6 +211,8 @@ struct Win {
     view: RefCell<Option<WindowView>>,
     /// The window it opened from, which it opens offset from.
     cascade: Cell<Option<Rect>>,
+    /// Opened from another window, it shows the Command Bar once in front, like Arc's.
+    fresh: Cell<bool>,
     window: RefCell<Option<Window>>,
     /// Beside the card, at the window's left edge. It must not reach under the card: a web view
     /// below the overlays receives no real mouse event on macOS, only synthesized ones.
@@ -287,6 +289,7 @@ impl Win {
             id,
             view: RefCell::new(None),
             cascade: Cell::new(None),
+            fresh: Cell::new(false),
             window: RefCell::new(None),
             sidebar: RefCell::new(None),
             card: RefCell::new(None),
@@ -381,8 +384,23 @@ fn new_window() {
             .window
             .with_borrow(|window| window.as_ref().map(|w| w.bounds())),
     );
+    window.fresh.set(true);
     WINDOWS.with_borrow_mut(|windows| windows.push(Rc::new(window)));
     window_create_top_level(Some(&mut MainWindowDelegate::new(id)));
+}
+
+wrap_task! {
+    struct OpenCommandBar {
+        window: u32,
+    }
+
+    impl Task {
+        /// Shows the Command Bar in a window just opened from another, like Arc's.
+        fn execute(&self) {
+            focus(self.window);
+            show_overlay(true);
+        }
+    }
 }
 
 /// How far a new window opens from the one it opens from, down and right, like macOS cascades.
@@ -4715,9 +4733,10 @@ wrap_window_delegate! {
             for link in PENDING_LINKS.take() {
                 open_little(Some(link));
             }
-            // Another window opens on the Command Bar, like Arc's.
-            if self.id != 0 {
-                show_overlay(true);
+            // Once it has settled in front: until then, the window taking the keyboard back
+            // from the Command Bar's field would close it.
+            if win().fresh.take() {
+                post_delayed_task(ThreadId::UI, Some(&mut OpenCommandBar::new(self.id)), 300);
             }
         }
 
