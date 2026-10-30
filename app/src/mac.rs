@@ -13,15 +13,16 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
-    NSAlert, NSAlertFirstButtonReturn, NSApp, NSApplication, NSColor, NSControlStateValueOn,
-    NSDownArrowFunctionKey, NSEvent, NSEventMask, NSEventModifierFlags, NSEventPhase, NSEventType,
-    NSF12FunctionKey, NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSPasteboard,
-    NSPasteboardTypeString, NSRightArrowFunctionKey, NSSharingServicePicker, NSTextField,
-    NSUpArrowFunctionKey, NSView, NSWindow, NSWindowButton, NSWorkspace,
+    NSAlert, NSAlertFirstButtonReturn, NSApp, NSApplication, NSAutoresizingMaskOptions, NSColor,
+    NSControlStateValueOn, NSDownArrowFunctionKey, NSEvent, NSEventMask, NSEventModifierFlags,
+    NSEventPhase, NSEventType, NSF12FunctionKey, NSImage, NSLeftArrowFunctionKey, NSMenu,
+    NSMenuItem, NSPasteboard, NSPasteboardTypeString, NSRightArrowFunctionKey,
+    NSSharingServicePicker, NSTextField, NSUpArrowFunctionKey, NSView, NSWindow, NSWindowButton,
+    NSWorkspace,
 };
 use objc2_foundation::{
-    NSAppleEventDescriptor, NSAppleEventManager, NSArray, NSNumber, NSProcessInfo, NSRect,
-    NSRectEdge, NSSize, NSString, NSURL, ns_string,
+    NSAppleEventDescriptor, NSAppleEventManager, NSArray, NSData, NSDataBase64DecodingOptions,
+    NSNumber, NSProcessInfo, NSRect, NSRectEdge, NSSize, NSString, NSURL, ns_string,
 };
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
@@ -1093,6 +1094,58 @@ pub fn copy(url: &str) {
 /// its content view, whose layer holds what the window's compositor draws.
 pub fn round_card(view: *mut c_void) {
     round(view, CARD_RADIUS);
+}
+
+/// Covers a page's view, which CEF gives, with a picture of it, a JPEG in base64, until
+/// uncover_page.
+pub fn cover_page(view: *mut c_void, jpeg: &str) {
+    // SAFETY: CEF gives the page's NSView, which its window keeps alive.
+    let Some(view) = (unsafe { view.cast::<NSView>().as_ref() }) else {
+        return;
+    };
+    uncover_page((view as *const NSView).cast_mut().cast());
+    let Some(data) = NSData::initWithBase64EncodedString_options(
+        NSData::alloc(),
+        &NSString::from_str(jpeg),
+        NSDataBase64DecodingOptions::empty(),
+    ) else {
+        return;
+    };
+    let (Some(image), Some(class)) = (
+        NSImage::initWithData(NSImage::alloc(), &data),
+        AnyClass::get(c"NSImageView"),
+    ) else {
+        return;
+    };
+    unsafe {
+        let cover: Retained<NSView> = msg_send![class, imageViewWithImage: &*image];
+        // NSImageScaleAxesIndependently: the picture was the page's size.
+        let _: () = msg_send![&*cover, setImageScaling: 1usize];
+        cover.setFrame(view.bounds());
+        cover.setAutoresizingMask(
+            NSAutoresizingMaskOptions::ViewWidthSizable
+                | NSAutoresizingMaskOptions::ViewHeightSizable,
+        );
+        view.addSubview(&cover);
+    }
+}
+
+/// Takes the picture covering a page's view away, if any.
+pub fn uncover_page(view: *mut c_void) {
+    // SAFETY: CEF gives the page's NSView, which its window keeps alive.
+    let Some(view) = (unsafe { view.cast::<NSView>().as_ref() }) else {
+        return;
+    };
+    let Some(class) = AnyClass::get(c"NSImageView") else {
+        return;
+    };
+    // The page's view holds no other picture.
+    for subview in view.subviews().iter() {
+        let picture: bool = unsafe { msg_send![&*subview, isKindOfClass: class] };
+        if picture {
+            subview.removeFromSuperview();
+        }
+    }
 }
 
 /// Makes a window invisible and lets clicks through it, while a sheet it holds, like Chromium's

@@ -622,6 +622,9 @@ pub fn page_closed(page: i32) {
 /// The id of the message asking a page whether it plays media (crate::shell::page_playing).
 pub const PLAYING: i32 = 2;
 
+/// The id of the message asking a page for a picture of itself (crate::shell::page_snapshot).
+pub const SNAPSHOT: i32 = 3;
+
 /// The id of the message asking a page's session for its own target, apart from the
 /// bridge's, which start above it.
 const CONTENT_INFO: i32 = 1;
@@ -1231,6 +1234,10 @@ wrap_dev_tools_message_observer! {
             } else if message["id"] == PLAYING {
                 let playing = message["result"]["result"]["value"].as_bool().unwrap_or(false);
                 crate::shell::page_playing(self.page, playing);
+            } else if message["id"] == SNAPSHOT
+                && let Some(jpeg) = message["result"]["data"].as_str()
+            {
+                crate::shell::page_snapshot(self.page, jpeg);
             }
             0
         }

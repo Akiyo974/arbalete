@@ -184,6 +184,13 @@ thread_local! {
     static SETTINGS: RefCell<Settings> = RefCell::new(Settings::default());
     /// The tabs whose page is frozen or was unloaded, which the sidebar dims.
     static ASLEEP: RefCell<HashSet<NodeId>> = RefCell::default();
+    /// The last picture of each tab's page, a JPEG in base64, which covers the page while it
+    /// loads again once unloaded.
+    static SNAPSHOTS: RefCell<HashMap<NodeId, String>> = RefCell::default();
+    /// The tabs whose unloaded page opens again, covered by its picture once it is made.
+    static REVIVED: RefCell<HashSet<NodeId>> = RefCell::default();
+    /// The tab whose page is being made, as its view joins the card.
+    static MAKING: Cell<Option<NodeId>> = const { Cell::new(None) };
     /// The find bar, at the card's top right corner; created the first time it is shown.
     static FIND_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static FIND: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
@@ -1825,8 +1832,8 @@ wrap_load_handler! {
 /// How often the "Today" tabs left unshown are archived.
 const ARCHIVE_CHECK_MS: i64 = 60_000;
 
-/// Archives the "Today" tabs left unshown longer than their profile allows, and suspends the
-/// pages hidden for long, then again every minute.
+/// Archives the "Today" tabs left unshown longer than their profile allows, suspends the pages
+/// hidden for long and takes a picture of the shown one, then again every minute.
 fn check_archive() {
     let now = now().try_into().unwrap_or_default();
     let archived = STATE.with_borrow_mut(|state| state.sidebar.archive_due(now));
@@ -1835,6 +1842,7 @@ fn check_archive() {
         send_archive();
     }
     suspend_hidden_pages();
+    snapshot_shown();
     post_delayed_task(
         ThreadId::UI,
         Some(&mut CheckArchive::new()),
@@ -3318,6 +3326,47 @@ fn suspend_hidden_pages() {
     }
 }
 
+/// Asks the shown page for a picture of itself (page_snapshot), while it draws: a hidden page
+/// draws nothing, and would never answer.
+fn snapshot_shown() {
+    let params = serde_json::json!({ "format": "jpeg", "quality": 70 });
+    let message = serde_json::json!({ "id": extensions::SNAPSHOT, "method": "Page.captureScreenshot", "params": params });
+    if let Some(host) = content().and_then(|view| view.browser()?.host()) {
+        host.send_dev_tools_message(Some(message.to_string().as_bytes()));
+    }
+}
+
+/// Covers a page opening again after it was unloaded with its picture as soon as it is made, or
+/// takes the picture away once it has loaded.
+#[cfg(target_os = "macos")]
+fn cover_revived(browser: Option<&Browser>, loading: bool) {
+    let Some(browser) = browser else { return };
+    // A page being made, which its view does not hold yet, is MAKING's.
+    let tab = page_tab(browser).or(MAKING.get());
+    let (Some(tab), Some(host)) = (tab, browser.host()) else {
+        return;
+    };
+    if !loading {
+        crate::mac::uncover_page(host.window_handle());
+    } else if REVIVED.with_borrow_mut(|revived| revived.remove(&tab))
+        && let Some(jpeg) = SNAPSHOTS.with_borrow(|snapshots| snapshots.get(&tab).cloned())
+    {
+        crate::mac::cover_page(host.window_handle(), &jpeg);
+    }
+}
+
+/// Keeps a page's picture, a JPEG in base64, for its tab.
+pub fn page_snapshot(page: i32, jpeg: &str) {
+    let tab = PAGES.with_borrow(|pages| {
+        pages
+            .iter()
+            .find_map(|(tab, live)| (live.view.browser()?.identifier() == page).then_some(*tab))
+    });
+    if let Some(tab) = tab {
+        SNAPSHOTS.with_borrow_mut(|snapshots| snapshots.insert(tab, jpeg.to_owned()));
+    }
+}
+
 /// A tab's url, if it is still a tab.
 fn tab_url(tab: NodeId) -> Option<String> {
     STATE.with_borrow(|state| match &state.sidebar.node(tab)?.kind {
@@ -3457,6 +3506,9 @@ fn show_selected() {
     match CONTEXTS.with_borrow(|contexts| contexts.get(&profile).cloned()) {
         Some(Some(mut context)) => {
             let start = if url.is_empty() { "about:blank" } else { &url };
+            if SNAPSHOTS.with_borrow(|snapshots| snapshots.contains_key(&tab)) {
+                REVIVED.with_borrow_mut(|revived| revived.insert(tab));
+            }
             let view = browser_view(
                 ContentClient::new(profile, false),
                 start,
@@ -3464,9 +3516,11 @@ fn show_selected() {
                 Some(&mut context),
             );
             view.set_visible(0);
+            MAKING.set(Some(tab));
             if let Some(card) = card_panel() {
                 card.add_child_view(Some(&mut View::from(&view)));
             }
+            MAKING.set(None);
             PAGES.with_borrow_mut(|pages| {
                 pages.insert(
                     tab,
@@ -3502,6 +3556,8 @@ fn mute_page(tab: NodeId) {
 fn content_created(profile: ProfileId, browser: Option<&mut Browser>) {
     let Some(browser) = browser else { return };
     extensions::page_created(profile, browser);
+    #[cfg(target_os = "macos")]
+    cover_revived(Some(browser), true);
     let Some(tab) = page_tab(browser) else { return };
     mute_page(tab);
     if SHOWN.get() == Some(tab) {
@@ -3578,7 +3634,7 @@ fn hide_content() {
 }
 
 /// Closes the pages of the tabs closed, archived or moved to another profile's Space, whose web
-/// data a page cannot change.
+/// data a page cannot change, and forgets the pictures of the tabs gone.
 fn prune_pages() {
     let gone: Vec<NodeId> = STATE.with_borrow(|state| {
         PAGES.with_borrow(|pages| {
@@ -3592,6 +3648,11 @@ fn prune_pages() {
     for tab in gone {
         close_page(tab);
     }
+    STATE.with_borrow(|state| {
+        SNAPSHOTS.with_borrow_mut(|snapshots| {
+            snapshots.retain(|tab, _| state.sidebar.node(*tab).is_some());
+        });
+    });
 }
 
 /// Closes a tab's page, if it has one: the tab opens again at its url. Its view then leaves the
@@ -5200,8 +5261,13 @@ wrap_load_handler! {
         }
 
         fn on_loading_state_change(&self, browser: Option<&mut Browser>, is_loading: i32, can_go_back: i32, can_go_forward: i32) {
+            #[cfg(target_os = "macos")]
+            cover_revived(browser.as_deref(), is_loading == 1);
             if !is_shown(browser) {
                 return;
+            }
+            if is_loading == 0 {
+                snapshot_shown();
             }
             update_page(|page| {
                 page.loading = is_loading == 1;

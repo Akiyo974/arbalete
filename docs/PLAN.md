@@ -368,8 +368,9 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
 - New Window (⌘N): several full windows, each with its sidebar. Both change how the window's state and its
   pages are held, so they go together.
 - Freeze, then unload hidden tabs on timers; reload on selection from the saved URL, with the snapshot shown
-  while loading. Done but the snapshot: a page hidden 5 minutes is frozen, then unloaded after an hour, unless
-  it plays media.
+  while loading. Done: a page hidden 5 minutes is frozen, then unloaded after an hour, unless it plays media;
+  the shown page's picture, taken when it loads and every minute (a hidden page draws nothing to take one),
+  covers it while it loads again (on macOS).
 - Memory pressure and low-power detection on each OS. Done on macOS: under memory pressure, hidden pages are
   frozen after a minute and unloaded after 5, all at once when it is critical; in Low Power Mode, they are
   frozen after a minute.
