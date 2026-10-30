@@ -273,6 +273,12 @@ final class NativeWindow {
         surfaces["import"] = importSurface
     }
 
+    /// Closes its panels, the window they belong to closing.
+    func close() {
+        sidebar.close()
+        surfaces.values.forEach { $0.close() }
+    }
+
     /// Gives one of its views an event, by the name of the web view it stands for.
     func handle(_ surface: String, _ name: String, _ detail: Data) {
         switch surface {
@@ -302,6 +308,14 @@ public func attach(_ id: UInt32, _ handle: UnsafeMutableRawPointer, _ send: Send
         let app = AppModel(window: id, send: send)
         nativeWindows[id] = NativeWindow(window: window, content: content, app: app)
         if settingsModel == nil { settingsModel = SettingsModel(app: app) }
+    }
+}
+
+/// Takes the interface out of the window `id`, which closed: its panels close with it.
+@_cdecl("arbalete_ui_detach")
+public func detach(_ id: UInt32) {
+    MainActor.assumeIsolated {
+        nativeWindows.removeValue(forKey: id)?.close()
     }
 }
 

@@ -17,6 +17,7 @@ use arbalete_core::import::{self, Choice, safari};
 use arbalete_core::search::SearchEngine;
 use arbalete_core::sidebar::{
     ArchiveAfter, Color, Error, NodeId, NodeKind, ProfileId, Sidebar, Space, SpaceId, Tab,
+    View as WindowView,
 };
 use arbalete_core::{favicon, store};
 use cef::wrapper::stream_resource_handler::StreamResourceHandler;
@@ -197,12 +198,19 @@ thread_local! {
     static WINDOWS: RefCell<Vec<Rc<Win>>> = RefCell::new(vec![Rc::new(Win::new(0))]);
     /// The window commands and events are about, by its id.
     static FOCUSED: Cell<u32> = const { Cell::new(0) };
+    /// The id the next window opened takes.
+    static NEXT_WINDOW: Cell<u32> = const { Cell::new(1) };
 }
 
 /// What a window holds of its own: its views, the page it shows and its panels' state.
 struct Win {
     /// What the native interface knows the window by.
     id: u32,
+    /// What the window shows of the sidebar while another window has the focus: the sidebar
+    /// shows the focused window's.
+    view: RefCell<Option<WindowView>>,
+    /// The window it opened from, which it opens offset from.
+    cascade: Cell<Option<Rect>>,
     window: RefCell<Option<Window>>,
     /// Beside the card, at the window's left edge. It must not reach under the card: a web view
     /// below the overlays receives no real mouse event on macOS, only synthesized ones.
@@ -277,6 +285,8 @@ impl Win {
     fn new(id: u32) -> Self {
         Self {
             id,
+            view: RefCell::new(None),
+            cascade: Cell::new(None),
             window: RefCell::new(None),
             sidebar: RefCell::new(None),
             card: RefCell::new(None),
@@ -325,10 +335,94 @@ fn win() -> Rc<Win> {
         .expect("the focused window")
 }
 
-/// Makes the window `id` the one commands and events are about.
+/// The window `id`, if open.
+fn window_by_id(id: u32) -> Option<Rc<Win>> {
+    WINDOWS.with_borrow(|windows| windows.iter().find(|win| win.id == id).cloned())
+}
+
+/// Makes the window `id` the one commands and events are about: the sidebar shows what it shows,
+/// and keeps what the window focused until then showed apart.
 fn focus(id: u32) {
-    if WINDOWS.with_borrow(|windows| windows.iter().any(|win| win.id == id)) {
-        FOCUSED.set(id);
+    let Some(target) = window_by_id(id).filter(|_| FOCUSED.get() != id) else {
+        return;
+    };
+    if let Some(current) = window_by_id(FOCUSED.get()) {
+        current
+            .view
+            .set(Some(STATE.with_borrow(|state| state.sidebar.view())));
+    }
+    FOCUSED.set(id);
+    if let Some(view) = target.view.take() {
+        STATE.with_borrow_mut(|state| state.sidebar.set_view(&view));
+    }
+}
+
+/// Runs `act` in each window in turn, as the focused one, then focuses back the window that was.
+fn in_each_window(act: impl Fn()) {
+    let was = FOCUSED.get();
+    let ids: Vec<u32> = WINDOWS.with_borrow(|windows| windows.iter().map(|win| win.id).collect());
+    for id in ids {
+        focus(id);
+        act();
+    }
+    focus(was);
+}
+
+/// Opens another window, offset from the focused one, on its Space without a tab, like Arc's.
+fn new_window() {
+    let id = NEXT_WINDOW.get();
+    NEXT_WINDOW.set(id + 1);
+    let window = Win::new(id);
+    window.view.set(Some(
+        STATE.with_borrow(|state| state.sidebar.new_window_view()),
+    ));
+    window.cascade.set(
+        win()
+            .window
+            .with_borrow(|window| window.as_ref().map(|w| w.bounds())),
+    );
+    WINDOWS.with_borrow_mut(|windows| windows.push(Rc::new(window)));
+    window_create_top_level(Some(&mut MainWindowDelegate::new(id)));
+}
+
+/// How far a new window opens from the one it opens from, down and right, like macOS cascades.
+const CASCADE: i32 = 22;
+
+/// Moves the pages of the window `id`, which closes, into another window, hidden.
+fn hand_pages_over(id: u32) {
+    let Some(card) = window_by_id(id).and_then(|win| {
+        win.card
+            .with_borrow(|card| card.as_ref()?.contents_view()?.as_panel())
+    }) else {
+        return;
+    };
+    let other = WINDOWS.with_borrow(|windows| {
+        windows.iter().find(|win| win.id != id).and_then(|win| {
+            win.card
+                .with_borrow(|card| card.as_ref()?.contents_view()?.as_panel())
+        })
+    });
+    let Some(other) = other else { return };
+    let pages: Vec<_> =
+        PAGES.with_borrow(|pages| pages.values().map(|live| live.view.clone()).collect());
+    for view in pages {
+        let here = view
+            .parent_view()
+            .is_some_and(|parent| parent.is_same(Some(&mut View::from(&card))) == 1);
+        if here {
+            view.set_visible(0);
+            card.remove_child_view(Some(&mut View::from(&view)));
+            other.add_child_view(Some(&mut View::from(&view)));
+        }
+    }
+    if let Some(win) = window_by_id(id)
+        && let Some(tab) = win.shown.take()
+    {
+        PAGES.with_borrow_mut(|pages| {
+            if let Some(live) = pages.get_mut(&tab) {
+                live.hidden_since = Some(now());
+            }
+        });
     }
 }
 
@@ -702,11 +796,14 @@ fn send_state() {
     if let Some(url) = selected_url().filter(|_| open) {
         send_site_controls(&url);
     }
-    let json = STATE.with_borrow(UiState::to_json);
-    let event = format!(r#"new CustomEvent("arbalete:state", {{ detail: {json} }})"#);
-    dispatch(&win().sidebar, &event);
-    dispatch(&win().reveal_view, &event);
-    dispatch(&win().toolbar_view, &event);
+    // Each window's sidebar shows its own Space and tab.
+    in_each_window(|| {
+        let json = STATE.with_borrow(UiState::to_json);
+        let event = format!(r#"new CustomEvent("arbalete:state", {{ detail: {json} }})"#);
+        dispatch(&win().sidebar, &event);
+        dispatch(&win().reveal_view, &event);
+        dispatch(&win().toolbar_view, &event);
+    });
     // Extensions see the displayed Space's selected tab as their profile's active tab.
     let active = STATE.with_borrow(|state| {
         let sidebar = &state.sidebar;
@@ -760,7 +857,7 @@ fn send_downloads() {
     update_media_files();
     let json = DOWNLOADS.with_borrow(|downloads| serde_json::to_string(downloads).expect("JSON"));
     let event = format!(r#"new CustomEvent("arbalete:downloads", {{ detail: {json} }})"#);
-    dispatch(&win().sidebar, &event);
+    in_each_window(|| dispatch(&win().sidebar, &event));
     dispatch(&win().reveal_view, &event);
 }
 
@@ -2013,7 +2110,7 @@ fn send_archive() {
         serde_json::Value::from(items)
     });
     let event = format!(r#"new CustomEvent("arbalete:archive", {{ detail: {json} }})"#);
-    dispatch(&win().sidebar, &event);
+    in_each_window(|| dispatch(&win().sidebar, &event));
     dispatch(&win().reveal_view, &event);
 }
 
@@ -3729,6 +3826,26 @@ fn show_content(tab: NodeId, view: &BrowserView) {
         return;
     }
     hide_content();
+    // A page shows in one window at a time, like Arc's: this one takes it from another.
+    let current = FOCUSED.get();
+    WINDOWS.with_borrow(|windows| {
+        for other in windows.iter().filter(|other| other.id != current) {
+            if other.shown.get() == Some(tab) {
+                other.shown.set(None);
+            }
+        }
+    });
+    if let Some(card) = card_panel() {
+        let here = view
+            .parent_view()
+            .is_some_and(|parent| parent.is_same(Some(&mut View::from(&card))) == 1);
+        if !here {
+            if let Some(parent) = view.parent_view().and_then(|parent| parent.as_panel()) {
+                parent.remove_child_view(Some(&mut View::from(view)));
+            }
+            card.add_child_view(Some(&mut View::from(view)));
+        }
+    }
     win().shown.set(Some(tab));
     let frozen = PAGES.with_borrow_mut(|pages| {
         let live = pages.get_mut(&tab)?;
@@ -3830,9 +3947,9 @@ wrap_task! {
     }
 
     impl Task {
-        /// Takes a closing page's view out of the card, which destroys its browser.
+        /// Takes a closing page's view out of its window's card, which destroys its browser.
         fn execute(&self) {
-            if let Some(card) = card_panel() {
+            if let Some(card) = self.view.parent_view().and_then(|parent| parent.as_panel()) {
                 card.remove_child_view(Some(&mut View::from(&self.view)));
             }
         }
@@ -4174,6 +4291,7 @@ fn run_command(command: Command) {
         (Command::ShowSettings, _) => show_settings(),
         (Command::ToggleToolbar, _) => toggle_toolbar(),
         (Command::NewLittle(url), _) => open_link(url),
+        (Command::NewWindow, _) => new_window(),
         (Command::Little(id, action), _) => little_action(id, action),
         (Command::OpenLittleInSpace, _) => {
             if let Some(id) = focused_little() {
@@ -4362,8 +4480,8 @@ pub fn scroll(scroll: crate::swipe::Scroll) {
     }
 }
 
-/// Closes the main window, and the settings', which quits the app once its browsers are closed.
-/// The window's own close button does the same on every OS.
+/// Closes every window, which quits the app once its browsers are closed. The last window's own
+/// close button does the same on every OS.
 pub fn close() {
     close_settings();
     let littles: Vec<_> =
@@ -4371,7 +4489,14 @@ pub fn close() {
     for window in littles {
         window.close();
     }
-    if let Some(window) = win().window.with_borrow(Clone::clone) {
+    CLOSING.set(true);
+    let windows: Vec<_> = WINDOWS.with_borrow(|windows| {
+        windows
+            .iter()
+            .filter_map(|win| win.window.with_borrow(Clone::clone))
+            .collect()
+    });
+    for window in windows {
         window.close();
     }
 }
@@ -4436,7 +4561,7 @@ wrap_browser_process_handler! {
             restore(self.data_dir.join(store::FILE_NAME));
             check_archive();
             DOWNLOADS.set(downloads::load(&self.data_dir.join(downloads::FILE_NAME)));
-            window_create_top_level(Some(&mut MainWindowDelegate::new()));
+            window_create_top_level(Some(&mut MainWindowDelegate::new(0)));
         }
 
         fn default_client(&self) -> Option<Client> {
@@ -4446,7 +4571,9 @@ wrap_browser_process_handler! {
 }
 
 wrap_window_delegate! {
-    struct MainWindowDelegate {}
+    struct MainWindowDelegate {
+        id: u32,
+    }
 
     impl ViewDelegate {
         fn preferred_size(&self, _view: Option<&mut View>) -> Size {
@@ -4456,6 +4583,7 @@ wrap_window_delegate! {
         // CEF gives views its theme's colors again once it changes, as when the window shows:
         // the window's own, transparent on macOS, and the card's come back.
         fn on_theme_changed(&self, _view: Option<&mut View>) {
+            focus(self.id);
             if let Some(colors) = win().window_colors.with_borrow(Clone::clone) {
                 set_window_colors(colors.0, colors.1, &colors.2);
             }
@@ -4464,6 +4592,7 @@ wrap_window_delegate! {
         // The card, the revealed sidebar and the margins follow the window's size.
         // A slide places them on its next step.
         fn on_layout_changed(&self, _view: Option<&mut View>, _new_bounds: Option<&Rect>) {
+            focus(self.id);
             if win().slide.with_borrow(Option::is_none) {
                 place_card();
                 place_reveal();
@@ -4481,8 +4610,12 @@ wrap_window_delegate! {
 
     impl WindowDelegate {
         fn on_window_created(&self, window: Option<&mut Window>) {
+            focus(self.id);
             let window = window.expect("window").clone();
             window.set_title(Some(&CefString::from("Arbalete")));
+            if let Some(from) = win().cascade.take() {
+                window.set_bounds(Some(&Rect { x: from.x + CASCADE, y: from.y + CASCADE, ..from }));
+            }
             // The sidebar at the left edge, the rest of the window its own background, below the
             // card and the other overlays.
             window.set_background_color(WINDOW_COLOR);
@@ -4582,10 +4715,38 @@ wrap_window_delegate! {
             for link in PENDING_LINKS.take() {
                 open_little(Some(link));
             }
+            // Another window opens on the Command Bar, like Arc's.
+            if self.id != 0 {
+                show_overlay(true);
+            }
         }
 
-        /// Asks every browser to close; the window closes once they all can.
+        // The window in front shows the live page of its tab, taking it from another window.
+        fn on_window_activation_changed(&self, _window: Option<&mut Window>, active: i32) {
+            if active == 1 {
+                focus(self.id);
+                show_selected();
+            }
+        }
+
+        fn on_window_destroyed(&self, _window: Option<&mut Window>) {
+            WINDOWS.with_borrow_mut(|windows| windows.retain(|win| win.id != self.id));
+            #[cfg(target_os = "macos")]
+            crate::native::detach(self.id);
+            if let Some(next) = WINDOWS.with_borrow(|windows| windows.first().map(|win| win.id)) {
+                focus(next);
+                show_selected();
+            }
+        }
+
+        /// Asks every browser to close; the window closes once they all can. With other windows
+        /// open, it closes alone, its pages going to another one, like Arc's.
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
+            focus(self.id);
+            if !CLOSING.get() && WINDOWS.with_borrow(Vec::len) > 1 {
+                hand_pages_over(self.id);
+                return 1;
+            }
             CLOSING.set(true);
             let current = win();
             let mut views: Vec<_> = [&current.sidebar, &current.reveal_view, &current.overlay_view, &current.find_view, &current.toolbar_view, &current.site_view, &current.theme_view]

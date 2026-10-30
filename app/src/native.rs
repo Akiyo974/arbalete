@@ -26,6 +26,7 @@ unsafe extern "C" {
         width: f64,
         height: f64,
     );
+    fn arbalete_ui_detach(window: u32);
     fn arbalete_ui_settings(shown: bool);
     fn arbalete_ui_little(id: u32, handle: *mut c_void);
     fn arbalete_ui_settings_focused() -> bool;
@@ -45,6 +46,12 @@ unsafe extern "C" {
 pub fn attach(window: u32, handle: *mut c_void) {
     // SAFETY: CEF gives a live NSWindow or NSView, and `send` lives as long as the app.
     unsafe { arbalete_ui_attach(window, handle, send) };
+}
+
+/// Takes the native interface out of `window`, which closed.
+pub fn detach(window: u32) {
+    // SAFETY: a plain value.
+    unsafe { arbalete_ui_detach(window) };
 }
 
 /// Gives a surface of the native interface of `window`, like "sidebar", an event dispatched to

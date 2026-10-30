@@ -101,6 +101,13 @@ final class SidebarHost {
         }
     }
 
+    /// Closes it, its window closing.
+    func close() {
+        if let rightClicks { NSEvent.removeMonitor(rightClicks) }
+        rightClicks = nil
+        panel.close()
+    }
+
     /// Shows the sidebar at `frame`, from the window's top left corner, or hides it.
     func place(_ frame: NSRect?, floating: Bool, revealed: Bool) {
         self.revealed = revealed

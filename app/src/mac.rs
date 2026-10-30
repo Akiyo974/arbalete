@@ -257,6 +257,11 @@ define_class!(
             crate::shell::run(Command::ShowDownloads);
         }
 
+        #[unsafe(method(arbaleteNewWindow:))]
+        fn new_window(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::NewWindow);
+        }
+
         #[unsafe(method(arbaleteNewLittle:))]
         fn new_little(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::NewLittle(None));
@@ -488,6 +493,12 @@ pub fn setup_menu() {
                     ns_string!("New Tab"),
                     sel!(arbaleteNewTab:),
                     ns_string!("t"),
+                ),
+                item(
+                    mtm,
+                    ns_string!("New Window"),
+                    sel!(arbaleteNewWindow:),
+                    ns_string!("n"),
                 ),
                 option_item(
                     mtm,

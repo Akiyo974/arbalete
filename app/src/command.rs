@@ -195,6 +195,8 @@ pub enum Command {
     /// Opens a Little Arbalete window, empty, from the menu, or on a link another app asks to
     /// open: `little/new` or `little/new/<percent-encoded url>`.
     NewLittle(Option<String>),
+    /// Opens another window, on the same Space, without a tab: `window/new`.
+    NewWindow,
     /// Acts in a Little Arbalete window, from its bar: `little/<window id>/ready`,
     /// `little/<window id>/navigate/<percent-encoded url>` or `little/<window id>/open`.
     Little(u32, LittleAction),
@@ -462,6 +464,7 @@ impl Command {
             "sidebar/toggle" => Some(Self::ToggleSidebar),
             "toolbar/toggle" => Some(Self::ToggleToolbar),
             "little/new" => Some(Self::NewLittle(None)),
+            "window/new" => Some(Self::NewWindow),
             "sidebar/reveal" => Some(Self::RevealSidebar),
             "sidebar/conceal" => Some(Self::ConcealSidebar),
             "library/show" => Some(Self::ShowLibrary),
@@ -1448,6 +1451,7 @@ mod tests {
 
     #[test]
     fn parses_little_window_commands() {
+        assert_eq!(Command::parse("window/new"), Some(Command::NewWindow));
         assert_eq!(Command::parse("little/new"), Some(Command::NewLittle(None)));
         assert_eq!(
             Command::parse("little/new/https%3A%2F%2Fexample.com%2F"),

@@ -99,6 +99,9 @@ final class Surface {
 
     var isShown: Bool { panel.isVisible }
 
+    /// Closes it, its window closing.
+    func close() { panel.close() }
+
     /// Shows the surface at `frame`, from the window's top left corner, or hides it.
     func place(_ shown: Bool, _ frame: NSRect) {
         let showing = shown && !panel.isVisible
