@@ -109,6 +109,9 @@ final class ThemePickerModel: ObservableObject {
     @Published var space = 0
     @Published var theme = Theme(colors: [], mode: "auto", intensity: 1, noise: 0)
     @Published var wheel = Wheel(saturation: 0.8, range: (0.01, 0.97))
+    /// Where the dots sit, one for each color. A drag places them where the pointer takes them,
+    /// as a color's #rrggbb, rounded, would not: a grayish one barely keeps its hue.
+    @Published var points: [CGPoint] = []
     @Published var page = 0
     let app: AppModel
     /// The theme to send next, at most one every frame's time while a dot or a knob moves.
@@ -128,11 +131,21 @@ final class ThemePickerModel: ObservableObject {
         space = shown.space
         theme = shown.theme
         wheel = wheelFor(shown.theme)
+        points = shown.theme.colors.map { pointOf(wheel, $0) }
     }
 
-    func change(_ update: (inout Theme) -> Void, rewheel: Bool = false) {
+    /// Changes the theme; dots `at` points give its colors, other new colors place their dots.
+    func change(
+        _ update: (inout Theme) -> Void, rewheel: Bool = false, at points: [CGPoint]? = nil
+    ) {
+        let colors = theme.colors
         update(&theme)
         if rewheel { wheel = wheelFor(theme) }
+        if let points {
+            self.points = points
+        } else if rewheel || theme.colors != colors {
+            self.points = theme.colors.map { pointOf(wheel, $0) }
+        }
         if pending == nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { [weak self] in
                 guard let self, let sent = self.pending else { return }
@@ -187,6 +200,9 @@ struct ThemePickerView: View {
 struct Pad: View {
     @ObservedObject var picker: ThemePickerModel
     private let dragged = State<Int?>(initialValue: nil)
+    /// The dots where the drag found them, which the others keep their place from as the leading
+    /// one turns and stretches them.
+    private let start = State<[CGPoint]>(initialValue: [])
 
     var body: some View {
         let colors = picker.theme.colors
@@ -207,8 +223,8 @@ struct Pad: View {
                         .font(.system(size: 13))
                         .foregroundStyle(.white.opacity(0.7))
                 }
-                ForEach(Array(colors.enumerated()), id: \.offset) { index, hex in
-                    let at = pointOf(wheel, hex)
+                ForEach(Array(zip(colors, picker.points).enumerated()), id: \.offset) { index, dot in
+                    let (hex, at) = dot
                     Circle()
                         .fill(color(hex))
                         .overlay(Circle().strokeBorder(.white, lineWidth: index == 0 ? 3 : 2))
@@ -222,11 +238,12 @@ struct Pad: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { drag in
-                        let at = point(drag.location)
+                        let at = onPad(point(drag.location))
                         if dragged.wrappedValue == nil {
                             dragged.wrappedValue = dotUnder(drag.startLocation, size, radius)
+                            start.wrappedValue = picker.points
                             if colors.isEmpty {
-                                picker.change({ $0.colors = [colorAt(wheel, at.x, at.y)] })
+                                picker.change({ $0.colors = [colorAt(wheel, at.x, at.y)] }, at: [at])
                                 return
                             }
                         }
@@ -236,14 +253,15 @@ struct Pad: View {
             .overlay(alignment: .bottomTrailing) {
                 HStack(spacing: 6) {
                     PickerButton(symbol: "minus", label: "Remove a color") {
-                        picker.change { $0.colors.removeLast() }
+                        picker.change({ $0.colors.removeLast() }, at: picker.points.dropLast())
                     }
                     .disabled(colors.isEmpty)
                     PickerButton(symbol: "plus", label: "Add a color") {
                         let lead = colors.first ?? colorAt(wheel, 0, -0.5)
-                        picker.change {
-                            $0.colors += harmony(lead, colors.count + 1).dropFirst(colors.count)
-                        }
+                        let added = harmony(lead, colors.count + 1).dropFirst(colors.count)
+                        picker.change(
+                            { $0.colors += added },
+                            at: picker.points + added.map { pointOf(wheel, $0) })
                     }
                     .disabled(colors.count == maxColors)
                 }
@@ -255,8 +273,7 @@ struct Pad: View {
 
     /// The dot under a point, the last drawn first; the leading one elsewhere.
     private func dotUnder(_ location: CGPoint, _ size: CGSize, _ radius: CGFloat) -> Int {
-        for (index, hex) in picker.theme.colors.enumerated().reversed() {
-            let at = pointOf(picker.wheel, hex)
+        for (index, at) in picker.points.enumerated().reversed() {
             let center = CGPoint(x: size.width / 2 + at.x * radius, y: size.height / 2 + at.y * radius)
             if hypot(location.x - center.x, location.y - center.y) < 16 { return index }
         }
@@ -265,25 +282,29 @@ struct Pad: View {
 
     private func move(_ index: Int, _ at: CGPoint) {
         let wheel = picker.wheel
-        let colors = picker.theme.colors
-        guard index < colors.count else { return }
-        let color = colorAt(wheel, at.x, at.y)
+        var points = start.wrappedValue
+        guard index < points.count, points.count == picker.theme.colors.count else { return }
         if index > 0 {
-            picker.change { $0.colors[index] = color }
-            return
-        }
-        // The other dots turn and stretch with the leading one.
-        let from = pointOf(wheel, colors[0])
-        let turn = atan2(at.y, at.x) - atan2(from.y, from.x)
-        let length = hypot(from.x, from.y)
-        let stretch = length > 0.01 ? hypot(at.x, at.y) / length : 1
-        let others = colors.dropFirst().map { hex in
-            let p = pointOf(wheel, hex)
+            points[index] = at
+        } else {
+            // The other dots turn and stretch with the leading one, from where the drag found them.
+            let from = points[0]
+            let turn = atan2(at.y, at.x) - atan2(from.y, from.x)
+            let length = hypot(from.x, from.y)
+            let stretch = length > 0.01 ? hypot(at.x, at.y) / length : 1
             let (c, s) = (cos(turn), sin(turn))
-            return colorAt(wheel, (p.x * c - p.y * s) * stretch, (p.x * s + p.y * c) * stretch)
+            points = [at] + points.dropFirst().map { p in
+                onPad(CGPoint(x: (p.x * c - p.y * s) * stretch, y: (p.x * s + p.y * c) * stretch))
+            }
         }
-        picker.change { $0.colors = [color] + others }
+        picker.change({ $0.colors = points.map { colorAt(wheel, $0.x, $0.y) } }, at: points)
     }
+}
+
+/// A point of the pad, from its center, brought within its edge.
+func onPad(_ point: CGPoint) -> CGPoint {
+    let length = hypot(point.x, point.y)
+    return length > edge ? CGPoint(x: point.x / length * edge, y: point.y / length * edge) : point
 }
 
 /// The pad's grid of faint dots.
