@@ -27,6 +27,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, LocalKey};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -137,27 +138,11 @@ const TOOLBAR_HEIGHT: f32 = 40.0;
 const START_URL: &str = "https://www.wikipedia.org/";
 
 thread_local! {
-    static WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
-    /// Beside the card, at the window's left edge. It must not reach under the card: a web view
-    /// below the overlays receives no real mouse event on macOS, only synthesized ones.
-    static SIDEBAR: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
-    /// Holds the content views, inset from the window's edges and from the sidebar. An overlay, as
-    /// macOS only rounds the corners of a window of its own. Without a selected tab, its own
-    /// color paints an empty Space's panel.
-    static CARD: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
     /// Each profile's web data, `None` while CEF initializes it (create_profile_context).
     static CONTEXTS: RefCell<HashMap<ProfileId, Option<RequestContext>>> = RefCell::default();
     /// The live page of each tab shown since it opened, hidden while another tab is shown:
     /// switching back to it does not load it again.
     static PAGES: RefCell<HashMap<NodeId, Live>> = RefCell::default();
-    /// The tab whose page the window shows.
-    static SHOWN: Cell<Option<NodeId>> = const { Cell::new(None) };
-    /// Shown above the page, to open tabs.
-    static OVERLAY_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
-    static OVERLAY: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
-    /// A second sidebar, shown above the page while the sidebar is hidden.
-    static REVEAL_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
-    static REVEAL: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
     /// The import assistant, shown above the page; created the first time it is shown, as most
     /// sessions never import.
     static IMPORT_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
@@ -168,8 +153,6 @@ thread_local! {
     static NEXT_LITTLE: Cell<u32> = const { Cell::new(0) };
     /// Links other apps asked to open before the main window existed.
     static PENDING_LINKS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
-    /// The bar above the page, at the card's top while it is shown (View › Show Toolbar).
-    static TOOLBAR_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     /// The settings, in a window of their own while it is open.
     static SETTINGS_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static SETTINGS_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
@@ -191,29 +174,6 @@ thread_local! {
     static REVIVED: RefCell<HashSet<NodeId>> = RefCell::default();
     /// The tab whose page is being made, as its view joins the card.
     static MAKING: Cell<Option<NodeId>> = const { Cell::new(None) };
-    /// The find bar, at the card's top right corner; created the first time it is shown.
-    static FIND_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
-    static FIND: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
-    /// The text last searched for, which ⌘G searches again.
-    static FIND_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
-    /// A Space's theme picker, beside the sidebar.
-    static THEME_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
-    static THEME: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
-    /// How far down the window the pointer was as the theme picker opened, which it centers on.
-    static THEME_AT: Cell<Option<i32>> = const { Cell::new(None) };
-    /// The site controls' panel, under their button.
-    static SITE_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
-    static SITE: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
-    /// Where the site controls' button was, in the window, when they were last shown: their
-    /// panel, and the extension popups opened from it, show under it.
-    static SITE_BUTTON: RefCell<Option<Rect>> = const { RefCell::new(None) };
-    static SITE_HEIGHT: Cell<i32> = const { Cell::new(1) };
-    /// Where the site controls' panel shows its extensions (Command::SiteTargets).
-    static SITE_TARGETS: RefCell<Vec<ExtensionTarget>> = const { RefCell::new(Vec::new()) };
-    /// When the panel last closed: a click on its button closes it, as the panel loses the focus,
-    /// and must not show it again.
-    static SITE_CLOSED: Cell<Option<Instant>> = const { Cell::new(None) };
-    static EXTENSION_POPUP: RefCell<Option<ExtensionPopup>> = const { RefCell::new(None) };
     /// The downloads, kept across sessions, most recent last.
     static DOWNLOADS: RefCell<Vec<Download>> = const { RefCell::new(Vec::new()) };
     /// What cancels each download in progress, by its id in the list.
@@ -224,29 +184,7 @@ thread_local! {
     static IMPORTING: Cell<bool> = const { Cell::new(false) };
     /// The first launch shows the import assistant with the window, instead of the start page.
     static IMPORT_AT_LAUNCH: Cell<bool> = const { Cell::new(false) };
-    static SIDEBAR_MODE: Cell<SidebarMode> = const { Cell::new(SidebarMode::Shown) };
-    /// The Command Bar edits the address over the docked sidebar's url bar.
-    static OVER_URL_BAR: Cell<bool> = const { Cell::new(false) };
-    /// The tabs selected last, the most recent first, which the tab switcher lists.
-    static RECENT: RefCell<Vec<NodeId>> = const { RefCell::new(Vec::new()) };
-    /// The tab switcher's tabs and the picked one's index, while ⌃ is held.
-    static SWITCH: RefCell<Option<(Vec<NodeId>, usize)>> = const { RefCell::new(None) };
-    /// The sidebar sent the window's colors, which show the card.
-    static COLORED: Cell<bool> = const { Cell::new(false) };
-    /// The window's colors last sent (set_window_colors): the card's, the grain and the gradient.
-    static WINDOW_COLORS: RefCell<Option<(u32, f64, Vec<u32>)>> = const { RefCell::new(None) };
-    /// The docked sidebar shows the library, wider (LIBRARY_WIDTH).
-    static LIBRARY: Cell<bool> = const { Cell::new(false) };
-    /// The library shows the Spaces, filling the window while it is shown, the card hidden.
-    static WIDE_LIBRARY: Cell<bool> = const { Cell::new(false) };
-    /// Under way while the sidebar moves to its mode.
-    static SLIDE: RefCell<Option<Slide>> = const { RefCell::new(None) };
-    /// The sidebar's draggable regions, which move the window while the sidebar is shown, with
-    /// the margins around the card.
-    static DRAG_REGIONS: RefCell<Vec<DraggableRegion>> = const { RefCell::new(Vec::new()) };
     static STATE: RefCell<UiState> = RefCell::default();
-    /// The tab shown last, which showing another marks as shown until then (Sidebar::touch).
-    static LAST_SHOWN: Cell<Option<NodeId>> = const { Cell::new(None) };
     /// Where the sidebar is saved, once the previous session is restored.
     static SESSION_FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     /// Each profile's history, opened on its first visit.
@@ -255,11 +193,149 @@ thread_local! {
     static OPEN_BROWSERS: Cell<usize> = const { Cell::new(0) };
     /// The window was asked to close, by quitting or its close button.
     static CLOSING: Cell<bool> = const { Cell::new(false) };
+    /// The window, the only one for now.
+    static WIN: Rc<Win> = Rc::new(Win::new());
+}
+
+/// What a window holds of its own: its views, the page it shows and its panels' state.
+struct Win {
+    window: RefCell<Option<Window>>,
+    /// Beside the card, at the window's left edge. It must not reach under the card: a web view
+    /// below the overlays receives no real mouse event on macOS, only synthesized ones.
+    sidebar: RefCell<Option<BrowserView>>,
+    /// Holds the content views, inset from the window's edges and from the sidebar. An overlay, as
+    /// macOS only rounds the corners of a window of its own. Without a selected tab, its own
+    /// color paints an empty Space's panel.
+    card: RefCell<Option<OverlayController>>,
+    /// The tab whose page the window shows.
+    shown: Cell<Option<NodeId>>,
+    /// Shown above the page, to open tabs.
+    overlay_view: RefCell<Option<BrowserView>>,
+    overlay: RefCell<Option<OverlayController>>,
+    /// A second sidebar, shown above the page while the sidebar is hidden.
+    reveal_view: RefCell<Option<BrowserView>>,
+    reveal: RefCell<Option<OverlayController>>,
+    /// The bar above the page, at the card's top while it is shown (View › Show Toolbar).
+    toolbar_view: RefCell<Option<BrowserView>>,
+    /// The find bar, at the card's top right corner; created the first time it is shown.
+    find_view: RefCell<Option<BrowserView>>,
+    find: RefCell<Option<OverlayController>>,
+    /// The text last searched for, which ⌘G searches again.
+    find_text: RefCell<String>,
+    /// A Space's theme picker, beside the sidebar.
+    theme_view: RefCell<Option<BrowserView>>,
+    theme: RefCell<Option<OverlayController>>,
+    /// How far down the window the pointer was as the theme picker opened, which it centers on.
+    theme_at: Cell<Option<i32>>,
+    /// The site controls' panel, under their button.
+    site_view: RefCell<Option<BrowserView>>,
+    site: RefCell<Option<OverlayController>>,
+    /// Where the site controls' button was, in the window, when they were last shown: their
+    /// panel, and the extension popups opened from it, show under it.
+    site_button: RefCell<Option<Rect>>,
+    site_height: Cell<i32>,
+    /// Where the site controls' panel shows its extensions (Command::SiteTargets).
+    site_targets: RefCell<Vec<ExtensionTarget>>,
+    /// When the panel last closed: a click on its button closes it, as the panel loses the focus,
+    /// and must not show it again.
+    site_closed: Cell<Option<Instant>>,
+    extension_popup: RefCell<Option<ExtensionPopup>>,
+    sidebar_mode: Cell<SidebarMode>,
+    /// The Command Bar edits the address over the docked sidebar's url bar.
+    over_url_bar: Cell<bool>,
+    /// The tabs selected last, the most recent first, which the tab switcher lists.
+    recent: RefCell<Vec<NodeId>>,
+    /// The tab switcher's tabs and the picked one's index, while ⌃ is held.
+    switch: RefCell<Option<(Vec<NodeId>, usize)>>,
+    /// The sidebar sent the window's colors, which show the card.
+    colored: Cell<bool>,
+    /// The window's colors last sent (set_window_colors): the card's, the grain and the gradient.
+    window_colors: RefCell<Option<(u32, f64, Vec<u32>)>>,
+    /// The docked sidebar shows the library, wider (LIBRARY_WIDTH).
+    library: Cell<bool>,
+    /// The library shows the Spaces, filling the window while it is shown, the card hidden.
+    wide_library: Cell<bool>,
+    /// Under way while the sidebar moves to its mode.
+    slide: RefCell<Option<Slide>>,
+    /// The sidebar's draggable regions, which move the window while the sidebar is shown, with
+    /// the margins around the card.
+    drag_regions: RefCell<Vec<DraggableRegion>>,
+    /// The tab shown last, which showing another marks as shown until then (Sidebar::touch).
+    last_shown: Cell<Option<NodeId>>,
     #[cfg(target_os = "macos")]
-    static SWIPE: RefCell<crate::swipe::Tracker> = RefCell::default();
+    swipe: RefCell<crate::swipe::Tracker>,
     /// Where the docked sidebar's rows, Space header and pinned extensions are, then the revealed
     /// one's, then the pinned extensions in the bar above the page.
-    static MENU_TARGETS: RefCell<[Vec<HitTarget>; 3]> = RefCell::default();
+    menu_targets: RefCell<[Vec<HitTarget>; 3]>,
+}
+
+impl Win {
+    fn new() -> Self {
+        Self {
+            window: RefCell::new(None),
+            sidebar: RefCell::new(None),
+            card: RefCell::new(None),
+            shown: Cell::new(None),
+            overlay_view: RefCell::new(None),
+            overlay: RefCell::new(None),
+            reveal_view: RefCell::new(None),
+            reveal: RefCell::new(None),
+            toolbar_view: RefCell::new(None),
+            find_view: RefCell::new(None),
+            find: RefCell::new(None),
+            find_text: RefCell::new(String::new()),
+            theme_view: RefCell::new(None),
+            theme: RefCell::new(None),
+            theme_at: Cell::new(None),
+            site_view: RefCell::new(None),
+            site: RefCell::new(None),
+            site_button: RefCell::new(None),
+            site_height: Cell::new(1),
+            site_targets: RefCell::new(Vec::new()),
+            site_closed: Cell::new(None),
+            extension_popup: RefCell::new(None),
+            sidebar_mode: Cell::new(SidebarMode::Shown),
+            over_url_bar: Cell::new(false),
+            recent: RefCell::new(Vec::new()),
+            switch: RefCell::new(None),
+            colored: Cell::new(false),
+            window_colors: RefCell::new(None),
+            library: Cell::new(false),
+            wide_library: Cell::new(false),
+            slide: RefCell::new(None),
+            drag_regions: RefCell::new(Vec::new()),
+            last_shown: Cell::new(None),
+            #[cfg(target_os = "macos")]
+            swipe: RefCell::default(),
+            menu_targets: RefCell::default(),
+        }
+    }
+}
+
+/// The window commands and events are about.
+fn win() -> Rc<Win> {
+    WIN.with(Rc::clone)
+}
+
+/// LocalKey's borrowing helpers, for a window's cells.
+trait WithBorrow<T> {
+    fn with_borrow<R>(&self, f: impl FnOnce(&T) -> R) -> R;
+    fn with_borrow_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R;
+    fn set(&self, value: T);
+}
+
+impl<T> WithBorrow<T> for RefCell<T> {
+    fn with_borrow<R>(&self, f: impl FnOnce(&T) -> R) -> R {
+        f(&self.borrow())
+    }
+
+    fn with_borrow_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
+        f(&mut self.borrow_mut())
+    }
+
+    fn set(&self, value: T) {
+        *self.borrow_mut() = value;
+    }
 }
 
 /// The sidebar sits beside the page, or is hidden: then a strip at the window's left edge
@@ -325,10 +401,11 @@ impl SidebarMode {
 /// The docked sidebar's width: wider for the library, the window's for its Spaces.
 fn docked_width() -> i32 {
     if fills_window() {
-        WINDOW
+        win()
+            .window
             .with_borrow(|window| window.as_ref().map(|window| window.size().width))
             .unwrap_or(LIBRARY_WIDTH)
-    } else if LIBRARY.get() {
+    } else if win().library.get() {
         LIBRARY_WIDTH
     } else {
         SIDEBAR_WIDTH
@@ -337,7 +414,9 @@ fn docked_width() -> i32 {
 
 /// The docked library shows the Spaces, over the whole window: the card is hidden.
 fn fills_window() -> bool {
-    LIBRARY.get() && WIDE_LIBRARY.get() && SIDEBAR_MODE.get() == SidebarMode::Shown
+    win().library.get()
+        && win().wide_library.get()
+        && win().sidebar_mode.get() == SidebarMode::Shown
 }
 
 /// Where the card and the revealed sidebar stand.
@@ -602,15 +681,17 @@ fn update_sidebar<R>(change: impl FnOnce(&mut Sidebar) -> R) -> R {
 fn send_state() {
     prune_pages();
     // The site controls' panel shows the extensions as they are, while it is open too.
-    let open = SITE.with_borrow(|site| site.as_ref().is_some_and(|site| site.is_visible() == 1));
+    let open = win()
+        .site
+        .with_borrow(|site| site.as_ref().is_some_and(|site| site.is_visible() == 1));
     if let Some(url) = selected_url().filter(|_| open) {
         send_site_controls(&url);
     }
     let json = STATE.with_borrow(UiState::to_json);
     let event = format!(r#"new CustomEvent("arbalete:state", {{ detail: {json} }})"#);
-    dispatch(&SIDEBAR, &event);
-    dispatch(&REVEAL_VIEW, &event);
-    dispatch(&TOOLBAR_VIEW, &event);
+    dispatch(&win().sidebar, &event);
+    dispatch(&win().reveal_view, &event);
+    dispatch(&win().toolbar_view, &event);
     // Extensions see the displayed Space's selected tab as their profile's active tab.
     let active = STATE.with_borrow(|state| {
         let sidebar = &state.sidebar;
@@ -639,7 +720,7 @@ fn toggle_toolbar() {
         settings.show_toolbar
     });
     save_settings();
-    if let Some(toolbar) = TOOLBAR_VIEW.with_borrow(Clone::clone) {
+    if let Some(toolbar) = win().toolbar_view.with_borrow(Clone::clone) {
         toolbar.set_visible(shown.into());
     }
     if let Some(card) = card_panel() {
@@ -664,8 +745,8 @@ fn send_downloads() {
     update_media_files();
     let json = DOWNLOADS.with_borrow(|downloads| serde_json::to_string(downloads).expect("JSON"));
     let event = format!(r#"new CustomEvent("arbalete:downloads", {{ detail: {json} }})"#);
-    dispatch(&SIDEBAR, &event);
-    dispatch(&REVEAL_VIEW, &event);
+    dispatch(&win().sidebar, &event);
+    dispatch(&win().reveal_view, &event);
 }
 
 /// The images and videos downloaded and still there, which the library's Media section shows:
@@ -696,19 +777,23 @@ fn media_file(path: &str) -> Option<(PathBuf, &'static str)> {
 
 /// Opens the library on its downloads, showing the sidebar first if it is hidden.
 fn show_downloads() {
-    if SIDEBAR_MODE.get() == SidebarMode::Hidden {
+    if win().sidebar_mode.get() == SidebarMode::Hidden {
         set_sidebar(SidebarMode::Shown);
     }
-    let view = shown_sidebar();
+    let current = win();
+    let view = shown_sidebar(&current);
     dispatch(view, r#"new Event("arbalete:show-downloads")"#);
 }
 
 /// Opens the library on the section it showed last, showing the sidebar first if it is hidden.
 fn show_library_page() {
-    if SIDEBAR_MODE.get() == SidebarMode::Hidden {
+    if win().sidebar_mode.get() == SidebarMode::Hidden {
         set_sidebar(SidebarMode::Shown);
     }
-    dispatch(shown_sidebar(), r#"new Event("arbalete:open-library")"#);
+    dispatch(
+        shown_sidebar(&win()),
+        r#"new Event("arbalete:open-library")"#,
+    );
 }
 
 /// Puts a tab first among the tabs selected last, which the tab switcher lists.
@@ -731,9 +816,10 @@ fn step(index: usize, count: usize, forward: bool) -> usize {
 /// and picks the one before the shown tab; each ⌃⇥ more picks the next one, ⌃⇧⇥ the one before.
 /// Releasing ⌃ shows the picked tab (end_tab_switch).
 fn switch_tab(forward: bool) {
-    let switch = SWITCH.take().or_else(|| {
+    let switch = win().switch.take().or_else(|| {
         let tabs: Vec<_> = STATE.with_borrow_mut(|state| {
-            RECENT
+            win()
+                .recent
                 .with_borrow(Clone::clone)
                 .into_iter()
                 .filter(|&id| state.sidebar.tab_mut(id).is_some())
@@ -757,23 +843,23 @@ fn switch_tab(forward: bool) {
     });
     let detail = json!({ "tabs": rows, "picked": index });
     dispatch(
-        &OVERLAY_VIEW,
+        &win().overlay_view,
         &format!(r#"new CustomEvent("arbalete:switch", {{ detail: {detail} }})"#),
     );
-    if let Some(overlay) = OVERLAY.with_borrow(Clone::clone)
+    if let Some(overlay) = win().overlay.with_borrow(Clone::clone)
         && overlay.is_visible() == 0
     {
-        OVER_URL_BAR.set(false);
+        win().over_url_bar.set(false);
         place_overlay(OVERLAY_ROW);
         overlay.set_visible(1);
         round_overlay();
     }
-    SWITCH.set(Some((tabs, index)));
+    win().switch.set(Some((tabs, index)));
 }
 
 /// Shows the tab picked in the switcher, if it is shown.
 fn end_tab_switch() {
-    if let Some((tabs, index)) = SWITCH.take() {
+    if let Some((tabs, index)) = win().switch.take() {
         show_overlay(false);
         select_tab(tabs[index]);
     }
@@ -817,7 +903,7 @@ fn download_command(action: DownloadAction, id: u32) {
 }
 
 /// Dispatches a DOM event, given as JavaScript, in one of the UI's views.
-fn dispatch(view: &'static LocalKey<RefCell<Option<BrowserView>>>, event: &str) {
+fn dispatch(view: &RefCell<Option<BrowserView>>, event: &str) {
     #[cfg(target_os = "macos")]
     if let Some(surface) = native_surface(view) {
         crate::native::event(surface, event);
@@ -832,16 +918,19 @@ fn dispatch(view: &'static LocalKey<RefCell<Option<BrowserView>>>, event: &str) 
 /// revealed sidebar's events also go to the docked one's (shown_sidebar), which the native
 /// sidebar stands for in every mode.
 #[cfg(target_os = "macos")]
-fn native_surface(view: &'static LocalKey<RefCell<Option<BrowserView>>>) -> Option<&'static str> {
+fn native_surface(view: &RefCell<Option<BrowserView>>) -> Option<&'static str> {
+    let current = win();
+    let global =
+        |key: &'static LocalKey<RefCell<Option<BrowserView>>>| key.with(std::ptr::from_ref);
     [
-        (&SIDEBAR, "sidebar"),
-        (&OVERLAY_VIEW, "overlay"),
-        (&FIND_VIEW, "find"),
-        (&SITE_VIEW, "site"),
-        (&THEME_VIEW, "theme"),
-        (&TOOLBAR_VIEW, "toolbar"),
-        (&SETTINGS_VIEW, "settings"),
-        (&IMPORT_VIEW, "import"),
+        (std::ptr::from_ref(&current.sidebar), "sidebar"),
+        (std::ptr::from_ref(&current.overlay_view), "overlay"),
+        (std::ptr::from_ref(&current.find_view), "find"),
+        (std::ptr::from_ref(&current.site_view), "site"),
+        (std::ptr::from_ref(&current.theme_view), "theme"),
+        (std::ptr::from_ref(&current.toolbar_view), "toolbar"),
+        (global(&SETTINGS_VIEW), "settings"),
+        (global(&IMPORT_VIEW), "import"),
     ]
     .into_iter()
     .find(|(native, _)| std::ptr::eq(view, *native))
@@ -877,15 +966,15 @@ fn edit_url() {
 /// Shows the Command Bar, or hides it. Holding a tab's address and icon, it edits the address,
 /// over the docked sidebar's url bar; empty, it opens a tab, centered on the window.
 fn open_overlay(visible: bool, tab: Option<(String, Option<String>)>) {
-    let Some(overlay) = OVERLAY.with_borrow(Clone::clone) else {
+    let Some(overlay) = win().overlay.with_borrow(Clone::clone) else {
         return;
     };
     if visible {
         // The sidebar shows its url bar while docked, unless the bar above the page holds it.
         let over_url_bar = tab.is_some()
-            && SIDEBAR_MODE.get() == SidebarMode::Shown
+            && win().sidebar_mode.get() == SidebarMode::Shown
             && !app_settings().show_toolbar;
-        OVER_URL_BAR.set(over_url_bar);
+        win().over_url_bar.set(over_url_bar);
         place_overlay(OVERLAY_ROW);
         let (url, favicon) = tab.unzip();
         let engine = STATE.with_borrow(|state| {
@@ -900,7 +989,7 @@ fn open_overlay(visible: bool, tab: Option<(String, Option<String>)>) {
         let search = json!({ "name": engine.name(), "url": engine.url() });
         let detail = json!({ "url": url, "favicon": favicon.flatten(), "search": search });
         dispatch(
-            &OVERLAY_VIEW,
+            &win().overlay_view,
             &format!(r#"new CustomEvent("arbalete:show", {{ detail: {detail} }})"#),
         );
     }
@@ -924,22 +1013,26 @@ fn round_overlay() {
 /// and layout: the overlays above the page and the bar at the card's top in toolbar mode.
 #[cfg(target_os = "macos")]
 fn sync_native_surfaces() {
+    let current = win();
     for (view, overlay) in [
-        (&OVERLAY_VIEW, &OVERLAY),
-        (&FIND_VIEW, &FIND),
-        (&SITE_VIEW, &SITE),
-        (&THEME_VIEW, &THEME),
-        (&IMPORT_VIEW, &IMPORT),
+        (&current.overlay_view, &current.overlay),
+        (&current.find_view, &current.find),
+        (&current.site_view, &current.site),
+        (&current.theme_view, &current.theme),
     ] {
         if let Some(overlay) = overlay.with_borrow(Clone::clone) {
             mirror(view, &overlay);
         }
     }
-    let card =
-        CARD.with_borrow(|card| card.as_ref().map(|card| (card.is_visible(), card.bounds())));
+    if let Some(overlay) = IMPORT.with_borrow(Clone::clone) {
+        IMPORT_VIEW.with(|view| mirror(view, &overlay));
+    }
+    let card = win()
+        .card
+        .with_borrow(|card| card.as_ref().map(|card| (card.is_visible(), card.bounds())));
     if let Some((visible, card)) = card {
         let shown =
-            visible == 1 && app_settings().show_toolbar && SLIDE.with_borrow(Option::is_none);
+            visible == 1 && app_settings().show_toolbar && win().slide.with_borrow(Option::is_none);
         let bar = Rect {
             height: PAGE_TOOLBAR_HEIGHT,
             ..card
@@ -951,7 +1044,7 @@ fn sync_native_surfaces() {
 /// Shows a native surface where the app shows its web counterpart's overlay, which stays out of
 /// sight and lets clicks through to it.
 #[cfg(target_os = "macos")]
-fn mirror(view: &'static LocalKey<RefCell<Option<BrowserView>>>, overlay: &OverlayController) {
+fn mirror(view: &RefCell<Option<BrowserView>>, overlay: &OverlayController) {
     if let Some(host) = view.with_borrow(|view| view.as_ref()?.browser()?.host()) {
         crate::mac::hide_window(host.window_handle());
     }
@@ -963,12 +1056,14 @@ fn mirror(view: &'static LocalKey<RefCell<Option<BrowserView>>>, overlay: &Overl
 /// Centers the Command Bar on the window, or places it over the url bar, `height` tall.
 fn place_overlay(height: i32) {
     let (Some(overlay), Some(size)) = (
-        OVERLAY.with_borrow(Clone::clone),
-        WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())),
+        win().overlay.with_borrow(Clone::clone),
+        win()
+            .window
+            .with_borrow(|window| window.as_ref().map(|w| w.size())),
     ) else {
         return;
     };
-    let bounds = if OVER_URL_BAR.get() {
+    let bounds = if win().over_url_bar.get() {
         Rect {
             x: URL_BAR_LEFT,
             y: URL_BAR_TOP,
@@ -1029,7 +1124,7 @@ fn search_overlay(text: &str) {
         .collect();
     let detail = json!({ "text": text, "tabs": tabs, "pages": pages });
     dispatch(
-        &OVERLAY_VIEW,
+        &win().overlay_view,
         &format!(r#"new CustomEvent("arbalete:results", {{ detail: {detail} }})"#),
     );
     suggest(profile, text);
@@ -1080,7 +1175,7 @@ wrap_urlrequest_client! {
             let body = String::from_utf8_lossy(&self.body.borrow()).into_owned();
             let detail = json!({ "text": self.text, "suggestions": arbalete_core::search::suggestions(&body) });
             dispatch(
-                &OVERLAY_VIEW,
+                &win().overlay_view,
                 &format!(r#"new CustomEvent("arbalete:suggestions", {{ detail: {detail} }})"#),
             );
         }
@@ -1109,11 +1204,13 @@ fn navigate(url: &str) {
 /// once it gets there (settle). The card and the revealed sidebar slide natively, frame by frame;
 /// the revealed sidebar floats in and out in the compositor, which clips it by its own window.
 fn set_sidebar(mode: SidebarMode) {
-    let before = SIDEBAR_MODE.replace(mode);
+    let before = win().sidebar_mode.replace(mode);
     let (Some(size), Some(card), Some(reveal)) = (
-        WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())),
-        CARD.with_borrow(Clone::clone),
-        REVEAL.with_borrow(Clone::clone),
+        win()
+            .window
+            .with_borrow(|window| window.as_ref().map(|w| w.size())),
+        win().card.with_borrow(Clone::clone),
+        win().reveal.with_borrow(Clone::clone),
     ) else {
         return;
     };
@@ -1128,7 +1225,7 @@ fn set_sidebar(mode: SidebarMode) {
     let docked = mode == SidebarMode::Shown;
     if docked
         && !cfg!(target_os = "macos")
-        && let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone)
+        && let Some(sidebar) = win().sidebar.with_borrow(Clone::clone)
     {
         sidebar.set_visible(1);
     }
@@ -1136,7 +1233,7 @@ fn set_sidebar(mode: SidebarMode) {
         let slide = duration > 0 && matches!(before, SidebarMode::Shown | SidebarMode::Hidden);
         let detail = json!({ "docked": docked, "slide": slide });
         dispatch(
-            &SIDEBAR,
+            &win().sidebar,
             &format!(r#"new CustomEvent("arbalete:docked", {{ detail: {detail} }})"#),
         );
     }
@@ -1174,7 +1271,7 @@ fn set_sidebar(mode: SidebarMode) {
         duration: Duration::from_millis(duration.into()),
         docking: docked && floating(before),
     };
-    if SLIDE.replace(Some(slide)).is_none() {
+    if win().slide.replace(Some(slide)).is_none() {
         step_slide();
     }
 }
@@ -1206,7 +1303,7 @@ fn toggled(mode: SidebarMode, has_tab: bool) -> SidebarMode {
 /// Moves the card, and the revealed sidebar while it docks, one frame further, until the slide
 /// ends.
 fn step_slide() {
-    let Some((from, start, duration, docking)) = SLIDE.with_borrow(|slide| {
+    let Some((from, start, duration, docking)) = win().slide.with_borrow(|slide| {
         let slide = slide.as_ref()?;
         Some((
             slide.from.clone(),
@@ -1223,18 +1320,20 @@ fn step_slide() {
     } else {
         elapsed / duration.as_secs_f64()
     };
-    let size = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size()));
+    let size = win()
+        .window
+        .with_borrow(|window| window.as_ref().map(|w| w.size()));
     let (Some(size), true) = (size, progress < 1.0) else {
-        SLIDE.set(None);
+        win().slide.set(None);
         settle_sidebar();
         return;
     };
     let eased = crate::motion::ease_out(progress);
-    let to = SIDEBAR_MODE.get().layout(&size);
-    if let Some(card) = CARD.with_borrow(Clone::clone) {
+    let to = win().sidebar_mode.get().layout(&size);
+    if let Some(card) = win().card.with_borrow(Clone::clone) {
         card.set_bounds(Some(&lerp_rect(&from.card, &to.card, eased)));
     }
-    if docking && let Some(reveal) = REVEAL.with_borrow(Clone::clone) {
+    if docking && let Some(reveal) = win().reveal.with_borrow(Clone::clone) {
         reveal.set_bounds(Some(&lerp_rect(&from.reveal, &to.reveal, eased)));
         #[cfg(target_os = "macos")]
         place_native_sidebar();
@@ -1269,9 +1368,9 @@ fn lerp_rect(from: &Rect, to: &Rect, t: f64) -> Rect {
 
 /// Shows the views of the sidebar's mode where it wants them, and hides the others.
 fn settle_sidebar() {
-    let mode = SIDEBAR_MODE.get();
+    let mode = win().sidebar_mode.get();
     let docked = mode == SidebarMode::Shown;
-    if let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone) {
+    if let Some(sidebar) = win().sidebar.with_borrow(Clone::clone) {
         sidebar.set_visible((docked && !cfg!(target_os = "macos")).into());
     }
     place_card();
@@ -1284,7 +1383,7 @@ fn settle_sidebar() {
             let floating = matches!(mode, SidebarMode::Revealed | SidebarMode::Floating);
             crate::mac::float(view, if floating { 1.0 } else { 0.0 });
         }
-        if let Some(window) = WINDOW.with_borrow(Clone::clone) {
+        if let Some(window) = win().window.with_borrow(Clone::clone) {
             crate::mac::sidebar_shown(window.window_handle(), docked);
         }
     }
@@ -1293,18 +1392,20 @@ fn settle_sidebar() {
 /// The revealed sidebar's window, once its browser is created.
 #[cfg(target_os = "macos")]
 fn reveal_window() -> Option<*mut std::ffi::c_void> {
-    let browser = REVEAL_VIEW.with_borrow(|view| view.as_ref()?.browser())?;
+    let browser = win()
+        .reveal_view
+        .with_borrow(|view| view.as_ref()?.browser())?;
     Some(browser.host()?.window_handle())
 }
 
 /// The sidebar the window shows: the docked one, or the one above the page.
-fn shown_sidebar() -> &'static LocalKey<RefCell<Option<BrowserView>>> {
+fn shown_sidebar(window: &Win) -> &RefCell<Option<BrowserView>> {
     if cfg!(target_os = "macos") {
-        return &SIDEBAR;
+        return &window.sidebar;
     }
-    match SIDEBAR_MODE.get() {
-        SidebarMode::Revealed | SidebarMode::Floating => &REVEAL_VIEW,
-        SidebarMode::Shown | SidebarMode::Hidden => &SIDEBAR,
+    match window.sidebar_mode.get() {
+        SidebarMode::Revealed | SidebarMode::Floating => &window.reveal_view,
+        SidebarMode::Shown | SidebarMode::Hidden => &window.sidebar,
     }
 }
 
@@ -1312,10 +1413,10 @@ fn shown_sidebar() -> &'static LocalKey<RefCell<Option<BrowserView>>> {
 /// docked. CEF applies the regions in order, a region that is not draggable cutting out of the
 /// ones before: the sidebar's come last, so its controls stay clickable.
 fn update_drag_regions() {
-    let Some(window) = WINDOW.with_borrow(Clone::clone) else {
+    let Some(window) = win().window.with_borrow(Clone::clone) else {
         return;
     };
-    let mode = SIDEBAR_MODE.get();
+    let mode = win().sidebar_mode.get();
     let size = window.size();
     let mut regions = if fills_window() {
         Vec::new()
@@ -1323,7 +1424,7 @@ fn update_drag_regions() {
         margin_regions(&size, &mode.layout(&size).card, mode.margins_start())
     };
     if mode == SidebarMode::Shown {
-        regions.extend(DRAG_REGIONS.with_borrow(Clone::clone));
+        regions.extend(win().drag_regions.with_borrow(Clone::clone));
     }
     window.set_draggable_regions(Some(&regions));
 }
@@ -1354,18 +1455,20 @@ fn margin_regions(size: &Size, card: &Rect, start: i32) -> Vec<DraggableRegion> 
 
 /// Insets the card from the window's edges, and from the sidebar while it is docked or floating.
 fn place_card() {
-    let Some(card) = CARD.with_borrow(Clone::clone) else {
+    let Some(card) = win().card.with_borrow(Clone::clone) else {
         return;
     };
-    let size = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size()));
+    let size = win()
+        .window
+        .with_borrow(|window| window.as_ref().map(|w| w.size()));
     let Some(size) = size else { return };
     if fills_window() {
         card.set_visible(0);
         return;
     }
-    card.set_bounds(Some(&SIDEBAR_MODE.get().layout(&size).card));
+    card.set_bounds(Some(&win().sidebar_mode.get().layout(&size).card));
     // Once the sidebar sent the window's colors, which first show it.
-    if COLORED.get() {
+    if win().colored.get() {
         card.set_visible(1);
     }
 }
@@ -1374,7 +1477,7 @@ fn place_card() {
 /// towards the library; the sidebar gets its own width back first. The compositor moves the
 /// card's window content, clipped by the window: the page keeps its size.
 fn shift_card(offset: u32) {
-    if SIDEBAR_MODE.get() != SidebarMode::Shown {
+    if win().sidebar_mode.get() != SidebarMode::Shown {
         return;
     }
     widen_for_library(false);
@@ -1388,7 +1491,7 @@ fn shift_card(offset: u32) {
 
 /// Widens the docked sidebar for the library, the card resting beside it.
 fn show_library() {
-    if SIDEBAR_MODE.get() != SidebarMode::Shown {
+    if win().sidebar_mode.get() != SidebarMode::Shown {
         return;
     }
     widen_for_library(true);
@@ -1400,24 +1503,24 @@ fn show_library() {
 
 /// Fills the window with the library while it shows the Spaces, or rests it beside the card.
 fn widen_library(wide: bool) {
-    if WIDE_LIBRARY.replace(wide) != wide && LIBRARY.get() {
+    if win().wide_library.replace(wide) != wide && win().library.get() {
         relayout_library();
     }
 }
 
 /// Gives the docked sidebar the library's width, or its own, and places the card beside it.
 fn widen_for_library(library: bool) {
-    if LIBRARY.replace(library) != library {
+    if win().library.replace(library) != library {
         relayout_library();
     }
 }
 
 /// Sizes the docked sidebar and places the card after the library's width changed.
 fn relayout_library() {
-    if let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone) {
+    if let Some(sidebar) = win().sidebar.with_borrow(Clone::clone) {
         sidebar.invalidate_layout();
     }
-    if let Some(window) = WINDOW.with_borrow(Clone::clone) {
+    if let Some(window) = win().window.with_borrow(Clone::clone) {
         window.layout();
     }
     place_card();
@@ -1434,17 +1537,21 @@ fn card_window() -> Option<*mut std::ffi::c_void> {
 
 /// The panel holding the content views.
 fn card_panel() -> Option<Panel> {
-    CARD.with_borrow(|card| card.as_ref()?.contents_view()?.as_panel())
+    win()
+        .card
+        .with_borrow(|card| card.as_ref()?.contents_view()?.as_panel())
 }
 
 /// Places the revealed sidebar above the page, or the strip that reveals it along the window's
 /// left edge.
 fn place_reveal() {
-    let Some(reveal) = REVEAL.with_borrow(Clone::clone) else {
+    let Some(reveal) = win().reveal.with_borrow(Clone::clone) else {
         return;
     };
-    let mode = SIDEBAR_MODE.get();
-    let size = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size()));
+    let mode = win().sidebar_mode.get();
+    let size = win()
+        .window
+        .with_borrow(|window| window.as_ref().map(|w| w.size()));
     let Some(size) = size else { return };
     reveal.set_bounds(Some(&mode.layout(&size).reveal));
     reveal.set_visible((mode != SidebarMode::Shown && !cfg!(target_os = "macos")).into());
@@ -1457,12 +1564,14 @@ fn place_reveal() {
 #[cfg(target_os = "macos")]
 fn place_native_sidebar() {
     let (Some(size), Some(reveal)) = (
-        WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())),
-        REVEAL.with_borrow(Clone::clone),
+        win()
+            .window
+            .with_borrow(|window| window.as_ref().map(|w| w.size())),
+        win().reveal.with_borrow(Clone::clone),
     ) else {
         return;
     };
-    let mode = SIDEBAR_MODE.get();
+    let mode = win().sidebar_mode.get();
     let frame = match mode {
         SidebarMode::Shown => Some(Rect {
             x: 0,
@@ -1519,7 +1628,7 @@ fn is_untouched(sidebar: &Sidebar) -> bool {
 
 /// Shows the import assistant above the page, with the browsers found now.
 fn show_import() {
-    let Some(window) = WINDOW.with_borrow(Clone::clone) else {
+    let Some(window) = win().window.with_borrow(Clone::clone) else {
         return;
     };
     // It shows the import running.
@@ -1623,7 +1732,7 @@ struct Little {
 /// Opens a link another app asked to open, or an empty page from the menu, in a Little Arbalete
 /// window; links arriving before the main window exists wait for it.
 pub fn open_link(url: Option<String>) {
-    if WINDOW.with_borrow(Option::is_none) {
+    if win().window.with_borrow(Option::is_none) {
         PENDING_LINKS.with_borrow_mut(|links| links.extend(url));
         return;
     }
@@ -1670,7 +1779,7 @@ fn little_action(id: u32, action: LittleAction) {
             if let Some(window) = little_window(id) {
                 window.close();
             }
-            if let Some(window) = WINDOW.with_borrow(Clone::clone) {
+            if let Some(window) = win().window.with_borrow(Clone::clone) {
                 window.activate();
             }
         }
@@ -1771,7 +1880,7 @@ fn show_settings() {
 /// Runs `expression` in a page, `url`, of a profile, loaded hidden above the page for it, then
 /// closes the page a moment later: an extension removing itself never answers.
 pub fn run_in_hidden_page(profile: ProfileId, url: &str, expression: &str) {
-    let Some(window) = WINDOW.with_borrow(Clone::clone) else {
+    let Some(window) = win().window.with_borrow(Clone::clone) else {
         return;
     };
     let client = HiddenPageClient::new(expression.to_string());
@@ -1883,8 +1992,8 @@ fn send_archive() {
         serde_json::Value::from(items)
     });
     let event = format!(r#"new CustomEvent("arbalete:archive", {{ detail: {json} }})"#);
-    dispatch(&SIDEBAR, &event);
-    dispatch(&REVEAL_VIEW, &event);
+    dispatch(&win().sidebar, &event);
+    dispatch(&win().reveal_view, &event);
 }
 
 /// Opens an archived tab again, by its rank, in its Space, and shows it.
@@ -1904,7 +2013,9 @@ fn restore_archived(rank: usize) {
 /// The displayed Space's profile.
 /// The sidebar's browser, which outlives every page: the extensions' DevTools session runs in it.
 pub fn sidebar_host() -> Option<BrowserHost> {
-    SIDEBAR.with_borrow(|sidebar| sidebar.as_ref()?.browser()?.host())
+    win()
+        .sidebar
+        .with_borrow(|sidebar| sidebar.as_ref()?.browser()?.host())
 }
 
 pub fn displayed_profile() -> ProfileId {
@@ -1992,7 +2103,7 @@ wrap_window_delegate! {
             .expect("permission view");
             window.add_child_view(Some(&mut View::from(&view)));
             PERMISSION_WINDOW_HIDDEN.set(self.hidden);
-            let main = WINDOW.with_borrow(|w| w.as_ref().map(Window::bounds));
+            let main = win().window.with_borrow(|w| w.as_ref().map(Window::bounds));
             match main.filter(|_| self.hidden) {
                 // Its sheet shows at its top, over the main window's middle.
                 Some(main) => window.set_bounds(Some(&Rect {
@@ -2134,10 +2245,8 @@ fn send_settings() {
         .collect();
     let detail =
         json!({ "settings": settings, "engines": engines, "delays": delays, "profiles": profiles });
-    dispatch(
-        &SETTINGS_VIEW,
-        &format!(r#"new CustomEvent("arbalete:settings", {{ detail: {detail} }})"#),
-    );
+    let event = format!(r#"new CustomEvent("arbalete:settings", {{ detail: {detail} }})"#);
+    SETTINGS_VIEW.with(|view| dispatch(view, &event));
 }
 
 /// Turns an app setting on or off and saves it.
@@ -2189,18 +2298,20 @@ fn save_settings() {
 
 /// Shows the find bar, with the text last searched for selected.
 fn show_find() {
-    let Some(window) = WINDOW.with_borrow(Clone::clone) else {
+    let Some(window) = win().window.with_borrow(Clone::clone) else {
         return;
     };
     make_find(&window);
     place_find();
-    let Some(controller) = FIND.with_borrow(Clone::clone) else {
+    let Some(controller) = win().find.with_borrow(Clone::clone) else {
         return;
     };
     controller.set_visible(1);
-    let text = FIND_TEXT.with_borrow(|text| serde_json::to_string(text).expect("a string"));
+    let text = win()
+        .find_text
+        .with_borrow(|text| serde_json::to_string(text).expect("a string"));
     dispatch(
-        &FIND_VIEW,
+        &win().find_view,
         &format!(r#"new CustomEvent("arbalete:show", {{ detail: {text} }})"#),
     );
     // On macOS, the native surface takes the keyboard instead.
@@ -2213,26 +2324,29 @@ fn show_find() {
 /// Makes the find bar's overlay, once. On macOS, it is made with the window: made later, it would
 /// take the keyboard from the native find bar.
 fn make_find(window: &Window) {
-    if FIND.with_borrow(Option::is_none) {
+    if win().find.with_borrow(Option::is_none) {
         let view = browser_view(UiClient::new(), "about:blank", no_width, None);
         let controller = window
             .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
             .expect("find");
         controller.set_visible(0);
-        FIND_VIEW.set(Some(view));
-        FIND.set(Some(controller));
+        win().find_view.set(Some(view));
+        win().find.set(Some(controller));
     }
 }
 
 /// Keeps the find bar at the card's top right corner.
 fn place_find() {
-    let Some(controller) = FIND.with_borrow(Clone::clone) else {
+    let Some(controller) = win().find.with_borrow(Clone::clone) else {
         return;
     };
-    let Some(size) = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())) else {
+    let Some(size) = win()
+        .window
+        .with_borrow(|window| window.as_ref().map(|w| w.size()))
+    else {
         return;
     };
-    let card = SIDEBAR_MODE.get().layout(&size).card;
+    let card = win().sidebar_mode.get().layout(&size).card;
     let width = FIND_SIZE.width.min(card.width - 2 * FIND_MARGIN);
     controller.set_bounds(Some(&Rect {
         x: card.x + card.width - width - FIND_MARGIN,
@@ -2245,15 +2359,15 @@ fn place_find() {
 /// Finds text in the shown page; the same text again goes to the next match. `None` searches the
 /// last text again, or shows the find bar when there is none.
 fn find(browser: &Browser, text: Option<String>, forward: bool) {
-    let text = text.unwrap_or_else(|| FIND_TEXT.with_borrow(Clone::clone));
+    let text = text.unwrap_or_else(|| win().find_text.with_borrow(Clone::clone));
     if text.is_empty() {
         if let Some(host) = browser.host() {
             host.stop_finding(1);
         }
-        FIND_TEXT.with_borrow_mut(String::clear);
+        win().find_text.with_borrow_mut(String::clear);
         return show_find_if_hidden();
     }
-    let next = FIND_TEXT.replace(text.clone()) == text;
+    let next = win().find_text.replace(text.clone()) == text;
     if let Some(host) = browser.host() {
         host.find(
             Some(&CefString::from(text.as_str())),
@@ -2266,7 +2380,9 @@ fn find(browser: &Browser, text: Option<String>, forward: bool) {
 
 /// From ⌘G with nothing to search again.
 fn show_find_if_hidden() {
-    let hidden = FIND.with_borrow(|find| find.as_ref().is_none_or(|find| find.is_visible() == 0));
+    let hidden = win()
+        .find
+        .with_borrow(|find| find.as_ref().is_none_or(|find| find.is_visible() == 0));
     if hidden {
         show_find();
     }
@@ -2275,7 +2391,7 @@ fn show_find_if_hidden() {
 /// Hides the find bar and the page's highlights, keeping the active match selected and the text,
 /// which ⌘G searches again.
 fn hide_find(browser: Option<&Browser>) {
-    if let Some(controller) = FIND.with_borrow(Clone::clone) {
+    if let Some(controller) = win().find.with_borrow(Clone::clone) {
         controller.set_visible(0);
     }
     if let Some(host) = browser.and_then(Browser::host) {
@@ -2319,9 +2435,12 @@ fn under(button: &Rect, size: &Size, window: &Size) -> Rect {
 /// its link and what the site keeps, and the profile's extensions. A click on the button while
 /// the panel shows closes it, as the panel losing the focus does.
 fn show_site_controls(button: Button) {
-    let shown = SITE.with_borrow(|site| site.as_ref().is_some_and(|site| site.is_visible() == 1));
+    let shown = win()
+        .site
+        .with_borrow(|site| site.as_ref().is_some_and(|site| site.is_visible() == 1));
     if shown
-        || SITE_CLOSED
+        || win()
+            .site_closed
             .get()
             .is_some_and(|at| at.elapsed() < Duration::from_millis(300))
     {
@@ -2331,11 +2450,11 @@ fn show_site_controls(button: Button) {
     let (Some(button), Some(url)) = (button_in_window(button), selected_url()) else {
         return;
     };
-    SITE_BUTTON.set(Some(button));
+    win().site_button.set(Some(button));
     extensions::reload(displayed_profile());
     send_site_controls(&url);
     place_site_controls();
-    let Some(controller) = SITE.with_borrow(Clone::clone) else {
+    let Some(controller) = win().site.with_borrow(Clone::clone) else {
         return;
     };
     controller.set_visible(1);
@@ -2359,16 +2478,16 @@ fn show_theme_picker(id: SpaceId) {
         let space = state.sidebar.spaces().iter().find(|space| space.id == id)?;
         Some(space.theme.clone())
     });
-    let (Some(theme), Some(controller)) = (theme, THEME.with_borrow(Clone::clone)) else {
+    let (Some(theme), Some(controller)) = (theme, win().theme.with_borrow(Clone::clone)) else {
         return;
     };
     let detail = json!({ "space": id, "theme": theme });
     dispatch(
-        &THEME_VIEW,
+        &win().theme_view,
         &format!(r#"new CustomEvent("arbalete:theme", {{ detail: {detail} }})"#),
     );
     #[cfg(target_os = "macos")]
-    THEME_AT.set(crate::mac::pointer_y());
+    win().theme_at.set(crate::mac::pointer_y());
     controller.set_visible(1);
     place_theme_picker();
     // On macOS, the native surface takes the keyboard instead.
@@ -2382,18 +2501,21 @@ fn show_theme_picker(id: SpaceId) {
 /// was, or else above the window's bottom edge; within the window.
 fn place_theme_picker() {
     let (Some(controller), Some(size)) = (
-        THEME.with_borrow(Clone::clone),
-        WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())),
+        win().theme.with_borrow(Clone::clone),
+        win()
+            .window
+            .with_borrow(|window| window.as_ref().map(|w| w.size())),
     ) else {
         return;
     };
     if controller.is_visible() == 0 {
         return;
     }
-    let card = SIDEBAR_MODE.get().layout(&size).card;
+    let card = win().sidebar_mode.get().layout(&size).card;
     let height = THEME_SIZE.height.min(size.height - 2 * CARD_MARGIN);
     let lowest = size.height - height - 2 * CARD_MARGIN;
-    let y = THEME_AT
+    let y = win()
+        .theme_at
         .get()
         .map_or(lowest, |at| (at - height / 2).clamp(CARD_MARGIN, lowest));
     controller.set_bounds(Some(&Rect {
@@ -2416,9 +2538,9 @@ fn button_in_window(button: Button) -> Option<Rect> {
         });
     }
     let source = match button.view {
-        ButtonView::Docked => &SIDEBAR,
-        ButtonView::Revealed => &REVEAL_VIEW,
-        ButtonView::Toolbar => &TOOLBAR_VIEW,
+        ButtonView::Docked => &win().sidebar,
+        ButtonView::Revealed => &win().reveal_view,
+        ButtonView::Toolbar => &win().toolbar_view,
     };
     let source = source.with_borrow(Clone::clone)?;
     let mut origin = Point {
@@ -2474,7 +2596,7 @@ fn send_site_controls(url: &str) {
     let awake = settings.awake_sites.iter().any(|awake| awake == site(url));
     let detail = json!({ "url": url, "site": site(url), "awake": awake, "suspends": settings.suspend_tabs, "extensions": extensions });
     dispatch(
-        &SITE_VIEW,
+        &win().site_view,
         &format!(r#"new CustomEvent("arbalete:show", {{ detail: {detail} }})"#),
     );
 }
@@ -2487,26 +2609,28 @@ fn selected_url() -> Option<String> {
 /// Puts the site controls' panel under their button, as tall as its page asks.
 fn place_site_controls() {
     let (Some(controller), Some(button), Some(window)) = (
-        SITE.with_borrow(Clone::clone),
-        SITE_BUTTON.with_borrow(Clone::clone),
-        WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())),
+        win().site.with_borrow(Clone::clone),
+        win().site_button.with_borrow(Clone::clone),
+        win()
+            .window
+            .with_borrow(|window| window.as_ref().map(|w| w.size())),
     ) else {
         return;
     };
     let size = Size {
         width: SITE_WIDTH,
-        height: SITE_HEIGHT.get(),
+        height: win().site_height.get(),
     };
     controller.set_bounds(Some(&under(&button, &size, &window)));
 }
 
 /// Hides the site controls' panel, if it shows.
 fn hide_site_controls() {
-    if let Some(controller) = SITE.with_borrow(Clone::clone)
+    if let Some(controller) = win().site.with_borrow(Clone::clone)
         && controller.is_visible() == 1
     {
         controller.set_visible(0);
-        SITE_CLOSED.set(Some(Instant::now()));
+        win().site_closed.set(Some(Instant::now()));
     }
 }
 
@@ -2517,7 +2641,9 @@ fn hide_site_controls() {
 /// for a sign-in code: its close button, Escape, the extension's button, or the extension close it.
 fn open_extension_popup(id: &str) {
     hide_site_controls();
-    let open = EXTENSION_POPUP.with_borrow(|popup| popup.as_ref().map(|popup| popup.id.clone()));
+    let open = win()
+        .extension_popup
+        .with_borrow(|popup| popup.as_ref().map(|popup| popup.id.clone()));
     close_extension_popup();
     if open.as_deref() == Some(id) {
         return;
@@ -2525,8 +2651,10 @@ fn open_extension_popup(id: &str) {
     let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
     let (Some(url), Some(main), Some(button)) = (
         extensions::popup_url(profile, id),
-        WINDOW.with_borrow(|window| window.as_ref().map(|w| w.bounds())),
-        SITE_BUTTON.with_borrow(Clone::clone),
+        win()
+            .window
+            .with_borrow(|window| window.as_ref().map(|w| w.bounds())),
+        win().site_button.with_borrow(Clone::clone),
     ) else {
         return;
     };
@@ -2560,7 +2688,9 @@ fn open_extension_options(id: &str) {
         return;
     }
     let key = format!("{id}/options");
-    let open = EXTENSION_POPUP.with_borrow(|popup| popup.as_ref().map(|popup| popup.id.clone()));
+    let open = win()
+        .extension_popup
+        .with_borrow(|popup| popup.as_ref().map(|popup| popup.id.clone()));
     close_extension_popup();
     if open != Some(key.clone()) {
         open_extension_window(profile, key, url, None);
@@ -2569,7 +2699,7 @@ fn open_extension_options(id: &str) {
 
 /// Shows the extension popup's window once its page has a size, under the button, with the focus.
 fn show_extension_popup(size: &Size) {
-    EXTENSION_POPUP.with_borrow(|popup| {
+    win().extension_popup.with_borrow(|popup| {
         let Some(popup) = popup else { return };
         // The window's bounds hold its title bar too.
         let bar = popup.window.bounds().height - popup.view.bounds().height;
@@ -2580,7 +2710,8 @@ fn show_extension_popup(size: &Size) {
                 button.y + button.height + PANEL_GAP,
             ),
             None => {
-                let main = WINDOW
+                let main = win()
+                    .window
                     .with_borrow(|w| w.as_ref().map(|w| w.bounds()))
                     .unwrap_or_default();
                 (
@@ -2602,7 +2733,9 @@ fn show_extension_popup(size: &Size) {
 
 /// Closes the extension popup's window, if one is open.
 pub fn close_extension_popup() {
-    if let Some(window) = EXTENSION_POPUP.with_borrow(|popup| Some(popup.as_ref()?.window.clone()))
+    if let Some(window) = win()
+        .extension_popup
+        .with_borrow(|popup| Some(popup.as_ref()?.window.clone()))
     {
         window.close();
     }
@@ -2631,11 +2764,11 @@ wrap_window_delegate! {
             let client = PopupClient::new(self.profile, self.url.clone());
             let view = browser_view(client, "about:blank", no_width, profile_context(self.profile).as_mut());
             window.add_child_view(Some(&mut View::from(&view)));
-            EXTENSION_POPUP.set(Some(ExtensionPopup { id: self.id.clone(), window, view, button: self.button.clone() }));
+            win().extension_popup.set(Some(ExtensionPopup { id: self.id.clone(), window, view, button: self.button.clone() }));
         }
 
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
-            EXTENSION_POPUP.set(None);
+            win().extension_popup.set(None);
             extensions::popup_closed();
         }
 
@@ -2681,7 +2814,7 @@ fn send_sources() {
     });
     let detail = json!({ "browsers": browsers, "profiles": profiles });
     let event = format!(r#"new CustomEvent("arbalete:sources", {{ detail: {detail} }})"#);
-    dispatch(&IMPORT_VIEW, &event);
+    IMPORT_VIEW.with(|view| dispatch(view, &event));
 }
 
 /// Makes the import assistant's overlay, once: with the window on macOS, like the find bar's.
@@ -3119,8 +3252,8 @@ pub fn perform(action: Action) {
 fn ask(event: &str, detail: &serde_json::Value) {
     focus_sidebar();
     let event = format!(r#"new CustomEvent("{event}", {{ detail: {detail} }})"#);
-    dispatch(&SIDEBAR, &event);
-    dispatch(&REVEAL_VIEW, &event);
+    dispatch(&win().sidebar, &event);
+    dispatch(&win().reveal_view, &event);
 }
 
 /// Pins or unpins a tab, or the selected one.
@@ -3149,10 +3282,10 @@ fn new_folder(parent: Option<NodeId>) {
 
 /// Gives the sidebar the keyboard focus, even from the page, whose card is a window of its own.
 fn focus_sidebar() {
-    if let Some(window) = WINDOW.with_borrow(Clone::clone) {
+    if let Some(window) = win().window.with_borrow(Clone::clone) {
         window.activate();
     }
-    if let Some(sidebar) = shown_sidebar().with_borrow(Clone::clone) {
+    if let Some(sidebar) = shown_sidebar(&win()).with_borrow(Clone::clone) {
         sidebar.request_focus();
     }
 }
@@ -3444,7 +3577,7 @@ fn load(url: &str) {
 
 /// The page the window shows.
 fn content() -> Option<BrowserView> {
-    let tab = SHOWN.get()?;
+    let tab = win().shown.get()?;
     PAGES.with_borrow(|pages| Some(pages.get(&tab)?.view.clone()))
 }
 
@@ -3486,12 +3619,12 @@ fn selected() -> Option<(ProfileId, String)> {
 fn show_selected() {
     let tab = STATE.with_borrow(|state| state.sidebar.displayed().selected);
     if let Some(tab) = tab {
-        RECENT.with_borrow_mut(|recent| remember(recent, tab));
+        win().recent.with_borrow_mut(|recent| remember(recent, tab));
     }
     // The tab left and the tab shown both showed until now, for the archive.
     let now = now().try_into().unwrap_or_default();
     STATE.with_borrow_mut(|state| {
-        for shown in [LAST_SHOWN.replace(tab), tab].into_iter().flatten() {
+        for shown in [win().last_shown.replace(tab), tab].into_iter().flatten() {
             state.sidebar.touch(shown, now);
         }
     });
@@ -3560,7 +3693,7 @@ fn content_created(profile: ProfileId, browser: Option<&mut Browser>) {
     cover_revived(Some(browser), true);
     let Some(tab) = page_tab(browser) else { return };
     mute_page(tab);
-    if SHOWN.get() == Some(tab) {
+    if win().shown.get() == Some(tab) {
         #[cfg(target_os = "macos")]
         if let Some(host) = browser.host() {
             crate::mac::round_card(host.window_handle());
@@ -3571,11 +3704,11 @@ fn content_created(profile: ProfileId, browser: Option<&mut Browser>) {
 
 /// Puts a tab's page in the window instead of the shown one, if any.
 fn show_content(tab: NodeId, view: &BrowserView) {
-    if SHOWN.get() == Some(tab) {
+    if win().shown.get() == Some(tab) {
         return;
     }
     hide_content();
-    SHOWN.set(Some(tab));
+    win().shown.set(Some(tab));
     let frozen = PAGES.with_borrow_mut(|pages| {
         let live = pages.get_mut(&tab)?;
         live.hidden_since = None;
@@ -3624,7 +3757,7 @@ fn hide_content() {
     if let Some(shown) = content() {
         shown.set_visible(0);
     }
-    if let Some(tab) = SHOWN.take() {
+    if let Some(tab) = win().shown.take() {
         PAGES.with_borrow_mut(|pages| {
             if let Some(live) = pages.get_mut(&tab) {
                 live.hidden_since = Some(now());
@@ -3661,8 +3794,8 @@ fn close_page(tab: NodeId) {
     let Some(live) = PAGES.with_borrow_mut(|pages| pages.remove(&tab)) else {
         return;
     };
-    if SHOWN.get() == Some(tab) {
-        SHOWN.set(None);
+    if win().shown.get() == Some(tab) {
+        win().shown.set(None);
     }
     live.view.set_visible(0);
     if let Some(host) = live.view.browser().and_then(|browser| browser.host()) {
@@ -3689,8 +3822,10 @@ wrap_task! {
 /// gradient's `colors` and `grain`, and the card behind its content views. The card shows from the
 /// sidebar's first colors on, so that it never flashes another color.
 fn set_window_colors(card_color: u32, grain: f64, colors: &[u32]) {
-    WINDOW_COLORS.set(Some((card_color, grain, colors.to_vec())));
-    if let Some(window) = WINDOW.with_borrow(Clone::clone) {
+    win()
+        .window_colors
+        .set(Some((card_color, grain, colors.to_vec())));
+    if let Some(window) = win().window.with_borrow(Clone::clone) {
         // The native interface tints the window itself, over the blurred desktop, which shows
         // through: transparent, but not 0, which CEF takes for its theme's color.
         #[cfg(target_os = "macos")]
@@ -3704,10 +3839,10 @@ fn set_window_colors(card_color: u32, grain: f64, colors: &[u32]) {
     if let Some(panel) = card_panel() {
         panel.set_background_color(card_color);
     }
-    COLORED.set(true);
+    win().colored.set(true);
     // Only when it changes: showing an overlay again puts it above the others, like the theme
     // picker, which would lose the focus and close.
-    if let Some(card) = CARD.with_borrow(Clone::clone) {
+    if let Some(card) = win().card.with_borrow(Clone::clone) {
         let visible = (!fills_window()).into();
         if card.is_visible() != visible {
             card.set_visible(visible);
@@ -3717,15 +3852,18 @@ fn set_window_colors(card_color: u32, grain: f64, colors: &[u32]) {
 
 /// Tells the sidebars the window's width, which their gradient spans like the window's.
 fn send_window_width() {
-    let Some(size) = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())) else {
+    let Some(size) = win()
+        .window
+        .with_borrow(|window| window.as_ref().map(|w| w.size()))
+    else {
         return;
     };
     let event = format!(
         r#"new CustomEvent("arbalete:window-width", {{ detail: {} }})"#,
         size.width
     );
-    dispatch(&SIDEBAR, &event);
-    dispatch(&REVEAL_VIEW, &event);
+    dispatch(&win().sidebar, &event);
+    dispatch(&win().reveal_view, &event);
 }
 
 /// Opens a profile's web data in its own directory, `Profile <id>`: Chromium only accepts profile
@@ -3803,16 +3941,19 @@ fn search_history(text: &str, limit: usize) {
         .collect();
     let detail = json!({ "text": text, "entries": entries });
     let event = format!(r#"new CustomEvent("arbalete:history", {{ detail: {detail} }})"#);
-    dispatch(&SIDEBAR, &event);
-    dispatch(&REVEAL_VIEW, &event);
+    dispatch(&win().sidebar, &event);
+    dispatch(&win().reveal_view, &event);
 }
 
 /// Opens the library on the history, showing the sidebar first if it is hidden.
 fn show_history() {
-    if SIDEBAR_MODE.get() == SidebarMode::Hidden {
+    if win().sidebar_mode.get() == SidebarMode::Hidden {
         set_sidebar(SidebarMode::Shown);
     }
-    dispatch(shown_sidebar(), r#"new Event("arbalete:show-history")"#);
+    dispatch(
+        shown_sidebar(&win()),
+        r#"new Event("arbalete:show-history")"#,
+    );
 }
 
 fn now() -> i64 {
@@ -3889,12 +4030,12 @@ fn run_command(command: Command) {
         (Command::Navigate(url), _) => navigate(&url),
         (Command::ToggleSidebar, _) => {
             let has_tab = STATE.with_borrow(|state| state.sidebar.displayed().selected.is_some());
-            set_sidebar(toggled(SIDEBAR_MODE.get(), has_tab));
+            set_sidebar(toggled(win().sidebar_mode.get(), has_tab));
         }
-        (Command::RevealSidebar, _) if SIDEBAR_MODE.get() == SidebarMode::Hidden => {
+        (Command::RevealSidebar, _) if win().sidebar_mode.get() == SidebarMode::Hidden => {
             set_sidebar(SidebarMode::Revealed);
         }
-        (Command::ConcealSidebar, _) if SIDEBAR_MODE.get() == SidebarMode::Revealed => {
+        (Command::ConcealSidebar, _) if win().sidebar_mode.get() == SidebarMode::Revealed => {
             set_sidebar(SidebarMode::Hidden);
         }
         (Command::RevealSidebar | Command::ConcealSidebar, _) => {}
@@ -3942,7 +4083,9 @@ fn run_command(command: Command) {
         }
         (Command::Menu(target), _) => show_menu(target),
         (Command::MenuTargets { view, targets }, _) => {
-            MENU_TARGETS.with_borrow_mut(|all| all[view as usize] = targets);
+            win()
+                .menu_targets
+                .with_borrow_mut(|all| all[view as usize] = targets);
         }
         (Command::ChooseMenu(target, item), _) => choose_menu(target, &item),
         // Like a selection, an unknown folder or a blank title from the UI is ignored.
@@ -4089,12 +4232,12 @@ fn run_command(command: Command) {
         (Command::HideSiteControls, _) => hide_site_controls(),
         (Command::ShowThemePicker(id), _) => show_theme_picker(id),
         (Command::HideThemePicker, _) => {
-            if let Some(controller) = THEME.with_borrow(Clone::clone) {
+            if let Some(controller) = win().theme.with_borrow(Clone::clone) {
                 controller.set_visible(0);
             }
         }
         (Command::SiteControlsHeight(height), _) => {
-            SITE_HEIGHT.set(height);
+            win().site_height.set(height);
             place_site_controls();
         }
         (Command::OpenExtensionPopup(id), _) => open_extension_popup(&id),
@@ -4103,15 +4246,18 @@ fn run_command(command: Command) {
         (Command::UpdateExtensions, _) => extensions::update(displayed_profile()),
         (Command::ManageExtensions, _) => {
             hide_site_controls();
-            if SIDEBAR_MODE.get() == SidebarMode::Hidden {
+            if win().sidebar_mode.get() == SidebarMode::Hidden {
                 set_sidebar(SidebarMode::Shown);
             }
-            dispatch(shown_sidebar(), r#"new Event("arbalete:show-extensions")"#);
+            dispatch(
+                shown_sidebar(&win()),
+                r#"new Event("arbalete:show-extensions")"#,
+            );
         }
         (Command::ReloadExtensions, _) => {
             extensions::reload(STATE.with_borrow(|state| state.sidebar.displayed().profile));
         }
-        (Command::SiteTargets(targets), _) => SITE_TARGETS.set(targets),
+        (Command::SiteTargets(targets), _) => win().site_targets.set(targets),
         (Command::RemoveExtension(id), _) => {
             let profile = displayed_profile();
             let extension = extensions::list(profile).into_iter().find(|e| e.id == id);
@@ -4139,7 +4285,7 @@ fn run_command(command: Command) {
         }
         (Command::OpenPinnedExtension(id, button), _) => {
             if let Some(button) = button_in_window(button) {
-                SITE_BUTTON.set(Some(button));
+                win().site_button.set(Some(button));
                 open_extension_popup(&id);
             }
         }
@@ -4161,7 +4307,7 @@ pub fn is_over_sidebar(x: f64) -> bool {
     if fills_window() {
         return false;
     }
-    let width = match SIDEBAR_MODE.get() {
+    let width = match win().sidebar_mode.get() {
         SidebarMode::Hidden => return false,
         SidebarMode::Shown => docked_width(),
         SidebarMode::Revealed | SidebarMode::Floating => SIDEBAR_WIDTH,
@@ -4173,9 +4319,10 @@ pub fn is_over_sidebar(x: f64) -> bool {
 #[cfg(target_os = "macos")]
 pub fn scroll(scroll: crate::swipe::Scroll) {
     use crate::swipe::Swipe;
-    match SWIPE.with_borrow_mut(|tracker| tracker.track(scroll)) {
+    match win().swipe.with_borrow_mut(|tracker| tracker.track(scroll)) {
         Some(Swipe::Gesture(gesture)) => {
-            let view = shown_sidebar();
+            let current = win();
+            let view = shown_sidebar(&current);
             let detail = serde_json::to_string(&gesture).expect("a gesture");
             dispatch(
                 view,
@@ -4196,7 +4343,7 @@ pub fn close() {
     for window in littles {
         window.close();
     }
-    if let Some(window) = WINDOW.with_borrow(Clone::clone) {
+    if let Some(window) = win().window.with_borrow(Clone::clone) {
         window.close();
     }
 }
@@ -4281,7 +4428,7 @@ wrap_window_delegate! {
         // CEF gives views its theme's colors again once it changes, as when the window shows:
         // the window's own, transparent on macOS, and the card's come back.
         fn on_theme_changed(&self, _view: Option<&mut View>) {
-            if let Some(colors) = WINDOW_COLORS.with_borrow(Clone::clone) {
+            if let Some(colors) = win().window_colors.with_borrow(Clone::clone) {
                 set_window_colors(colors.0, colors.1, &colors.2);
             }
         }
@@ -4289,7 +4436,7 @@ wrap_window_delegate! {
         // The card, the revealed sidebar and the margins follow the window's size.
         // A slide places them on its next step.
         fn on_layout_changed(&self, _view: Option<&mut View>, _new_bounds: Option<&Rect>) {
-            if SLIDE.with_borrow(Option::is_none) {
+            if win().slide.with_borrow(Option::is_none) {
                 place_card();
                 place_reveal();
                 place_find();
@@ -4324,7 +4471,7 @@ wrap_window_delegate! {
             let mut view = View::from(&sidebar);
             window.add_child_view(Some(&mut view));
             layout.set_flex_for_view(Some(&mut view), 0);
-            SIDEBAR.set(Some(sidebar));
+            win().sidebar.set(Some(sidebar));
             // The card holds the bar above the page, at the top while it is shown, then the
             // tabs' pages, one shown at a time in the rest.
             let card = panel_create(None).expect("card");
@@ -4344,44 +4491,44 @@ wrap_window_delegate! {
             let mut view = View::from(&toolbar);
             card.add_child_view(Some(&mut view));
             layout.set_flex_for_view(Some(&mut view), 0);
-            TOOLBAR_VIEW.set(Some(toolbar));
+            win().toolbar_view.set(Some(toolbar));
             #[cfg(target_os = "macos")]
             crate::mac::toolbar_shown(app_settings().show_toolbar);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&card)), DockingMode::CUSTOM, 1)
                 .expect("card");
             controller.set_visible(0);
-            CARD.set(Some(controller));
+            win().card.set(Some(controller));
             // Below the overlay, which is added after it.
             let reveal = browser_view(UiClient::new(), "about:blank", no_width, None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&reveal)), DockingMode::CUSTOM, 1)
                 .expect("reveal");
             controller.set_visible(0);
-            REVEAL_VIEW.set(Some(reveal));
-            REVEAL.set(Some(controller));
+            win().reveal_view.set(Some(reveal));
+            win().reveal.set(Some(controller));
             let overlay = browser_view(UiClient::new(), "about:blank", no_width, None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&overlay)), DockingMode::CUSTOM, 1)
                 .expect("overlay");
             controller.set_visible(0);
-            OVERLAY_VIEW.set(Some(overlay));
-            OVERLAY.set(Some(controller));
+            win().overlay_view.set(Some(overlay));
+            win().overlay.set(Some(controller));
             // Made with the window, so that its page listens by the first time it shows.
             let site = browser_view(UiClient::new(), "about:blank", no_width, None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&site)), DockingMode::CUSTOM, 1)
                 .expect("site controls");
             controller.set_visible(0);
-            SITE_VIEW.set(Some(site));
-            SITE.set(Some(controller));
+            win().site_view.set(Some(site));
+            win().site.set(Some(controller));
             let theme = browser_view(UiClient::new(), "about:blank", no_width, None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&theme)), DockingMode::CUSTOM, 1)
                 .expect("theme picker");
             controller.set_visible(0);
-            THEME_VIEW.set(Some(theme));
-            THEME.set(Some(controller));
+            win().theme_view.set(Some(theme));
+            win().theme.set(Some(controller));
             #[cfg(target_os = "macos")]
             {
                 make_find(&window);
@@ -4397,7 +4544,7 @@ wrap_window_delegate! {
                 send_state();
                 send_downloads();
             }
-            WINDOW.set(Some(window));
+            win().window.set(Some(window));
             place_card();
             // Only the selected tab loads: the others wait until they are selected.
             show_selected();
@@ -4412,10 +4559,12 @@ wrap_window_delegate! {
         /// Asks every browser to close; the window closes once they all can.
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
             CLOSING.set(true);
-            let mut views: Vec<_> = [&SIDEBAR, &REVEAL_VIEW, &OVERLAY_VIEW, &IMPORT_VIEW, &FIND_VIEW, &TOOLBAR_VIEW, &SITE_VIEW]
+            let current = win();
+            let mut views: Vec<_> = [&current.sidebar, &current.reveal_view, &current.overlay_view, &current.find_view, &current.toolbar_view, &current.site_view]
                 .into_iter()
                 .filter_map(|view| view.with_borrow(Clone::clone))
                 .collect();
+            views.extend(IMPORT_VIEW.with_borrow(Clone::clone));
             views.extend(PAGES.with_borrow(|pages| pages.values().map(|live| live.view.clone()).collect::<Vec<_>>()));
             let mut closed = 1;
             for view in views {
@@ -4786,11 +4935,14 @@ fn target_at(targets: &[HitTarget], x: f64, y: f64) -> Option<Target> {
 /// (Command::MenuTargets).
 #[cfg(target_os = "macos")]
 pub fn menu_at(x: f64, y: f64) -> bool {
-    let Some(size) = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())) else {
+    let Some(size) = win()
+        .window
+        .with_borrow(|window| window.as_ref().map(|w| w.size()))
+    else {
         return false;
     };
     // The site controls' panel, above the sidebar, shows its extensions' menu.
-    let panel = SITE.with_borrow(|site| {
+    let panel = win().site.with_borrow(|site| {
         let site = site.as_ref().filter(|site| site.is_visible() == 1)?;
         Some(site.bounds())
     });
@@ -4798,7 +4950,7 @@ pub fn menu_at(x: f64, y: f64) -> bool {
         let (x, y) = (x - f64::from(panel.x), y - f64::from(panel.y));
         if (0.0..f64::from(panel.width)).contains(&x) && (0.0..f64::from(panel.height)).contains(&y)
         {
-            let id = SITE_TARGETS.with_borrow(|targets| {
+            let id = win().site_targets.with_borrow(|targets| {
                 let target = targets.iter().find(|t| {
                     (t.x..t.x + t.width).contains(&x) && (t.y..t.y + t.height).contains(&y)
                 })?;
@@ -4809,12 +4961,15 @@ pub fn menu_at(x: f64, y: f64) -> bool {
         }
     }
     // The bar above the page, in toolbar mode, shows its pinned extensions' menus.
-    if let Some(toolbar) = TOOLBAR_VIEW
+    if let Some(toolbar) = win()
+        .toolbar_view
         .with_borrow(Clone::clone)
         .filter(|_| app_settings().show_toolbar)
     {
         // It lies in the card, an overlay of its own: its bounds are the card's.
-        let card = CARD.with_borrow(|card| card.as_ref().map(OverlayController::bounds));
+        let card = win()
+            .card
+            .with_borrow(|card| card.as_ref().map(OverlayController::bounds));
         let card = card.unwrap_or_default();
         let bounds = toolbar.bounds();
         let point = Point {
@@ -4829,20 +4984,22 @@ pub fn menu_at(x: f64, y: f64) -> bool {
                     f64::from(point.y),
                 )
             };
-            if let Some(target) = MENU_TARGETS.with_borrow(targets) {
+            if let Some(target) = win().menu_targets.with_borrow(targets) {
                 show_menu(target);
             }
             return true;
         }
     }
-    let Some((view, x, y)) = sidebar_point(SIDEBAR_MODE.get(), &size, x, y) else {
+    let Some((view, x, y)) = sidebar_point(win().sidebar_mode.get(), &size, x, y) else {
         return false;
     };
     let view = match view {
         SidebarView::Docked => ButtonView::Docked,
         SidebarView::Revealed => ButtonView::Revealed,
     };
-    let target = MENU_TARGETS.with_borrow(|targets| target_at(&targets[view as usize], x, y));
+    let target = win()
+        .menu_targets
+        .with_borrow(|targets| target_at(&targets[view as usize], x, y));
     if let Some(target) = target {
         show_menu(target);
     }
@@ -4882,11 +5039,11 @@ wrap_drag_handler! {
                 window.set_draggable_regions(regions);
                 return;
             }
-            let Some(mut sidebar) = SIDEBAR.with_borrow(|view| view.as_ref()?.browser()) else { return };
+            let Some(mut sidebar) = win().sidebar.with_borrow(|view| view.as_ref()?.browser()) else { return };
             if browser.is_none_or(|browser| browser.is_same(Some(&mut sidebar)) == 0) {
                 return;
             }
-            DRAG_REGIONS.set(regions.unwrap_or_default().to_vec());
+            win().drag_regions.set(regions.unwrap_or_default().to_vec());
             update_drag_regions();
         }
     }
@@ -5084,7 +5241,7 @@ wrap_find_handler! {
         fn on_find_result(&self, browser: Option<&mut Browser>, _identifier: i32, count: i32, _selection_rect: Option<&Rect>, active_match_ordinal: i32, final_update: i32) {
             if final_update == 1 && is_shown(browser) {
                 dispatch(
-                    &FIND_VIEW,
+                    &win().find_view,
                     &format!(r#"new CustomEvent("arbalete:found", {{ detail: {{ "count": {count}, "active": {active_match_ordinal} }} }})"#),
                 );
             }
@@ -5536,10 +5693,10 @@ fn favicon_file(path: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CARD_MARGIN, DraggableRegion, EDGE_WIDTH, FLOAT_INSET, LIBRARY, LIBRARY_WIDTH,
-        MemoryPressure, RECENT_TABS, Rect, SIDEBAR_WIDTH, SidebarMode, Size, UiState, favicon_file,
-        lerp_rect, margin_regions, origin, remember, site, slide_duration, step, suspend_delays,
-        toggled, ui_path,
+        CARD_MARGIN, DraggableRegion, EDGE_WIDTH, FLOAT_INSET, LIBRARY_WIDTH, MemoryPressure,
+        RECENT_TABS, Rect, SIDEBAR_WIDTH, SidebarMode, Size, UiState, favicon_file, lerp_rect,
+        margin_regions, origin, remember, site, slide_duration, step, suspend_delays, toggled,
+        ui_path, win,
     };
     use arbalete_core::sidebar::NodeId;
 
@@ -5661,11 +5818,11 @@ mod tests {
     #[test]
     fn the_card_rests_beside_the_wider_library_while_the_sidebar_is_docked() {
         let m = CARD_MARGIN;
-        LIBRARY.set(true);
+        win().library.set(true);
         let docked = rect(&SidebarMode::Shown.layout(&SIZE).card);
         let start = SidebarMode::Shown.margins_start();
         let hidden = rect(&SidebarMode::Hidden.layout(&SIZE).card);
-        LIBRARY.set(false);
+        win().library.set(false);
         assert_eq!(
             docked,
             (
@@ -5992,12 +6149,12 @@ mod tests {
             Some((SidebarView::Revealed, 2.0, 300.0))
         );
         assert_eq!(at(SidebarMode::Hidden, 10.0, 300.0), None);
-        LIBRARY.set(true);
+        win().library.set(true);
         assert_eq!(
             at(SidebarMode::Shown, 400.0, 300.0),
             Some((SidebarView::Docked, 400.0, 300.0))
         );
-        LIBRARY.set(false);
+        win().library.set(false);
     }
 
     #[test]
