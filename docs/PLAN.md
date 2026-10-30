@@ -365,8 +365,12 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
 ### Phase 7 — Resource saving
 - A live page per open tab, kept in the background while another shows: switching tabs no longer reloads the
   page. Done: a tab's page opens the first time it is shown and closes with the tab.
-- New Window (⌘N): several full windows, each with its sidebar. Both change how the window's state and its
-  pages are held, so they go together.
+- New Window (⌘N): several full windows, each with its sidebar. Done, like Arc's: a new window opens offset
+  from the focused one, on its Space without a tab, on the Command Bar; Spaces and tabs are shared, each window
+  keeping its displayed Space and selected tabs; the window in front takes the live page of its tab from
+  another, which shows the page's picture dimmed by its Space's color; closing a window hands its pages over to
+  another. Left: restoring every window of the previous session (only the focused one's Space and tabs come
+  back), and folders opened per window.
 - Freeze, then unload hidden tabs on timers; reload on selection from the saved URL, with the snapshot shown
   while loading. Done: a page hidden 5 minutes is frozen, then unloaded after an hour, unless it plays media;
   the shown page's picture, taken when it loads and every minute (a hidden page draws nothing to take one),
