@@ -113,15 +113,13 @@ final class Surface {
     }
 }
 
-@MainActor var surfaces: [String: Surface] = [:]
-
 @_cdecl("arbalete_ui_surface")
 public func placeSurface(
-    _ name: UnsafePointer<CChar>, _ shown: Bool, _ x: Double, _ y: Double, _ width: Double,
-    _ height: Double
+    _ id: UInt32, _ name: UnsafePointer<CChar>, _ shown: Bool, _ x: Double, _ y: Double,
+    _ width: Double, _ height: Double
 ) {
     MainActor.assumeIsolated {
-        surfaces[String(cString: name)]?.place(
+        nativeWindows[id]?.surfaces[String(cString: name)]?.place(
             shown, NSRect(x: x, y: y, width: width, height: height))
     }
 }

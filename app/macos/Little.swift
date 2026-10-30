@@ -109,7 +109,8 @@ struct LittleBarView: View {
 public func little(_ id: UInt32, _ handle: UnsafeMutableRawPointer?) {
     MainActor.assumeIsolated {
         let id = Int(id)
-        guard let handle, let app = model else {
+        // Its commands come from a window of the app's, any.
+        guard let handle, let app = nativeWindows.values.first?.model else {
             littles.removeValue(forKey: id)?.close()
             return
         }

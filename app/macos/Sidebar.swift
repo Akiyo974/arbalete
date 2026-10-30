@@ -818,10 +818,11 @@ func percentEncoded(_ value: String) -> String {
 }
 
 /// A view's frame, from the top left corner of the window it shows in, as a command's path gives
-/// it: in the main window, from its content's top left corner, as "x/y/width/height".
+/// it: in the main window, the one a panel like the sidebar belongs to, from its content's top
+/// left corner, as "x/y/width/height".
 @MainActor func inMainWindow(_ frame: CGRect) -> String {
     var rect = frame
-    if let from = NSApp.currentEvent?.window, let main = mainWindow, from != main,
+    if let from = NSApp.currentEvent?.window, let main = from.parent,
         let fromHeight = from.contentView?.frame.height,
         let mainHeight = main.contentView?.frame.height
     {

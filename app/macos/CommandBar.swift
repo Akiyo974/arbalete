@@ -159,6 +159,9 @@ final class CommandBar: ObservableObject {
     /// The field, to focus it once the bar shows.
     weak var field: NSTextField?
     private let app: AppModel
+
+    /// Its panel shows above its window's page.
+    var isShown: Bool { nativeWindows[app.window]?.surfaces["overlay"]?.isShown == true }
     private var height: CGFloat = 0
 
     init(app: AppModel) {
@@ -445,7 +448,7 @@ struct CommandField: NSViewRepresentable {
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {
-            if surfaces["overlay"]?.isShown == true { bar.hide() }
+            if bar.isShown { bar.hide() }
         }
 
         func control(

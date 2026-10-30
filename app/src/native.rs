@@ -6,9 +6,19 @@ use cef::Rect;
 use std::ffi::{CStr, CString, c_char, c_void};
 
 unsafe extern "C" {
-    fn arbalete_ui_attach(handle: *mut c_void, send: extern "C" fn(*const c_char));
-    fn arbalete_ui_event(surface: *const c_char, name: *const c_char, detail: *const c_char);
+    fn arbalete_ui_attach(
+        window: u32,
+        handle: *mut c_void,
+        send: extern "C" fn(u32, *const c_char),
+    );
+    fn arbalete_ui_event(
+        window: u32,
+        surface: *const c_char,
+        name: *const c_char,
+        detail: *const c_char,
+    );
     fn arbalete_ui_surface(
+        window: u32,
         name: *const c_char,
         shown: bool,
         x: f64,
@@ -20,6 +30,7 @@ unsafe extern "C" {
     fn arbalete_ui_little(id: u32, handle: *mut c_void);
     fn arbalete_ui_settings_focused() -> bool;
     fn arbalete_ui_place_sidebar(
+        window: u32,
         visible: bool,
         x: f64,
         y: f64,
@@ -30,15 +41,15 @@ unsafe extern "C" {
     );
 }
 
-/// Puts the native interface in the window `handle` is, or is in.
-pub fn attach(handle: *mut c_void) {
+/// Puts the native interface in the window `handle` is, or is in, which the app knows as `window`.
+pub fn attach(window: u32, handle: *mut c_void) {
     // SAFETY: CEF gives a live NSWindow or NSView, and `send` lives as long as the app.
-    unsafe { arbalete_ui_attach(handle, send) };
+    unsafe { arbalete_ui_attach(window, handle, send) };
 }
 
-/// Gives a surface of the native interface, like "sidebar", an event dispatched to its web
-/// counterpart: `new CustomEvent("name", { detail: … })` or `new Event("name")`.
-pub fn event(surface: &str, event: &str) {
+/// Gives a surface of the native interface of `window`, like "sidebar", an event dispatched to
+/// its web counterpart: `new CustomEvent("name", { detail: … })` or `new Event("name")`.
+pub fn event(window: u32, surface: &str, event: &str) {
     let Some((name, detail)) = parse_event(event) else {
         return;
     };
@@ -50,7 +61,7 @@ pub fn event(surface: &str, event: &str) {
         return;
     };
     // SAFETY: the strings outlive the call, which copies what it needs.
-    unsafe { arbalete_ui_event(surface.as_ptr(), name.as_ptr(), detail.as_ptr()) };
+    unsafe { arbalete_ui_event(window, surface.as_ptr(), name.as_ptr(), detail.as_ptr()) };
 }
 
 /// An event's name and its detail, `null` without one.
@@ -65,14 +76,15 @@ fn parse_event(event: &str) -> Option<(&str, &str)> {
     Some((name, detail))
 }
 
-/// Shows the sidebar at `frame`, in the window's points from its top left corner, floating above
-/// the page or docked; hides it without a frame. Revealed, it hides again once the pointer
+/// Shows the sidebar of `window` at `frame`, in its points from its top left corner, floating
+/// above the page or docked; hides it without a frame. Revealed, it hides again once the pointer
 /// leaves it.
-pub fn place(frame: Option<&Rect>, floating: bool, revealed: bool) {
+pub fn place(window: u32, frame: Option<&Rect>, floating: bool, revealed: bool) {
     let frame = frame.cloned().unwrap_or_default();
     // SAFETY: plain values.
     unsafe {
         arbalete_ui_place_sidebar(
+            window,
             frame.width > 0,
             frame.x.into(),
             frame.y.into(),
@@ -84,13 +96,14 @@ pub fn place(frame: Option<&Rect>, floating: bool, revealed: bool) {
     }
 }
 
-/// Shows a surface of the interface, like "overlay", at `frame` in the window's points from its
-/// top left corner, or hides it.
-pub fn surface(name: &str, shown: bool, frame: &Rect) {
+/// Shows a surface of the interface of `window`, like "overlay", at `frame` in its points from
+/// its top left corner, or hides it.
+pub fn surface(window: u32, name: &str, shown: bool, frame: &Rect) {
     let Ok(name) = CString::new(name) else { return };
     // SAFETY: the string outlives the call.
     unsafe {
         arbalete_ui_surface(
+            window,
             name.as_ptr(),
             shown,
             frame.x.into(),
@@ -120,12 +133,13 @@ pub fn settings_focused() -> bool {
     unsafe { arbalete_ui_settings_focused() }
 }
 
-/// Runs a command the interface sends, on the main thread, which is CEF's UI thread on macOS.
-extern "C" fn send(path: *const c_char) {
+/// Runs a command the interface of `window` sends, on the main thread, which is CEF's UI thread
+/// on macOS.
+extern "C" fn send(window: u32, path: *const c_char) {
     // SAFETY: the interface passes a string that lives during the call.
     let path = unsafe { CStr::from_ptr(path) };
     if let Some(command) = path.to_str().ok().and_then(Command::parse) {
-        crate::shell::run(command);
+        crate::shell::run_in(window, command);
     }
 }
 

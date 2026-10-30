@@ -193,12 +193,16 @@ thread_local! {
     static OPEN_BROWSERS: Cell<usize> = const { Cell::new(0) };
     /// The window was asked to close, by quitting or its close button.
     static CLOSING: Cell<bool> = const { Cell::new(false) };
-    /// The window, the only one for now.
-    static WIN: Rc<Win> = Rc::new(Win::new());
+    /// The open windows, the first one made with the app.
+    static WINDOWS: RefCell<Vec<Rc<Win>>> = RefCell::new(vec![Rc::new(Win::new(0))]);
+    /// The window commands and events are about, by its id.
+    static FOCUSED: Cell<u32> = const { Cell::new(0) };
 }
 
 /// What a window holds of its own: its views, the page it shows and its panels' state.
 struct Win {
+    /// What the native interface knows the window by.
+    id: u32,
     window: RefCell<Option<Window>>,
     /// Beside the card, at the window's left edge. It must not reach under the card: a web view
     /// below the overlays receives no real mouse event on macOS, only synthesized ones.
@@ -270,8 +274,9 @@ struct Win {
 }
 
 impl Win {
-    fn new() -> Self {
+    fn new(id: u32) -> Self {
         Self {
+            id,
             window: RefCell::new(None),
             sidebar: RefCell::new(None),
             card: RefCell::new(None),
@@ -314,7 +319,17 @@ impl Win {
 
 /// The window commands and events are about.
 fn win() -> Rc<Win> {
-    WIN.with(Rc::clone)
+    let id = FOCUSED.get();
+    WINDOWS
+        .with_borrow(|windows| windows.iter().find(|win| win.id == id).cloned())
+        .expect("the focused window")
+}
+
+/// Makes the window `id` the one commands and events are about.
+fn focus(id: u32) {
+    if WINDOWS.with_borrow(|windows| windows.iter().any(|win| win.id == id)) {
+        FOCUSED.set(id);
+    }
 }
 
 /// LocalKey's borrowing helpers, for a window's cells.
@@ -906,7 +921,7 @@ fn download_command(action: DownloadAction, id: u32) {
 fn dispatch(view: &RefCell<Option<BrowserView>>, event: &str) {
     #[cfg(target_os = "macos")]
     if let Some(surface) = native_surface(view) {
-        crate::native::event(surface, event);
+        crate::native::event(win().id, surface, event);
         return;
     }
     if let Some(view) = view.with_borrow(Clone::clone) {
@@ -1037,7 +1052,7 @@ fn sync_native_surfaces() {
             height: PAGE_TOOLBAR_HEIGHT,
             ..card
         };
-        crate::native::surface("toolbar", shown, &bar);
+        crate::native::surface(win().id, "toolbar", shown, &bar);
     }
 }
 
@@ -1049,7 +1064,12 @@ fn mirror(view: &RefCell<Option<BrowserView>>, overlay: &OverlayController) {
         crate::mac::hide_window(host.window_handle());
     }
     if let Some(surface) = native_surface(view) {
-        crate::native::surface(surface, overlay.is_visible() == 1, &overlay.bounds());
+        crate::native::surface(
+            win().id,
+            surface,
+            overlay.is_visible() == 1,
+            &overlay.bounds(),
+        );
     }
 }
 
@@ -1583,6 +1603,7 @@ fn place_native_sidebar() {
         SidebarMode::Revealed | SidebarMode::Floating => Some(reveal.bounds()),
     };
     crate::native::place(
+        win().id,
         frame.as_ref(),
         mode != SidebarMode::Shown,
         mode == SidebarMode::Revealed,
@@ -1828,7 +1849,7 @@ fn send_little(id: u32) {
         #[cfg(target_os = "macos")]
         {
             let _ = bar;
-            crate::native::event(&format!("little/{id}"), &event);
+            crate::native::event(win().id, &format!("little/{id}"), &event);
         }
         #[cfg(not(target_os = "macos"))]
         dispatch_in(&bar, &event);
@@ -3986,6 +4007,13 @@ pub fn post(command: Command) {
 }
 
 /// Runs a command from the UI or a menu, on the UI thread.
+/// Runs a command from the window `window`.
+#[cfg(target_os = "macos")]
+pub fn run_in(window: u32, command: Command) {
+    focus(window);
+    run(command);
+}
+
 pub fn run(command: Command) {
     run_command(command);
     #[cfg(target_os = "macos")]
@@ -4537,7 +4565,7 @@ wrap_window_delegate! {
             window.show();
             #[cfg(target_os = "macos")]
             {
-                crate::native::attach(window.window_handle());
+                crate::native::attach(win().id, window.window_handle());
                 // The native interface blurs the desktop through the window's transparent parts.
                 window.set_background_color(0x0000_0001);
                 // What the web sidebar asks for once ready (Command::Ready).

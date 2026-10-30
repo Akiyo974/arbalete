@@ -5,8 +5,8 @@
 import AppKit
 import SwiftUI
 
-/// Runs a command, given as its path, like `select/12`.
-public typealias Send = @convention(c) (UnsafePointer<CChar>) -> Void
+/// Runs a command from a window, given as its path, like `select/12`.
+public typealias Send = @convention(c) (UInt32, UnsafePointer<CChar>) -> Void
 
 /// What the interface knows of the app, from its events.
 @MainActor
@@ -27,14 +27,17 @@ final class AppModel: ObservableObject {
     @Published var query = "" {
         didSet { if section == .history { searchHistory() } }
     }
+    /// The window the model is the interface of, which its commands come from.
+    let window: UInt32
     let send: Send
 
-    init(send: @escaping Send) {
+    init(window: UInt32, send: @escaping Send) {
+        self.window = window
         self.send = send
     }
 
     func run(_ path: String) {
-        path.withCString { send($0) }
+        path.withCString { send(window, $0) }
     }
 
     /// The displayed Space's page.
@@ -208,28 +211,22 @@ final class AppModel: ObservableObject {
     }
 }
 
-@MainActor var model: AppModel?
-@MainActor weak var mainWindow: NSWindow?
-@MainActor var backdrop: Backdrop?
-@MainActor var sidebar: SidebarHost?
-@MainActor var commandBar: CommandBar?
-@MainActor var findBar: FindBar?
-@MainActor var siteControls: SiteControls?
-@MainActor var themePicker: ThemePickerModel?
-@MainActor var importModel: ImportModel?
+/// What the interface puts in one of the app's windows.
+@MainActor
+final class NativeWindow {
+    let model: AppModel
+    let backdrop: Backdrop
+    let sidebar: SidebarHost
+    let commandBar: CommandBar
+    let findBar: FindBar
+    let siteControls: SiteControls
+    let themePicker: ThemePickerModel
+    let importModel: ImportModel
+    /// The panels above the page, by the name of the web view they stand for, like "overlay".
+    var surfaces: [String: Surface] = [:]
 
-/// Puts the interface in the window `handle` is, or is in: the blur behind every view, and the
-/// sidebar above them.
-@_cdecl("arbalete_ui_attach")
-public func attach(_ handle: UnsafeMutableRawPointer, _ send: Send) {
-    MainActor.assumeIsolated {
-        let object = Unmanaged<AnyObject>.fromOpaque(handle).takeUnretainedValue()
-        guard let window = (object as? NSWindow) ?? (object as? NSView)?.window,
-            let content = window.contentView
-        else { return }
-        let app = AppModel(send: send)
+    init(window: NSWindow, content: NSView, app: AppModel) {
         model = app
-        mainWindow = window
         window.isOpaque = false
         window.backgroundColor = .clear
         window.titlebarAppearsTransparent = true
@@ -269,57 +266,79 @@ public func attach(_ handle: UnsafeMutableRawPointer, _ send: Send) {
         themeSurface.takesKeyboard = true
         themeSurface.resigned = { app.run("theme/hide") }
         surfaces["theme"] = themeSurface
-        settingsModel = SettingsModel(app: app)
         let importer = ImportModel(app: app)
         importModel = importer
         let importSurface = Surface(in: window, radius: 16) { ImportView(model: importer) }
         importSurface.takesKeyboard = true
         surfaces["import"] = importSurface
     }
-}
 
-/// An event dispatched to a web surface the interface stands in for, like "sidebar".
-@_cdecl("arbalete_ui_event")
-public func event(
-    _ surface: UnsafePointer<CChar>, _ name: UnsafePointer<CChar>, _ detail: UnsafePointer<CChar>
-) {
-    MainActor.assumeIsolated {
-        let detail = Data(String(cString: detail).utf8)
-        switch String(cString: surface) {
-        case "sidebar":
-            model?.handle(String(cString: name), detail)
-        case "overlay":
-            commandBar?.handle(String(cString: name), detail)
-        case "find":
-            findBar?.handle(String(cString: name), detail)
-        case "site":
-            siteControls?.handle(String(cString: name), detail)
-        case "theme":
-            themePicker?.handle(String(cString: name), detail)
-        case "settings":
-            settingsModel?.handle(String(cString: name), detail)
-        case "import":
-            importModel?.handle(String(cString: name), detail)
-        case let surface where surface.hasPrefix("little/"):
-            if let id = Int(surface.dropFirst("little/".count)), let bar = littles[id],
-                String(cString: name) == "arbalete:little"
-            {
-                bar.page = try? JSONDecoder().decode(LittleDetail.self, from: detail)
-            }
-        default:
-            break
+    /// Gives one of its views an event, by the name of the web view it stands for.
+    func handle(_ surface: String, _ name: String, _ detail: Data) {
+        switch surface {
+        case "sidebar": model.handle(name, detail)
+        case "overlay": commandBar.handle(name, detail)
+        case "find": findBar.handle(name, detail)
+        case "site": siteControls.handle(name, detail)
+        case "theme": themePicker.handle(name, detail)
+        case "import": importModel.handle(name, detail)
+        default: break
         }
     }
 }
 
-/// Shows the sidebar at a frame in the window's points from its top left corner, or hides it.
+/// The interface of each of the app's windows, by the id the app gives it.
+@MainActor var nativeWindows: [UInt32: NativeWindow] = [:]
+
+/// Puts the interface in the window `handle` is, or is in, which the app knows as `id`: the blur
+/// behind every view, and the sidebar above them.
+@_cdecl("arbalete_ui_attach")
+public func attach(_ id: UInt32, _ handle: UnsafeMutableRawPointer, _ send: Send) {
+    MainActor.assumeIsolated {
+        let object = Unmanaged<AnyObject>.fromOpaque(handle).takeUnretainedValue()
+        guard let window = (object as? NSWindow) ?? (object as? NSView)?.window,
+            let content = window.contentView
+        else { return }
+        let app = AppModel(window: id, send: send)
+        nativeWindows[id] = NativeWindow(window: window, content: content, app: app)
+        if settingsModel == nil { settingsModel = SettingsModel(app: app) }
+    }
+}
+
+/// An event dispatched to a web surface the interface stands in for, like "sidebar", in the
+/// window `id`.
+@_cdecl("arbalete_ui_event")
+public func event(
+    _ id: UInt32, _ surface: UnsafePointer<CChar>, _ name: UnsafePointer<CChar>,
+    _ detail: UnsafePointer<CChar>
+) {
+    MainActor.assumeIsolated {
+        let (surface, name) = (String(cString: surface), String(cString: name))
+        let detail = Data(String(cString: detail).utf8)
+        switch surface {
+        case "settings":
+            settingsModel?.handle(name, detail)
+        case let surface where surface.hasPrefix("little/"):
+            if let id = Int(surface.dropFirst("little/".count)), let bar = littles[id],
+                name == "arbalete:little"
+            {
+                bar.page = try? JSONDecoder().decode(LittleDetail.self, from: detail)
+            }
+        default:
+            nativeWindows[id]?.handle(surface, name, detail)
+        }
+    }
+}
+
+/// Shows the sidebar of the window `id` at a frame in its points from its top left corner, or
+/// hides it.
 @_cdecl("arbalete_ui_place_sidebar")
 public func placeSidebar(
-    _ visible: Bool, _ x: Double, _ y: Double, _ width: Double, _ height: Double,
+    _ id: UInt32, _ visible: Bool, _ x: Double, _ y: Double, _ width: Double, _ height: Double,
     _ floating: Bool, _ revealed: Bool
 ) {
     MainActor.assumeIsolated {
-        sidebar?.place(
+        nativeWindows[id]?.sidebar.place(
             visible ? NSRect(x: x, y: y, width: width, height: height) : nil,
             floating: floating, revealed: revealed)
     }
