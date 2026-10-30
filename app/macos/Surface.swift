@@ -103,7 +103,8 @@ final class Surface {
     func place(_ shown: Bool, _ frame: NSRect) {
         let showing = shown && !panel.isVisible
         panel.place(in: parent, shown ? frame : nil)
-        panel.invalidateShadow()
+        // Once its rounded views are drawn, so that the shadow follows their corners.
+        DispatchQueue.main.async { self.panel.invalidateShadow() }
         if showing {
             if takesKeyboard { panel.makeKey() }
             // Once its views are made, which they are on first showing.
