@@ -1676,6 +1676,10 @@ fn place_card() {
         lay_out_split();
     } else {
         card.set_bounds(Some(&win().sidebar_mode.get().layout(&size).card));
+        // The page follows the card's corners at once, not at CEF's next layout.
+        if let Some(panel) = card_panel() {
+            panel.layout();
+        }
     }
     // Once the sidebar sent the window's colors, which first show it.
     // Showing it again would bring it to the front, and the panels above it after it.
