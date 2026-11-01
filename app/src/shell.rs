@@ -78,17 +78,18 @@ const SPLIT_GAP: i32 = 10;
 /// The bar at the top of each page of a split, above the page, like Arc's.
 const PANE_BAR_HEIGHT: i32 = 32;
 
-/// The overlay's size: one text field for now (ui/src/Overlay.tsx).
-/// The Command Bar's width, at most, and its search row's height: its results add to it
-/// (ui/src/Overlay.tsx). Its top sits at this share of the window's height, like Arc's.
-const OVERLAY_WIDTH: i32 = 720;
-const OVERLAY_ROW: i32 = 62;
-const OVERLAY_TOP: f32 = 0.29;
+/// The Command Bar's width, at most, its search row's height, which its results add to, and
+/// the height its box keeps at most, centered in the window, like Arc's.
+const OVERLAY_WIDTH: i32 = 766;
+const OVERLAY_ROW: i32 = 50;
+const OVERLAY_BOX: i32 = 338;
 
-/// Editing the address, the Command Bar sits over the docked sidebar's url bar instead, wider
-/// than the sidebar, like Arc's: its left edge and top are the url bar's (ui/src/index.css).
-const URL_EDIT_WIDTH: i32 = 360;
-const URL_BAR_LEFT: i32 = 7;
+/// Editing the address, the Command Bar sits over the docked sidebar's url bar instead, at
+/// least as wide as this and at most as `URL_EDIT_MAX`, like Arc's: its left edge and top are
+/// the url bar's.
+const URL_EDIT_WIDTH: i32 = 350;
+const URL_EDIT_MAX: i32 = 720;
+const URL_BAR_LEFT: i32 = 8;
 const URL_BAR_TOP: i32 = 44;
 
 /// How many tabs selected last the tab switcher lists, at most.
@@ -1346,17 +1347,20 @@ fn place_overlay(height: i32) {
         return;
     };
     let bounds = if win().over_url_bar.get() {
+        let width = URL_EDIT_WIDTH.max(sidebar_width() - 2 * URL_BAR_LEFT);
         Rect {
             x: URL_BAR_LEFT,
             y: URL_BAR_TOP,
-            width: URL_EDIT_WIDTH.min(size.width - 2 * URL_BAR_LEFT),
+            width: width.min(URL_EDIT_MAX).min(size.width - URL_BAR_LEFT - 80),
             height,
         }
     } else {
-        let width = OVERLAY_WIDTH.min(size.width - 2 * CARD_MARGIN);
+        // Inset 160 points from the window's sides, or 20 in a narrow window.
+        let margin = if size.width >= OVERLAY_WIDTH { 160 } else { 20 };
+        let width = OVERLAY_WIDTH.min(size.width - margin);
         Rect {
             x: (size.width - width) / 2,
-            y: (size.height as f32 * OVERLAY_TOP) as i32,
+            y: ((size.height - OVERLAY_BOX) / 2).max(24),
             width,
             height,
         }

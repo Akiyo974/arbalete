@@ -9,13 +9,14 @@
 import AppKit
 import SwiftUI
 
-/// The search row's height and a result's, and the space around the results: the app fits the
-/// Command Bar to them (place_overlay in app/src/shell.rs).
-private let searchRow: CGFloat = 62
-private let resultRow: CGFloat = 44
+/// The search row's height and a result's, and the space around the results, like Arc's: the
+/// app fits the Command Bar to them (place_overlay in app/src/shell.rs).
+private let searchRow: CGFloat = 50
+private let resultRow: CGFloat = 50
 private let resultsPadding: CGFloat = 8
-/// How many results show at once: the others scroll.
-private let visibleRows = 9
+private let resultsInset: CGFloat = 10
+/// How many results show at once, like Arc's: the others scroll.
+private let visibleRows = 5
 /// How many of the search engine's suggestions show.
 private let suggestionCount = 4
 
@@ -251,9 +252,9 @@ final class CommandBar: ObservableObject {
         let shown = min(rows.count, visibleRows)
         let height =
             if let switching {
-                CGFloat(switching.tabs.count) * resultRow + 2 * resultsPadding
+                CGFloat(switching.tabs.count) * resultRow + 2 * resultsInset
             } else if shown > 0 {
-                searchRow + CGFloat(shown) * resultRow + 2 * resultsPadding
+                searchRow + CGFloat(shown) * resultRow + 2 * resultsInset
             } else {
                 searchRow
             }
@@ -329,7 +330,8 @@ struct CommandBarView: View {
                     ResultRow(row: .tab(tab), picked: index == switching.picked, label: nil)
                 }
             }
-            .padding(resultsPadding)
+            .padding(.horizontal, resultsPadding)
+            .padding(.vertical, resultsInset)
             .frame(maxHeight: .infinity, alignment: .top)
         } else {
             VStack(spacing: 0) {
@@ -346,7 +348,10 @@ struct CommandBarView: View {
                 .frame(height: searchRow)
                 let rows = bar.rows
                 if !rows.isEmpty {
-                    Divider()
+                    // A hairline under the field while results show, like Arc's.
+                    Rectangle().fill(Color.ink((0x000000, 0.10), (0xFFFFFF, 0.10)))
+                        .frame(height: 1)
+                        .padding(.horizontal, 12)
                     ScrollViewReader { scroll in
                         ScrollView {
                             VStack(spacing: 0) {
@@ -360,7 +365,8 @@ struct CommandBarView: View {
                                     .onTapGesture { bar.open(row) }
                                 }
                             }
-                            .padding(resultsPadding)
+                            .padding(.horizontal, resultsPadding)
+                            .padding(.vertical, resultsInset)
                         }
                         .scrollIndicators(.never)
                         .onChange(of: bar.picked) { _, picked in scroll.scrollTo(picked) }
@@ -386,7 +392,7 @@ struct ResultRow: View {
     let label: String?
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             Group {
                 switch row {
                 case .action: Image(systemName: "bolt")
@@ -395,17 +401,24 @@ struct ResultRow: View {
                 default: Image(systemName: "globe")
                 }
             }
-            .frame(width: 18)
+            .frame(width: 24, height: 24)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
             Text(row.title).lineLimit(1)
+                .font(.system(size: 13))
+                .foregroundStyle(Color.ink((0x000000, 0.80), (0xFFFFFF, 0.80)))
             Spacer(minLength: 8)
             if let label {
-                Text(label).font(.system(size: 12)).foregroundStyle(.secondary)
+                Text(label).font(.system(size: 13))
+                    .foregroundStyle(Color.ink((0x000000, 0.33), (0xFFFFFF, 0.33)))
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.leading, 12)
+        .padding(.trailing, label == nil ? 12 : 20)
         .frame(height: resultRow)
+        // Inset 2 points within the row, rounded 6, like Arc's.
         .background(
-            RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(picked ? 0.25 : 0)))
+            RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(picked ? 0.25 : 0))
+                .padding(2))
         .contentShape(Rectangle())
     }
 }
