@@ -635,7 +635,7 @@ fn resize_sidebar(x: f64) {
 }
 
 /// How often the pages take the size of their cards while a resize goes on, in milliseconds.
-const PAGE_LAYOUT_EVERY: i64 = 120;
+const PAGE_LAYOUT_EVERY: i64 = 40;
 
 /// Puts the window's pages where their cards now go while a resize goes on, like Arc's: each
 /// moves along at once, cropped to its card, and takes its size only every
@@ -1756,7 +1756,8 @@ fn place_card() {
         card.set_bounds(Some(&win().sidebar_mode.get().layout(&size).card));
     }
     // Once the sidebar sent the window's colors, which first show it.
-    if win().colored.get() {
+    // Showing it again would bring it to the front, and the panels above it after it.
+    if win().colored.get() && card.is_visible() == 0 {
         card.set_visible(1);
     }
     place_split_handles();
@@ -4239,9 +4240,13 @@ fn lay_out_split() {
         match others.get(index) {
             Some(rect) => {
                 pane.set_bounds(Some(&page(rect)));
-                pane.set_visible(win().colored.get().into());
+                let shown = i32::from(win().colored.get());
+                if pane.is_visible() != shown {
+                    pane.set_visible(shown);
+                }
             }
-            None => pane.set_visible(0),
+            None if pane.is_visible() == 1 => pane.set_visible(0),
+            None => {}
         }
     }
     for card in pane_cards() {
