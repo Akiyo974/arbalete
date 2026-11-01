@@ -14,11 +14,11 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSApp, NSApplication, NSAutoresizingMaskOptions, NSColor,
-    NSControlStateValueOn, NSDownArrowFunctionKey, NSEvent, NSEventMask, NSEventModifierFlags,
-    NSEventPhase, NSEventType, NSF12FunctionKey, NSImage, NSLeftArrowFunctionKey, NSMenu,
-    NSMenuItem, NSPasteboard, NSPasteboardTypeString, NSRightArrowFunctionKey,
-    NSSharingServicePicker, NSTextField, NSUpArrowFunctionKey, NSView, NSWindow, NSWindowButton,
-    NSWorkspace,
+    NSControlStateValueOff, NSControlStateValueOn, NSDownArrowFunctionKey, NSEvent, NSEventMask,
+    NSEventModifierFlags, NSEventPhase, NSEventType, NSF12FunctionKey, NSImage,
+    NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSPasteboard, NSPasteboardTypeString,
+    NSRightArrowFunctionKey, NSSharingServicePicker, NSTextField, NSUpArrowFunctionKey, NSView,
+    NSWindow, NSWindowButton, NSWorkspace,
 };
 use objc2_foundation::{
     NSAppleEventDescriptor, NSAppleEventManager, NSArray, NSData, NSDataBase64DecodingOptions,
@@ -311,6 +311,17 @@ define_class!(
         #[unsafe(method(arbaleteSettings:))]
         fn settings(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::ShowSettings);
+        }
+
+        // Like Arc, Set as Default Browser is checked and disabled once Arbalete is the default.
+        #[unsafe(method(validateMenuItem:))]
+        fn validate_menu_item(&self, item: &NSMenuItem) -> Bool {
+            if item.action() != Some(sel!(arbaleteMakeDefaultBrowser:)) {
+                return Bool::YES;
+            }
+            let default = crate::native::is_default_browser();
+            item.setState(if default { NSControlStateValueOn } else { NSControlStateValueOff });
+            Bool::new(!default)
         }
 
         #[unsafe(method(arbaleteMakeDefaultBrowser:))]

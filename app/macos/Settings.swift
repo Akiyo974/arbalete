@@ -442,6 +442,15 @@ public func makeDefaultBrowser() {
     }
 }
 
+/// Whether a copy of Arbalete is the default browser: macOS never picks one in a temporary folder.
+@_cdecl("arbalete_ui_is_default_browser")
+public func isDefaultBrowser() -> Bool {
+    guard let url = URL(string: "https://example.com"),
+        let app = NSWorkspace.shared.urlForApplication(toOpen: url)
+    else { return false }
+    return Bundle(url: app)?.bundleIdentifier == Bundle.main.bundleIdentifier
+}
+
 private func failed(_ error: Error?) {
     guard let error else { return }
     DispatchQueue.main.async { NSApp.presentError(error) }

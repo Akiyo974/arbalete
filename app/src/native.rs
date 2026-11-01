@@ -31,6 +31,7 @@ unsafe extern "C" {
     fn arbalete_ui_little(id: u32, handle: *mut c_void);
     fn arbalete_ui_settings_focused() -> bool;
     fn arbalete_ui_make_default_browser();
+    fn arbalete_ui_is_default_browser() -> bool;
     fn arbalete_ui_place_sidebar(
         window: u32,
         visible: bool,
@@ -139,6 +140,12 @@ pub fn settings(shown: bool) {
 pub fn make_default_browser() {
     // SAFETY: no arguments.
     unsafe { arbalete_ui_make_default_browser() };
+}
+
+/// Arbalete is the default browser.
+pub fn is_default_browser() -> bool {
+    // SAFETY: no arguments.
+    unsafe { arbalete_ui_is_default_browser() }
 }
 
 /// The settings window has the keyboard: ⌘W closes it rather than a tab.
