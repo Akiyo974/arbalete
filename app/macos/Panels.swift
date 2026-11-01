@@ -50,7 +50,13 @@ struct FindView: View {
     @ObservedObject var bar: FindBar
 
     var body: some View {
-        HStack(spacing: 4) {
+        // Like Arc's: a 15-point magnifying glass in a 26-point box, 3 points in, the field 32
+        // points from the edge, and the buttons 3 points from the other.
+        HStack(spacing: 0) {
+            Image(systemName: "magnifyingglass").font(.system(size: 15))
+                .foregroundStyle(.secondary)
+                .frame(width: 26, height: 26)
+                .padding(.trailing, 3)
             KeyField(
                 placeholder: "Find in page", size: 13,
                 attach: { bar.field = $0 },
@@ -71,6 +77,7 @@ struct FindView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .fixedSize()
+                    .padding(.horizontal, 6)
             }
             IconButton(symbol: "chevron.up", label: "Previous match", size: 24) {
                 bar.find(forward: false)
@@ -80,7 +87,7 @@ struct FindView: View {
             }
             IconButton(symbol: "xmark", label: "Close", size: 24) { bar.hide() }
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 3)
         .frame(maxHeight: .infinity)
     }
 }

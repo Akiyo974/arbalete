@@ -102,7 +102,7 @@ const OVERLAY_PAGES: usize = 5;
 /// The find bar's size, and its margin from the card's top right corner (ui/src/Find.tsx).
 const FIND_SIZE: Size = Size {
     width: 380,
-    height: 44,
+    height: 32,
 };
 const FIND_MARGIN: i32 = 10;
 
