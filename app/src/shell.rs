@@ -198,8 +198,15 @@ thread_local! {
     static WINDOWS: RefCell<Vec<Rc<Win>>> = RefCell::new(vec![Rc::new(Win::new(0))]);
     /// The window commands and events are about, by its id.
     static FOCUSED: Cell<u32> = const { Cell::new(0) };
+    /// The other windows as quitting started, which the session keeps while they close.
+    static QUIT_WINDOWS: RefCell<Option<Vec<WindowView>>> = const { RefCell::new(None) };
+    /// Stands for the window once every window has closed, while the app quits.
+    static CLOSED: Rc<Win> = Rc::new(Win::new(u32::MAX));
     /// The id the next window opened takes.
     static NEXT_WINDOW: Cell<u32> = const { Cell::new(1) };
+    /// What the windows of the previous session but the focused one showed, which open again
+    /// once the first window is made.
+    static RESTORED_WINDOWS: RefCell<Vec<WindowView>> = const { RefCell::new(Vec::new()) };
 }
 
 /// What a window holds of its own: its views, the page it shows and its panels' state.
@@ -334,12 +341,19 @@ impl Win {
     }
 }
 
-/// The window commands and events are about.
+/// The window commands and events are about: the focused one, or another while it closes; once
+/// every window has closed, as the app quits, one holding nothing.
 fn win() -> Rc<Win> {
     let id = FOCUSED.get();
     WINDOWS
-        .with_borrow(|windows| windows.iter().find(|win| win.id == id).cloned())
-        .expect("the focused window")
+        .with_borrow(|windows| {
+            windows
+                .iter()
+                .find(|win| win.id == id)
+                .or(windows.first())
+                .cloned()
+        })
+        .unwrap_or_else(|| CLOSED.with(Rc::clone))
 }
 
 /// The window `id`, if open.
@@ -364,10 +378,13 @@ fn focus(id: u32) {
     }
 }
 
-/// Runs `act` in each window in turn, as the focused one, then focuses back the window that was.
+/// Runs `act` in each window in turn, as the focused one, the window focused last: a page two
+/// windows show stays in it.
 fn in_each_window(act: impl Fn()) {
     let was = FOCUSED.get();
-    let ids: Vec<u32> = WINDOWS.with_borrow(|windows| windows.iter().map(|win| win.id).collect());
+    let mut ids: Vec<u32> =
+        WINDOWS.with_borrow(|windows| windows.iter().map(|win| win.id).collect());
+    ids.sort_by_key(|&id| id == was);
     for id in ids {
         focus(id);
         act();
@@ -375,21 +392,30 @@ fn in_each_window(act: impl Fn()) {
     focus(was);
 }
 
-/// Opens another window, offset from the focused one, on its Space without a tab, like Arc's.
+/// Opens another window, offset from the focused one, on its Space without a tab, on the Command
+/// Bar, like Arc's.
 fn new_window() {
+    open_window(
+        STATE.with_borrow(|state| state.sidebar.new_window_view()),
+        true,
+    );
+}
+
+/// Opens another window, offset from the focused one, showing `view` of the sidebar; `fresh`, on
+/// the Command Bar.
+fn open_window(view: WindowView, fresh: bool) {
     let id = NEXT_WINDOW.get();
     NEXT_WINDOW.set(id + 1);
     let window = Win::new(id);
-    window.view.set(Some(
-        STATE.with_borrow(|state| state.sidebar.new_window_view()),
-    ));
+    window.view.set(Some(view));
     window.cascade.set(
         win()
             .window
             .with_borrow(|window| window.as_ref().map(|w| w.bounds())),
     );
-    window.fresh.set(true);
+    window.fresh.set(fresh);
     WINDOWS.with_borrow_mut(|windows| windows.push(Rc::new(window)));
+    save_session();
     window_create_top_level(Some(&mut MainWindowDelegate::new(id)));
 }
 
@@ -800,13 +826,35 @@ fn update_page(change: impl FnOnce(&mut Page)) {
 /// Changes the sidebar, saves it and sends the state to the UI.
 fn update_sidebar<R>(change: impl FnOnce(&mut Sidebar) -> R) -> R {
     let result = STATE.with_borrow_mut(|state| change(&mut state.sidebar));
-    if let Some(path) = SESSION_FILE.with_borrow(Clone::clone)
-        && let Err(error) = STATE.with_borrow(|state| store::save(&state.sidebar, &path))
-    {
-        eprintln!("cannot save the session: {error}");
-    }
+    save_session();
     send_state();
     result
+}
+
+/// What the windows but the focused one show of the sidebar.
+fn other_windows() -> Vec<WindowView> {
+    let focused = FOCUSED.get();
+    WINDOWS.with_borrow(|windows| {
+        windows
+            .iter()
+            .filter(|win| win.id != focused)
+            .filter_map(|win| win.view.with_borrow(Clone::clone))
+            .collect()
+    })
+}
+
+/// Saves the sidebar, and what the other windows show of it, once the session is restored.
+fn save_session() {
+    let Some(path) = SESSION_FILE.with_borrow(Clone::clone) else {
+        return;
+    };
+    // Quitting closes the windows one by one: the session keeps them all.
+    let windows = QUIT_WINDOWS
+        .with_borrow(Clone::clone)
+        .unwrap_or_else(other_windows);
+    if let Err(error) = STATE.with_borrow(|state| store::save(&state.sidebar, &windows, &path)) {
+        eprintln!("cannot save the session: {error}");
+    }
 }
 
 fn send_state() {
@@ -1733,8 +1781,12 @@ fn place_native_sidebar() {
 /// next save. The first launch offers to import the browsers found, if any, before the start page.
 fn restore(path: PathBuf) {
     let first_launch = match store::load(&path) {
-        Ok(Some(sidebar)) => {
+        Ok(Some((sidebar, windows))) => {
             STATE.with_borrow_mut(|state| state.sidebar = sidebar);
+            // The other windows open again with the first one.
+            if app_settings().restore_session {
+                RESTORED_WINDOWS.set(windows);
+            }
             false
         }
         Ok(None) => true,
@@ -4169,7 +4221,7 @@ wrap_request_context_handler! {
             let Some(context) = context else { return };
             CONTEXTS.with_borrow_mut(|contexts| contexts.insert(self.profile, Some(context.clone())));
             extensions::profile_ready(self.profile, &profile_dir(self.profile));
-            show_selected();
+            in_each_window(show_selected);
         }
     }
 }
@@ -4545,7 +4597,9 @@ pub fn close() {
     for window in littles {
         window.close();
     }
-    CLOSING.set(true);
+    if !CLOSING.replace(true) {
+        QUIT_WINDOWS.set(Some(other_windows()));
+    }
     let windows: Vec<_> = WINDOWS.with_borrow(|windows| {
         windows
             .iter()
@@ -4771,6 +4825,9 @@ wrap_window_delegate! {
             for link in PENDING_LINKS.take() {
                 open_little(Some(link));
             }
+            for view in RESTORED_WINDOWS.take() {
+                open_window(view, false);
+            }
             // Once it has settled in front: until then, the window taking the keyboard back
             // from the Command Bar's field would close it.
             if win().fresh.take() {
@@ -4797,6 +4854,11 @@ wrap_window_delegate! {
             if let Some(next) = WINDOWS.with_borrow(|windows| windows.first().map(|win| win.id)) {
                 focus(next);
                 show_selected();
+            }
+            // Once another window holds the sidebar: quitting keeps every window for the next
+            // session.
+            if !CLOSING.get() {
+                save_session();
             }
         }
 

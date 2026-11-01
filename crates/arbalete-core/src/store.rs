@@ -1,8 +1,8 @@
-//! Saves the sidebar as a JSON file and loads it back.
+//! Saves the sidebar, and what the other windows show of it, as a JSON file and loads them back.
 //!
 //! The file carries a format version, so a later version of Arbalete can migrate older files.
 
-use crate::sidebar::Sidebar;
+use crate::sidebar::{Sidebar, View};
 use serde::{Deserialize, Serialize};
 use std::{fs, io, path::Path};
 
@@ -15,7 +15,13 @@ pub const FILE_NAME: &str = "session.json";
 struct Saved {
     version: u32,
     sidebar: Sidebar,
+    /// What the windows but the focused one show, whose view the sidebar holds.
+    #[serde(default)]
+    windows: Vec<View>,
 }
+
+/// A saved session: the sidebar, and what the other windows show of it.
+pub type Session = (Sidebar, Vec<View>);
 
 #[derive(Debug)]
 pub enum LoadError {
@@ -24,11 +30,13 @@ pub enum LoadError {
     UnsupportedVersion(u32),
 }
 
-/// Writes the sidebar atomically: a crash while saving leaves the previous file intact.
-pub fn save(sidebar: &Sidebar, path: &Path) -> io::Result<()> {
+/// Writes the sidebar and the other windows' views atomically: a crash while saving leaves the
+/// previous file intact.
+pub fn save(sidebar: &Sidebar, windows: &[View], path: &Path) -> io::Result<()> {
     let saved = Saved {
         version: VERSION,
         sidebar: sidebar.clone(),
+        windows: windows.to_vec(),
     };
     let json = serde_json::to_vec_pretty(&saved).map_err(io::Error::other)?;
     let temporary = path.with_extension("tmp");
@@ -36,8 +44,8 @@ pub fn save(sidebar: &Sidebar, path: &Path) -> io::Result<()> {
     fs::rename(temporary, path)
 }
 
-/// Loads the sidebar, or `None` when nothing was saved yet.
-pub fn load(path: &Path) -> Result<Option<Sidebar>, LoadError> {
+/// Loads the session, or `None` when nothing was saved yet.
+pub fn load(path: &Path) -> Result<Option<Session>, LoadError> {
     let json = match fs::read(path) {
         Ok(json) => json,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -47,7 +55,7 @@ pub fn load(path: &Path) -> Result<Option<Sidebar>, LoadError> {
     if saved.version != VERSION {
         return Err(LoadError::UnsupportedVersion(saved.version));
     }
-    Ok(Some(saved.sidebar))
+    Ok(Some((saved.sidebar, saved.windows)))
 }
 
 #[cfg(test)]
@@ -70,8 +78,9 @@ mod tests {
         sidebar.set_space_emoji(work, "💼").unwrap();
         sidebar.set_space_theme(work, Color::Green.into()).unwrap();
 
-        save(&sidebar, &path).unwrap();
-        assert_eq!(load(&path).unwrap(), Some(sidebar));
+        let windows = vec![sidebar.new_window_view()];
+        save(&sidebar, &windows, &path).unwrap();
+        assert_eq!(load(&path).unwrap(), Some((sidebar, windows)));
         assert!(!path.with_extension("tmp").exists());
     }
 
@@ -86,7 +95,7 @@ mod tests {
     fn rejects_an_unknown_version() {
         let dir = TestDir::new("store-version");
         let path = dir.0.join("sidebar.json");
-        save(&Sidebar::default(), &path).unwrap();
+        save(&Sidebar::default(), &[], &path).unwrap();
         let json = fs::read_to_string(&path)
             .unwrap()
             .replace("\"version\": 1", "\"version\": 99");

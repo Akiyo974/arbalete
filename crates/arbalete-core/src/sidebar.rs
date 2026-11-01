@@ -319,12 +319,14 @@ pub enum Error {
     InvalidTheme,
 }
 
-/// What a window shows of the sidebar: its displayed Space and each Space's selected tab, which
-/// another window, showing the same Spaces and tabs, keeps apart.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// What a window shows of the sidebar: its displayed Space, each Space's selected tab and the
+/// folders it collapsed, which another window, showing the same Spaces and tabs, keeps apart.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct View {
     displayed: Option<SpaceId>,
     selected: Vec<(SpaceId, Option<NodeId>)>,
+    #[serde(default)]
+    collapsed: Vec<NodeId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -395,12 +397,31 @@ impl Sidebar {
         View {
             displayed: self.displayed,
             selected: self.spaces.iter().map(|s| (s.id, s.selected)).collect(),
+            collapsed: self
+                .nodes
+                .iter()
+                .filter(|(_, node)| {
+                    matches!(
+                        node.kind,
+                        NodeKind::Folder {
+                            expanded: false,
+                            ..
+                        }
+                    )
+                })
+                .map(|(id, _)| *id)
+                .collect(),
         }
     }
 
     /// Shows what `view` holds, but the Spaces and tabs gone since; a Space it did not know
-    /// shows no tab.
+    /// shows no tab, a folder it did not know stays expanded.
     pub fn set_view(&mut self, view: &View) {
+        for (id, node) in &mut self.nodes {
+            if let NodeKind::Folder { expanded, .. } = &mut node.kind {
+                *expanded = !view.collapsed.contains(id);
+            }
+        }
         self.displayed = view.displayed.filter(|&id| self.space(id).is_ok());
         let selected: HashMap<_, _> = view.selected.iter().copied().collect();
         let tabs: Vec<_> = self
@@ -2204,6 +2225,23 @@ mod tests {
         sidebar.set_view(&view);
         assert_eq!(sidebar.displayed().id, work);
         assert_eq!(sidebar.space(home.id).unwrap().selected, Some(first));
+        // Each view keeps its folders collapsed or not.
+        let folder = sidebar.add_folder(home.pinned, "Work").unwrap();
+        sidebar.toggle_folder(folder).unwrap();
+        let collapsed = sidebar.view();
+        sidebar.set_view(&view);
+        assert!(matches!(
+            sidebar.node(folder).unwrap().kind,
+            NodeKind::Folder { expanded: true, .. }
+        ));
+        sidebar.set_view(&collapsed);
+        assert!(matches!(
+            sidebar.node(folder).unwrap().kind,
+            NodeKind::Folder {
+                expanded: false,
+                ..
+            }
+        ));
         // A tab closed meanwhile is no longer selected.
         sidebar.remove(first).unwrap();
         sidebar.select(home.id, second).unwrap();

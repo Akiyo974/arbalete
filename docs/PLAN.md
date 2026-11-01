@@ -369,8 +369,8 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
   from the focused one, on its Space without a tab, on the Command Bar; Spaces and tabs are shared, each window
   keeping its displayed Space and selected tabs; the window in front takes the live page of its tab from
   another, which shows the page's picture dimmed by its Space's color; closing a window hands its pages over to
-  another. Left: restoring every window of the previous session (only the focused one's Space and tabs come
-  back), and folders opened per window.
+  another; each window opens and closes its own folders; with "Restore the previous session", every window
+  opens again.
 - Freeze, then unload hidden tabs on timers; reload on selection from the saved URL, with the snapshot shown
   while loading. Done: a page hidden 5 minutes is frozen, then unloaded after an hour, unless it plays media;
   the shown page's picture, taken when it loads and every minute (a hidden page draws nothing to take one),
