@@ -21,6 +21,12 @@ enum DropTarget: Equatable {
 /// How long the pointer rests on a tab's middle before the tab offers a split, as in Arc.
 private let splitDelay = 0.2
 
+/// Like Arc's, a drag resting this long within `edgeSlop` points at the sidebar's edge shows the
+/// previous or next Space; the edge is `edgeBand` points wide.
+private let edgeDelay = 0.35
+private let edgeSlop: CGFloat = 3
+let edgeBand: CGFloat = 20
+
 extension AppModel {
     /// The sidebar's theme color, which marks where a drop lands, like Arc's.
     /// The displayed Space's leading color, or Arc's indigo without one.
@@ -108,8 +114,31 @@ extension AppModel {
         }
     }
 
+    /// A drag rests at the sidebar's leading edge, its trailing one, or neither (nil): after a
+    /// while, the previous or the next Space shows, so that the drag carries on into it.
+    func edge(_ leading: Bool?) {
+        guard let leading else {
+            edgeWait?.cancel()
+            edgeWait = nil
+            edgeAt = nil
+            return
+        }
+        let here = NSEvent.mouseLocation
+        if let at = edgeAt, hypot(here.x - at.x, here.y - at.y) <= edgeSlop { return }
+        edgeAt = here
+        edgeWait?.cancel()
+        let wait = DispatchWorkItem { [weak self] in
+            guard let self, NSEvent.pressedMouseButtons != 0 else { return }
+            edgeWait = nil
+            run(leading ? "space/previous" : "space/next")
+        }
+        edgeWait = wait
+        DispatchQueue.main.asyncAfter(deadline: .now() + edgeDelay, execute: wait)
+    }
+
     /// The drag ends: what it carried, and where it landed, if anywhere.
     func endDrag() -> (Int, DropTarget)? {
+        edge(nil)
         splitWait?.cancel()
         splitWait = nil
         pendingSplit = nil
@@ -167,6 +196,10 @@ private struct RowDrop: DropDelegate {
     let place: (Int, Int) -> Void
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        // The row is inset from the sidebar's edges.
+        let band = edgeBand - Measure.inset
+        let x = info.location.x
+        model.edge(x <= band ? true : x >= size.width - band ? false : nil)
         model.hover(target(at: info.location))
         return DropProposal(operation: NSEvent.modifierFlags.contains(.option) ? .copy : .move)
     }

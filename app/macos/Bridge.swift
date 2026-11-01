@@ -29,6 +29,9 @@ final class AppModel: ObservableObject {
     var draggedTabs: [Int] = []
     /// The tabs selected at once with ⌘ or ⇧, besides the one shown, like Arc's; none otherwise.
     @Published var marked: [Int] = []
+    /// The Space switch a drag resting at the sidebar's edge waits for, and where it rested.
+    var edgeWait: DispatchWorkItem?
+    var edgeAt: NSPoint?
     @Published var dropTarget: DropTarget?
     /// Where in the favorites a drag would land.
     @Published var favoriteSlot: Int?
@@ -193,7 +196,12 @@ final class AppModel: ObservableObject {
     /// Moves a dragged node before the child `index` of `parent`, or after its last one: the app
     /// counts the index once the node has left its place.
     func move(_ id: Int, to parent: Int, _ index: Int) {
-        guard id != parent, let from = place(of: id) else { return }
+        guard id != parent else { return }
+        // From another Space, which a drag switched from.
+        guard let from = place(of: id) else {
+            run("move/\(id)/\(parent)/\(index)")
+            return
+        }
         let to = from.parent == parent && from.index < index ? index - 1 : index
         if from.parent == parent && to == from.index { return }
         run("move/\(id)/\(parent)/\(to)")
@@ -463,8 +471,8 @@ public func placeSidebar(
         nativeWindows[id]?.sidebar.place(
             visible ? NSRect(x: x, y: y, width: width, height: height) : nil,
             floating: floating, revealed: revealed)
-        // The page's room starts past the docked sidebar.
-        nativeWindows[id]?.pageDrop.left = visible && !floating ? x + width : 0
+        nativeWindows[id]?.pageDrop.sidebar =
+            visible && !floating ? NSRect(x: x, y: y, width: width, height: height) : nil
     }
 }
 
