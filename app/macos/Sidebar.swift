@@ -224,7 +224,7 @@ struct SpaceSections: View {
                     if !page.collapsed {
                         ItemRows(
                             model: model, items: page.pinned, parent: page.roots.pinned,
-                            selected: page.selected)
+                            selected: page.selected, pinned: true)
                         // Dropped on, the divider puts the node last among the pinned tabs.
                         DividerRow(model: model, clearable: !page.today.isEmpty)
                             .dropDestination(for: String.self) { ids, _ in
@@ -487,6 +487,8 @@ struct ItemRows: View {
     /// Their container: a section's root, or a folder.
     let parent: Int
     let selected: Int?
+    /// Among the pinned tabs, whose close button only deselects them, like Arc's.
+    var pinned = false
     var depth = 0
 
     var body: some View {
@@ -497,7 +499,7 @@ struct ItemRows: View {
                     if case .split(tab.id, let leading) = model.dropTarget {
                         SplitPreview(tab: tab, leading: leading, tint: model.themeColor)
                     } else {
-                        TabRow(model: model, tab: tab, active: tab.id == selected)
+                        TabRow(model: model, tab: tab, active: tab.id == selected, pinned: pinned)
                     }
                 case .folder(let id, let title, let expanded, _):
                     FolderRow(model: model, id: id, title: title, expanded: expanded)
@@ -509,7 +511,7 @@ struct ItemRows: View {
             if case .folder(let id, _, true, let children) = item {
                 ItemRows(
                     model: model, items: children, parent: id, selected: selected,
-                    depth: depth + 1)
+                    pinned: pinned, depth: depth + 1)
             }
         }
     }
@@ -528,6 +530,7 @@ struct TabRow: View {
     @ObservedObject var model: AppModel
     let tab: Tab
     let active: Bool
+    var pinned = false
     private let _hovered = State<Bool>(initialValue: false)
     private var hovered: Bool {
         get { _hovered.wrappedValue }
@@ -535,8 +538,10 @@ struct TabRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
+            // A 16-point icon in a 24-point slot, like Arc's.
             Favicon(url: tab.favicon, size: 16).opacity(tab.asleep == true ? 0.55 : 1)
+                .frame(width: 24, height: 24)
             if model.renaming == tab.id {
                 NameField(model: model, id: tab.id, title: tab.label, blank: true)
             } else {
@@ -547,24 +552,16 @@ struct TabRow: View {
                 }
                 Spacer(minLength: 0)
                 if hovered || active {
-                    Button {
+                    // Like Arc's: a minus for a pinned tab, which stays, an x for the others.
+                    CloseButton(symbol: pinned ? "minus" : "xmark", help: "Close \(tab.label)") {
                         model.run("close/\(tab.id)")
-                    } label: {
-                        Image(systemName: active ? "minus" : "xmark")
-                            .font(.system(size: 10, weight: .semibold))
-                            .frame(width: 22, height: 22)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6).fill(.primary.opacity(0.08)))
-                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
                     .opacity(hovered ? 1 : 0)
-                    .help("Close \(tab.label)")
                 }
             }
         }
-        .padding(.leading, 10)
-        .padding(.trailing, 5)
+        .padding(.leading, 6)
+        .padding(.trailing, 6)
         .font(.system(size: 14))
         .foregroundStyle(Ink.primary)
         .frame(height: Measure.rowFill)
@@ -725,14 +722,38 @@ struct SplitRow: View {
         .padding(.leading, 8)
         .padding(.trailing, 4)
         .font(.system(size: 14))
-        .frame(maxHeight: .infinity)
+        .frame(height: 28)
         .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(tab.id == selected ? Ink.selected : Ink.child))
+            RoundedRectangle(cornerRadius: 8).fill(tab.id == selected ? Ink.child : .clear))
         .contentShape(Rectangle())
         .onTapGesture { model.run("select/\(tab.id)") }
         .rightClick { model.run("menu/node/\(id)") }
         .help(tab.label)
+    }
+}
+
+/// A row's close button, like Arc's: a 24-point square, tinted while hovered, its glyph
+/// a little faded.
+struct CloseButton: View {
+    let symbol: String
+    let help: String
+    let action: () -> Void
+    private let _hovered = State<Bool>(initialValue: false)
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.ink((0x000000, 0.565), (0xFFFFFF, 0.592)))
+                .frame(width: 24, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(_hovered.wrappedValue ? Color.ink((0x000000, 0.1), (0xFFFFFF, 0.1)) : .clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { _hovered.wrappedValue = $0 }
+        .help(help)
     }
 }
 

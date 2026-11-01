@@ -143,8 +143,16 @@ fn tab_menu(sidebar: &Sidebar, id: NodeId, tab: &Tab) -> Vec<Entry> {
     let pinned = sidebar.is_pinned(id);
     let pin = if pinned { "Unpin Tab" } else { "Pin Tab" };
     let mute = if tab.muted { "Unmute Tab" } else { "Mute Tab" };
+    // In Arc's order: the link first, then the tab's own settings.
     let mut menu = vec![
         copy_link(&tab.url),
+        item(
+            "copy-markdown",
+            "Copy Link as Markdown",
+            Action::CopyLink(format!("[{}]({})", tab.label(), tab.url)),
+        ),
+        item("share", "Share…", Action::Share(tab.url.clone())),
+        Entry::Separator,
         item(
             "rename",
             "Rename Tab",
@@ -560,6 +568,9 @@ mod tests {
             titles(&menu),
             [
                 "Copy Link",
+                "Copy Link as Markdown",
+                "Share…",
+                "-",
                 "Rename Tab",
                 "Mute Tab",
                 "-",
@@ -607,7 +618,7 @@ mod tests {
         );
         sidebar.toggle_mute(tab).unwrap();
         let menu = build(&sidebar, Target::Node(tab)).unwrap();
-        assert_eq!(titles(&menu)[2], "Unmute Tab");
+        assert_eq!(titles(&menu)[5], "Unmute Tab");
         assert_eq!(choose(&sidebar, tab, "unknown"), None);
     }
 
@@ -631,10 +642,10 @@ mod tests {
         let pinned = sidebar.spaces()[0].pinned;
         let tab = sidebar.add_tab(pinned, "a", "a").unwrap();
         let menu = build(&sidebar, Target::Node(tab)).unwrap();
-        assert_eq!(titles(&menu)[4], "Unpin Tab");
+        assert_eq!(titles(&menu)[7], "Unpin Tab");
         // Its saved url is the current one: there is nothing to replace it with yet.
         assert_eq!(
-            titles(&menu)[5..8],
+            titles(&menu)[8..11],
             [
                 "Edit Pinned Page ▸",
                 "  (Replace Pinned URL with Current)",
