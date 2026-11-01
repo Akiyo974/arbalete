@@ -140,6 +140,7 @@ final class SettingsModel: ObservableObject {
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
             styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
         window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false
         window.title = "Settings"
         window.contentView = NSHostingView(rootView: SettingsView(settings: self))
@@ -172,15 +173,26 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
 
 struct SettingsView: View {
     @ObservedObject var settings: SettingsModel
+    private let tab = State(initialValue: "General")
 
     var body: some View {
-        TabView {
-            General(settings: settings).tabItem { Text("General") }
-            ProfilesSettings(settings: settings)
-                .tabItem { Text("Profiles") }
-            LinksSettings(settings: settings).tabItem { Text("Links") }
-            ShortcutsList().tabItem { Text("Shortcuts") }
+        // A segmented picker rather than a TabView, whose tabs macOS moves to the toolbar and
+        // sometimes lays out a single tab wide.
+        VStack(spacing: 16) {
+            Picker("", selection: tab.projectedValue) {
+                ForEach(["General", "Profiles", "Links", "Shortcuts"], id: \.self) { Text($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            switch tab.wrappedValue {
+            case "Profiles": ProfilesSettings(settings: settings)
+            case "Links": LinksSettings(settings: settings)
+            case "Shortcuts": ShortcutsList()
+            default: General(settings: settings)
+            }
         }
+        .frame(maxHeight: .infinity, alignment: .top)
         .padding(.top, 28)
         .padding(16)
         .frame(minWidth: 600, minHeight: 440)
