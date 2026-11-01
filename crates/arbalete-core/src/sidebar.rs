@@ -1277,6 +1277,20 @@ impl Sidebar {
         self.remove_rows(&rows)
     }
 
+    /// Removes a split with its tabs, as `clear_today` removes rows.
+    pub fn remove_split(&mut self, split: NodeId) -> Result<Vec<Tab>, Error> {
+        self.split_children(split)?;
+        self.remove_rows(&[split])
+    }
+
+    /// Takes every tab out of a split, as rows in its place, in its order.
+    pub fn separate_all(&mut self, split: NodeId) -> Result<(), Error> {
+        for tab in self.split_children(split)?.into_iter().rev() {
+            self.separate(tab)?;
+        }
+        Ok(())
+    }
+
     /// Removes a folder with what it holds, as `clear_today` removes rows.
     pub fn remove_folder(&mut self, folder: NodeId) -> Result<Vec<Tab>, Error> {
         self.folder_mut(folder)?;
@@ -3009,6 +3023,23 @@ mod tests {
         let factors = sidebar.split_layout(split).factors;
         assert!((factors.iter().sum::<f64>() - 1.0).abs() < 1e-9);
         assert_eq!(factors.len(), 3);
+    }
+
+    #[test]
+    fn separates_or_removes_a_whole_split() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let [a, b, c, d] = ["a", "b", "c", "d"].map(|url| sidebar.open_tab(home.id, url).unwrap());
+        let split = sidebar.split(b, a).unwrap();
+        sidebar.split(c, b).unwrap();
+        sidebar.separate_all(split).unwrap();
+        assert_eq!(children(&sidebar, home.today), [a, b, c, d]);
+        assert!(sidebar.node(split).is_none());
+        let split = sidebar.split(b, a).unwrap();
+        let removed = sidebar.remove_split(split).unwrap();
+        assert_eq!(removed.len(), 2);
+        assert_eq!(children(&sidebar, home.today), [c, d]);
+        assert_eq!(sidebar.remove_split(c), Err(Error::UnknownNode));
     }
 
     #[test]
