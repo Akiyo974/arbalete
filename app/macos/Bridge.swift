@@ -301,6 +301,7 @@ final class NativeWindow {
     let importModel: ImportModel
     let splitHandles: SplitHandles
     let paneBars: PaneBars
+    let pageDrop: PageDrop
     /// The panels above the page, by the name of the web view they stand for, like "overlay".
     var surfaces: [String: Surface] = [:]
     private var observers: [NSObjectProtocol] = []
@@ -366,6 +367,7 @@ final class NativeWindow {
         surfaces["import"] = importSurface
         splitHandles = SplitHandles(in: window, model: app)
         paneBars = PaneBars(model: app)
+        pageDrop = PageDrop(in: window, model: app)
     }
 
     /// Closes its panels, the window they belong to closing.
@@ -375,6 +377,7 @@ final class NativeWindow {
         surfaces.values.forEach { $0.close() }
         splitHandles.close()
         paneBars.close()
+        pageDrop.close()
     }
 
     /// Gives one of its views an event, by the name of the web view it stands for.
@@ -453,6 +456,8 @@ public func placeSidebar(
         nativeWindows[id]?.sidebar.place(
             visible ? NSRect(x: x, y: y, width: width, height: height) : nil,
             floating: floating, revealed: revealed)
+        // The page's room starts past the docked sidebar.
+        nativeWindows[id]?.pageDrop.left = visible && !floating ? x + width : 0
     }
 }
 

@@ -158,8 +158,8 @@ final class SidebarHost {
         let bounds = container.bounds
         catchers[0].frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - 40))
         catchers[1].frame = NSRect(x: 76, y: bounds.height - 40, width: max(0, bounds.width - 76), height: 40)
-        // Past the window's buttons and the sidebar's toggle, before the navigation buttons.
-        // The toolbar's room, centered with the window's buttons.
+        // Past the window's buttons and the sidebar's toggle, before the navigation buttons, in
+        // the toolbar's room, centered with the window's buttons.
         let band = windowButtonsCenter * 2
         drag.frame = NSRect(
             x: 108, y: bounds.height - band, width: max(0, bounds.width - 208), height: band)

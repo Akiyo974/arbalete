@@ -231,5 +231,6 @@ public func placePanes(
         // The card's view, which its window keeps alive.
         let card = card.map { Unmanaged<NSView>.fromOpaque($0).takeUnretainedValue() }
         nativeWindows[id]?.paneBars.place(panes, in: card)
+        nativeWindows[id]?.pageDrop.panes = panes
     }
 }
