@@ -34,9 +34,10 @@ const DIRECT_OBJECT: u32 = u32::from_be_bytes(*b"----");
 const CORE_EVENT: u32 = u32::from_be_bytes(*b"aevt");
 const OPEN_DOCUMENTS: u32 = u32::from_be_bytes(*b"odoc");
 
-/// The page's corner radius, in points: the window's, about 16 on macOS 26, less the card's
-/// margin (CARD_MARGIN in shell.rs), so that their corners are concentric.
-const CARD_RADIUS: f64 = 11.0;
+/// The page's corner radius, in points, like Arc's: the window's, about 16 on macOS 26, less the
+/// card's margin (CARD_MARGIN in shell.rs), so that their corners are concentric. A split's pages
+/// take it too, below their bars.
+const CARD_RADIUS: f64 = 6.0;
 
 /// Core Graphics' color, which only passes through here: no need for its bindings.
 #[repr(C)]
@@ -1272,10 +1273,6 @@ pub fn round_card(view: *mut c_void) {
     }
 }
 
-/// A split's page's corners, like Arc's: smaller than the card's, and only below, under the bar
-/// at its top.
-const PANE_RADIUS: f64 = 6.0;
-
 /// Peek's card's corners, like Arc's.
 const PEEK_RADIUS: f64 = 10.0;
 
@@ -1291,7 +1288,7 @@ pub fn round_peek(view: *mut c_void) {
 pub fn round_split(view: *mut c_void) {
     round(view, 0.0);
     for page in pages(view) {
-        round(page, PANE_RADIUS);
+        round(page, CARD_RADIUS);
         corners(page, true);
     }
 }

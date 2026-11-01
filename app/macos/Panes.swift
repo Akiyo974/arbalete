@@ -26,7 +26,7 @@ struct Pane: Decodable, Equatable {
 
 /// The focused pane's outline, like Arc's: the theme's color, 2 points wide.
 private let outlineWidth: CGFloat = 2
-/// A page's, like Arc's (PANE_RADIUS in app/src/mac.rs).
+/// The card's, like Arc's (CARD_RADIUS in app/src/mac.rs).
 private let paneRadius: CGFloat = 6
 
 /// A view the page under it keeps the clicks through.

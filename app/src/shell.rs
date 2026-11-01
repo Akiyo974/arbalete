@@ -46,9 +46,10 @@ const SIDEBAR_WIDTH: i32 = 260;
 /// The docked sidebar is wider while it shows the library (LIBRARY_SHIFT in ui/src/pager.ts).
 const LIBRARY_WIDTH: i32 = SIDEBAR_WIDTH + 180;
 
-/// The page is a card inset from the window's edges and from the sidebar. The window paints its
-/// margins with the colors the sidebar sends (Command::WindowColors).
-const CARD_MARGIN: i32 = 5;
+/// The page is a card inset from the window's edges and from the sidebar, 10 points like Arc's,
+/// as far as a split's pages stand from each other. The window paints its margins with the
+/// colors the sidebar sends (Command::WindowColors).
+const CARD_MARGIN: i32 = 10;
 
 /// The window's color until the sidebar sends the displayed Space's: the dark one, its most
 /// common appearance (--window-end in ui/src/index.css).
@@ -75,9 +76,6 @@ const FRAME_MS: i64 = 8;
 
 /// The room between a split's pages, in which their dividers sit, like Arc's.
 const SPLIT_GAP: i32 = 10;
-/// How far a split's pages are inset in the card, so that they stand as far from the window's
-/// edges as from each other, like Arc's.
-const SPLIT_INSET: i32 = SPLIT_GAP - CARD_MARGIN;
 /// The bar at the top of each page of a split, above the page, like Arc's.
 const PANE_BAR_HEIGHT: i32 = 32;
 
@@ -4229,17 +4227,11 @@ fn lay_out_split() {
         } else {
             card.width
         }
-    }) - 2 * SPLIT_INSET;
+    });
     SLOT_LENGTHS.set((layout.stacked, pane_lengths(room, &layout.factors)));
     split
         .set_to_box_layout(Some(&BoxLayoutSettings {
             horizontal: (!layout.stacked).into(),
-            inside_border_insets: Insets {
-                top: SPLIT_INSET,
-                left: SPLIT_INSET,
-                bottom: SPLIT_INSET,
-                right: SPLIT_INSET,
-            },
             between_child_spacing: SPLIT_GAP,
             cross_axis_alignment: AxisAlignment::STRETCH,
             ..Default::default()
@@ -7078,7 +7070,7 @@ mod tests {
         };
         let to = SidebarMode::Hidden.layout(&SIZE).card;
         assert_eq!(rect(&lerp_rect(&from, &to, 0.0)), rect(&from));
-        assert_eq!(rect(&lerp_rect(&from, &to, 0.5)), (137, 7, 856, 586));
+        assert_eq!(rect(&lerp_rect(&from, &to, 0.5)), (140, 10, 851, 581));
         assert_eq!(rect(&lerp_rect(&from, &to, 1.0)), rect(&to));
     }
 

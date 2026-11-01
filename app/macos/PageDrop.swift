@@ -17,7 +17,7 @@ struct PageDropTarget: Equatable {
 }
 
 /// The card's margin from the page's room (CARD_MARGIN in app/src/shell.rs).
-private let cardMargin: CGFloat = 5
+private let cardMargin: CGFloat = 10
 /// Like Arc's, the room beside the sidebar where a drag shows the previous Space, at its left,
 /// or the next one, at its right.
 private let leadingEdge: CGFloat = 80
