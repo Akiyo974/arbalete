@@ -73,8 +73,8 @@ const FLOATING_DOCK_DURATION: u32 = 50;
 /// The time between two steps of a native slide: about a frame.
 const FRAME_MS: i64 = 8;
 
-/// The room between a split's pages, in which their dividers sit, like Arc's.
-const SPLIT_GAP: i32 = 10;
+/// The room between a split's pages, in which their dividers sit: the card's margin, like Arc's.
+const SPLIT_GAP: i32 = CARD_MARGIN;
 /// The bar at the top of each page of a split, above the page, like Arc's.
 const PANE_BAR_HEIGHT: i32 = 32;
 
@@ -4124,7 +4124,7 @@ fn split_rects() -> Vec<Rect> {
         .collect()
 }
 
-/// How long each of a split's pages is along `room`, by its part, 10 points apart; the last
+/// How long each of a split's pages is along `room`, by its part, SPLIT_GAP apart; the last
 /// takes what is left.
 fn pane_lengths(room: i32, factors: &[f64]) -> Vec<i32> {
     let count = factors.len() as i32;
@@ -4145,7 +4145,7 @@ fn pane_lengths(room: i32, factors: &[f64]) -> Vec<i32> {
         .collect()
 }
 
-/// Shares the card between the split's pages by their parts, 10 points apart, then puts the
+/// Shares the card between the split's pages by their parts, SPLIT_GAP apart, then puts the
 /// handles between them and the bars above them.
 fn lay_out_split() {
     let (_, Some(layout)) = win().split.borrow().clone() else {
@@ -6630,20 +6630,20 @@ mod tests {
     use arbalete_core::sidebar::NodeId;
 
     #[test]
-    fn a_split_shares_its_room_by_the_parts_10_points_apart() {
-        assert_eq!(pane_lengths(1010, &[0.5, 0.25, 0.25]), [495, 248, 247]);
-        assert_eq!(pane_lengths(810, &[0.5, 0.5]), [400, 400]);
+    fn a_split_shares_its_room_by_the_parts_5_points_apart() {
+        assert_eq!(pane_lengths(1010, &[0.5, 0.25, 0.25]), [500, 250, 250]);
+        assert_eq!(pane_lengths(805, &[0.5, 0.5]), [400, 400]);
     }
 
     #[test]
     fn a_split_handle_keeps_the_pages_wide_enough_and_snaps_to_halves() {
-        // Two pages of 500 points from 100, the handle 10 points wide between them.
+        // Two pages of 500 points from 100, the handle 5 points wide between them.
         let part = |point| lead_part((100.0, 500.0), 500.0, point);
-        assert!((part(405.0) - 0.3).abs() < 1e-9);
+        assert!((part(402.5) - 0.3).abs() < 1e-9);
         assert_eq!(part(150.0), 0.22);
         assert_eq!(part(1000.0), 0.78);
         assert_eq!(part(612.0), 0.5);
-        assert!((part(625.0) - 0.52).abs() < 1e-9);
+        assert!((part(622.5) - 0.52).abs() < 1e-9);
     }
 
     #[test]
