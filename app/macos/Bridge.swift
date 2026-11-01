@@ -31,6 +31,7 @@ final class AppModel: ObservableObject {
     /// Option is held: a split's tabs offer to leave it rather than close.
     @Published var optionHeld = false
     private var flags: Any?
+    private var appearance: NSKeyValueObservation?
     /// A split a tab resting on another's middle will offer, once it rests long enough.
     var pendingSplit: DropTarget?
     var splitWait: DispatchWorkItem?
@@ -50,6 +51,14 @@ final class AppModel: ObservableObject {
         flags = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             self?.optionHeld = event.modifierFlags.contains(.option)
             return event
+        }
+        // A theme in automatic appearance follows the system's: the views read it again.
+        appearance = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.state = self.state
+                self.paintWindow()
+            }
         }
     }
 

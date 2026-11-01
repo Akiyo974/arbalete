@@ -3,14 +3,11 @@
 import AppKit
 import SwiftUI
 
-/// Whether a theme shows light text: as its mode forces, or, like Arc, when its leading color is
-/// too dark for black text to stand out more than white; as the system is without colors.
+/// Whether a theme shows light text: as its mode forces, or as the system's appearance is in
+/// automatic appearance, like Arc's.
 @MainActor func isDark(_ theme: Theme?) -> Bool {
-    guard let theme else { return systemDark() }
-    if theme.mode != "auto" { return theme.mode == "dark" }
-    guard let lead = theme.colors.first else { return systemDark() }
-    // Black and white text contrast alike on a luminance of 0.179.
-    return luminance(lead) < 0.179
+    guard let theme, theme.mode != "auto" else { return systemDark() }
+    return theme.mode == "dark"
 }
 
 @MainActor func systemDark() -> Bool {
