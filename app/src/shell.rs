@@ -75,6 +75,8 @@ const FRAME_MS: i64 = 8;
 
 /// The room between a split's pages, in which their dividers sit, like Arc's.
 const SPLIT_GAP: i32 = 10;
+/// The bar at the top of each page of a split, above the page, like Arc's.
+const PANE_BAR_HEIGHT: i32 = 32;
 
 /// The overlay's size: one text field for now (ui/src/Overlay.tsx).
 /// The Command Bar's width, at most, and its search row's height: its results add to it
@@ -202,6 +204,8 @@ thread_local! {
     static WINDOWS: RefCell<Vec<Rc<Win>>> = RefCell::new(vec![Rc::new(Win::new(0))]);
     /// The window commands and events are about, by its id.
     static FOCUSED: Cell<u32> = const { Cell::new(0) };
+    /// The sidebar's width as a drag of its edge began, while it goes on.
+    static SIDEBAR_DRAG: Cell<Option<i32>> = const { Cell::new(None) };
     /// The extensions' bridge's browser (make_bridge).
     static BRIDGE: RefCell<Option<Browser>> = const { RefCell::new(None) };
     /// The other windows as quitting started, which the session keeps while they close.
@@ -524,7 +528,7 @@ impl SidebarMode {
     fn layout(self, size: &Size) -> Layout {
         let left = match self {
             SidebarMode::Shown => docked_width() + CARD_MARGIN,
-            SidebarMode::Floating => SIDEBAR_WIDTH + CARD_MARGIN,
+            SidebarMode::Floating => sidebar_width() + CARD_MARGIN,
             SidebarMode::Hidden | SidebarMode::Revealed => CARD_MARGIN,
         };
         let card = Rect {
@@ -537,7 +541,7 @@ impl SidebarMode {
             SidebarMode::Shown => Rect {
                 x: 0,
                 y: 0,
-                width: SIDEBAR_WIDTH,
+                width: sidebar_width(),
                 height: size.height,
             },
             SidebarMode::Hidden => Rect {
@@ -549,7 +553,7 @@ impl SidebarMode {
             SidebarMode::Revealed | SidebarMode::Floating => Rect {
                 x: FLOAT_INSET,
                 y: FLOAT_INSET,
-                width: SIDEBAR_WIDTH,
+                width: sidebar_width(),
                 height: size.height - 2 * FLOAT_INSET,
             },
         };
@@ -573,12 +577,93 @@ fn docked_width() -> i32 {
         win()
             .window
             .with_borrow(|window| window.as_ref().map(|window| window.size().width))
-            .unwrap_or(LIBRARY_WIDTH)
+            .unwrap_or_else(library_width)
     } else if win().library.get() {
-        LIBRARY_WIDTH
+        library_width()
     } else {
-        SIDEBAR_WIDTH
+        sidebar_width()
     }
+}
+
+/// The least and the most the sidebar's edge may make it wide.
+const MIN_SIDEBAR: i32 = 180;
+const MAX_SIDEBAR: i32 = 500;
+
+/// The sidebar's width, as dragging its edge set it.
+fn sidebar_width() -> i32 {
+    app_settings().sidebar_width.clamp(MIN_SIDEBAR, MAX_SIDEBAR)
+}
+
+/// The docked sidebar's width while it shows the library, wider than its own by as much as
+/// `LIBRARY_WIDTH` is wider than `SIDEBAR_WIDTH`.
+fn library_width() -> i32 {
+    sidebar_width() + LIBRARY_WIDTH - SIDEBAR_WIDTH
+}
+
+/// Gives the sidebar the width its edge was dragged to, `x` points from the window's left edge.
+///
+/// Until the drag ends (end_sidebar_resize), the cards keep their size and place, cropped where
+/// the sidebar now reaches: resizing the pages, which CEF lays out and paints again, makes the
+/// drag stutter, even now and then.
+fn resize_sidebar(x: f64) {
+    let width = (x.round() as i32).clamp(MIN_SIDEBAR, MAX_SIDEBAR);
+    if width == sidebar_width() {
+        return;
+    }
+    if SIDEBAR_DRAG.get().is_none() {
+        SIDEBAR_DRAG.set(Some(sidebar_width()));
+    }
+    SETTINGS.with_borrow_mut(|settings| settings.sidebar_width = width);
+    in_each_window(|| {
+        #[cfg(target_os = "macos")]
+        {
+            place_native_sidebar();
+            // Out of the way until the pages take their place again.
+            crate::native::split_handles(win().id, false, &[]);
+            crate::native::panes(win().id, "[]");
+            let size = win()
+                .window
+                .with_borrow(|window| window.as_ref().map(|w| w.size()));
+            if let Some(size) = size
+                && win().sidebar_mode.get() == SidebarMode::Shown
+            {
+                let left = f64::from(win().sidebar_mode.get().layout(&size).card.x);
+                for card in card_windows() {
+                    crate::mac::crop_card(card, Some(left));
+                }
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        relayout_library();
+    });
+}
+
+/// Lays the windows out for the sidebar's width, once a drag of its edge ends.
+fn end_sidebar_resize() {
+    if SIDEBAR_DRAG.take().is_some() {
+        in_each_window(|| {
+            #[cfg(target_os = "macos")]
+            for card in card_windows() {
+                crate::mac::crop_card(card, None);
+            }
+            relayout_library();
+        });
+    }
+}
+
+/// The views of the pages a window shows, each in a card's window.
+#[cfg(target_os = "macos")]
+fn card_windows() -> Vec<*mut std::ffi::c_void> {
+    let split = win().split.borrow().0.clone();
+    let tabs = if split.is_empty() {
+        win().shown.get().into_iter().collect()
+    } else {
+        split
+    };
+    tabs.iter()
+        .filter_map(|tab| PAGES.with_borrow(|pages| pages.get(tab)?.view.browser()?.host()))
+        .map(|host| host.window_handle())
+        .collect()
 }
 
 /// The docked library shows the Spaces, over the whole window: the card is hidden.
@@ -1218,8 +1303,10 @@ fn sync_native_surfaces() {
         .card
         .with_borrow(|card| card.as_ref().map(|card| (card.is_visible(), card.bounds())));
     if let Some((visible, card)) = card {
-        let shown =
-            visible == 1 && app_settings().show_toolbar && win().slide.with_borrow(Option::is_none);
+        let shown = visible == 1
+            && app_settings().show_toolbar
+            && split_shown().is_none()
+            && win().slide.with_borrow(Option::is_none);
         let bar = Rect {
             height: PAGE_TOOLBAR_HEIGHT,
             ..card
@@ -1567,18 +1654,19 @@ fn update_drag_regions() {
     window.set_draggable_regions(Some(&regions));
 }
 
-/// The four margins around the `card` of a window of `size`, from `start`: the docked sidebar's
-/// edge, or the window's.
+/// The margins around the `card` of a window of `size`, from `start`: the docked sidebar's edge,
+/// or the window's. Beside the docked sidebar, the margin resizes it instead.
 fn margin_regions(size: &Size, card: &Rect, start: i32) -> Vec<DraggableRegion> {
     let (width, height) = (size.width, size.height);
     let (right, bottom) = (card.x + card.width, card.y + card.height);
     [
         (start, 0, width - start, card.y),
         (start, bottom, width - start, height - bottom),
-        (start, 0, card.x - start, height),
+        (start, 0, if start == 0 { card.x } else { 0 }, height),
         (right, 0, width - right, height),
     ]
     .into_iter()
+    .filter(|&(_, _, width, _)| width > 0)
     .map(|(x, y, width, height)| DraggableRegion {
         bounds: Rect {
             x,
@@ -3982,11 +4070,15 @@ fn show_split(focused: NodeId, tabs: &[NodeId], views: &[BrowserView], layout: S
             wake_page(tab, view);
         }
         *win().split.borrow_mut() = (tabs.to_vec(), Some(layout));
+        // The pages' bars stand for the bar above the page.
+        if let Some(toolbar) = win().toolbar_view.with_borrow(Clone::clone) {
+            toolbar.set_visible(0);
+        }
         lay_out_split();
         #[cfg(target_os = "macos")]
         for view in views {
             if let Some(host) = view.browser().and_then(|browser| browser.host()) {
-                crate::mac::round_card(host.window_handle());
+                crate::mac::round_pane(host.window_handle());
             }
         }
     }
@@ -3999,6 +4091,7 @@ fn show_split(focused: NodeId, tabs: &[NodeId], views: &[BrowserView], layout: S
         view.request_focus();
         shown_on_card(view);
     }
+    send_panes();
 }
 
 /// The panels a split's pages go in, in order: the card's, then the other cards'.
@@ -4074,14 +4167,20 @@ fn lay_out_split() {
     let Some((first, others)) = rects.split_first() else {
         return;
     };
+    // Each page under its bar.
+    let page = |rect: &Rect| Rect {
+        y: rect.y + PANE_BAR_HEIGHT,
+        height: rect.height - PANE_BAR_HEIGHT,
+        ..*rect
+    };
     if let Some(card) = win().card.with_borrow(Clone::clone) {
-        card.set_bounds(Some(first));
+        card.set_bounds(Some(&page(first)));
     }
     let panes = win().panes.borrow().clone();
     for (index, pane) in panes.iter().enumerate() {
         match others.get(index) {
             Some(rect) => {
-                pane.set_bounds(Some(rect));
+                pane.set_bounds(Some(&page(rect)));
                 pane.set_visible(win().colored.get().into());
             }
             None => pane.set_visible(0),
@@ -4091,6 +4190,57 @@ fn lay_out_split() {
         card.layout();
     }
     place_split_handles();
+    send_panes();
+}
+
+/// Tells the native interface where the split's pages are and how each stands, for their bars
+/// and the focused one's outline; none without a split shown.
+fn send_panes() {
+    #[cfg(target_os = "macos")]
+    {
+        let tabs = win().split.borrow().0.clone();
+        let focused = win().shown.get();
+        let split = tabs
+            .first()
+            .map(|&tab| STATE.with_borrow(|state| state.sidebar.row_of(tab)));
+        let panes: Vec<_> = tabs
+            .iter()
+            .zip(split_rects())
+            .map(|(&tab, rect)| {
+                let browser = PAGES.with_borrow(|pages| pages.get(&tab)?.view.browser());
+                let url = STATE
+                    .with_borrow_mut(|state| state.sidebar.tab_mut(tab).map(|tab| tab.url.clone()));
+                let can = |back: bool| {
+                    browser.as_ref().is_some_and(|browser| {
+                        (if back {
+                            browser.can_go_back()
+                        } else {
+                            browser.can_go_forward()
+                        }) == 1
+                    })
+                };
+                json!({
+                    "tab": tab, "split": split,
+                    "x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height,
+                    "bar": PANE_BAR_HEIGHT,
+                    "url": url.unwrap_or_default(),
+                    "back": can(true), "forward": can(false),
+                    "loading": browser.as_ref().is_some_and(|browser| browser.is_loading() == 1),
+                    "focused": focused == Some(tab),
+                })
+            })
+            .collect();
+        crate::native::panes(win().id, &json!(panes).to_string());
+    }
+}
+
+/// Tells each window showing `tab` in a split how its page now stands.
+fn pane_changed(tab: NodeId) {
+    in_each_window(|| {
+        if win().split.borrow().0.contains(&tab) {
+            send_panes();
+        }
+    });
 }
 
 /// The split's pages, in the window's points, along its axis: where each starts and its length.
@@ -4170,6 +4320,7 @@ fn lead_part((start, lead): (f64, f64), trail: f64, point: f64) -> f64 {
 /// Gives the pages on either side of the handle after the page at `index` equal parts.
 fn even_panes(index: usize) {
     share_panes(index, 0.5);
+    save_session();
 }
 
 /// Gives the page at `index` `part` of the room it shares with the next one, which takes the
@@ -4191,7 +4342,6 @@ fn share_panes(index: usize, part: f64) {
     if saved.is_ok() {
         win().split.borrow_mut().1 = Some(layout);
         lay_out_split();
-        save_session();
     }
 }
 
@@ -4320,7 +4470,11 @@ fn hide_content() {
         for pane in win().panes.borrow().iter() {
             pane.set_visible(0);
         }
+        if let Some(toolbar) = win().toolbar_view.with_borrow(Clone::clone) {
+            toolbar.set_visible(app_settings().show_toolbar.into());
+        }
         place_card();
+        send_panes();
     }
     // A picture of a page another window took no longer stands in for it.
     #[cfg(target_os = "macos")]
@@ -4654,6 +4808,13 @@ fn run_command(command: Command) {
         }
         (Command::Close(tab), _) => close_tab(tab),
         (Command::ResizePane(index, point), _) => resize_panes(index, point),
+        (Command::ResizeSidebar(x), _) => resize_sidebar(x),
+        // Kept once the drag ends, not on every move, which would stutter.
+        (Command::Resized, _) => {
+            end_sidebar_resize();
+            save_session();
+            save_settings();
+        }
         (Command::EvenPanes(index), _) => even_panes(index),
         (Command::Reopen(rank), _) => reopen_tab(rank),
         (Command::Pin(tab), _) => toggle_pin(tab),
@@ -4708,14 +4869,14 @@ fn run_command(command: Command) {
         (Command::Move(id, parent, index), _) => {
             let _ = update_sidebar(|sidebar| sidebar.move_node(id, parent, index));
         }
-        (Command::Split(tab, target), _) => {
-            let _ = update_sidebar(|sidebar| sidebar.split(tab, target));
+        (Command::Split(tab, target, before), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.split_beside(tab, target, before));
         }
         (Command::Duplicate(tab, parent, index), _) => {
             let _ = update_sidebar(|sidebar| sidebar.duplicate(tab, parent, index));
         }
-        (Command::SplitDuplicate(tab, target), _) => {
-            let _ = update_sidebar(|sidebar| sidebar.split_duplicate(tab, target));
+        (Command::SplitDuplicate(tab, target, before), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.split_duplicate(tab, target, before));
         }
         (Command::Separate(tab), _) => {
             let _ = update_sidebar(|sidebar| sidebar.separate(tab));
@@ -4914,7 +5075,7 @@ pub fn is_over_sidebar(x: f64) -> bool {
     let width = match win().sidebar_mode.get() {
         SidebarMode::Hidden => return false,
         SidebarMode::Shown => docked_width(),
-        SidebarMode::Revealed | SidebarMode::Floating => SIDEBAR_WIDTH,
+        SidebarMode::Revealed | SidebarMode::Floating => sidebar_width(),
     };
     x < f64::from(width)
 }
@@ -5965,6 +6126,7 @@ wrap_display_handler! {
                     tab.url = url;
                 }
             });
+            pane_changed(tab);
         }
 
         fn on_title_change(&self, browser: Option<&mut Browser>, title: Option<&CefString>) {
@@ -6111,6 +6273,9 @@ wrap_load_handler! {
         fn on_loading_state_change(&self, browser: Option<&mut Browser>, is_loading: i32, can_go_back: i32, can_go_forward: i32) {
             #[cfg(target_os = "macos")]
             cover_revived(browser.as_deref(), is_loading == 1);
+            if let Some(tab) = browser.as_deref().and_then(page_tab) {
+                pane_changed(tab);
+            }
             if !is_shown(browser) {
                 return;
             }
@@ -6509,14 +6674,13 @@ mod tests {
     }
 
     #[test]
-    fn the_margins_start_past_the_sidebar_while_it_is_docked() {
+    fn the_margins_start_past_the_sidebar_and_its_edge_while_it_is_docked() {
         let (m, s) = (CARD_MARGIN, SIDEBAR_WIDTH);
         assert_eq!(
             regions(SidebarMode::Shown),
             [
                 (s, 0, 1000 - s, m),
                 (s, 600 - m, 1000 - s, m),
-                (s, 0, m, 600),
                 (1000 - m, 0, m, 600)
             ]
         );

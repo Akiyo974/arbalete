@@ -243,6 +243,8 @@ struct SpaceSections: View {
                     }
                 }
                 .padding(.bottom, 8)
+                // Rows moving or dropped slide to their places, as quickly as Arc's.
+                .animation(.easeInOut(duration: 0.12), value: (page.pinned + page.today).map(\.id))
             }
             .scrollIndicators(.never)
         }
@@ -253,6 +255,21 @@ struct SpaceSections: View {
 struct Favorites: View {
     @ObservedObject var model: AppModel
     let page: SpacePage
+    private let _size = State<CGSize>(initialValue: .zero)
+
+    /// The favorites as a drag shows them, like Arc's: the one dragged moves to where it would
+    /// land, or an empty tile opens there for a tab from elsewhere.
+    private var shownFavorites: [FavoriteSlot] {
+        var slots = page.favorites.map { FavoriteSlot(tab: $0) }
+        guard let slot = model.favoriteSlot, let dragged = model.dragged else { return slots }
+        if let from = slots.firstIndex(where: { $0.tab?.id == dragged }) {
+            let moved = slots.remove(at: from)
+            slots.insert(moved, at: min(from < slot ? slot - 1 : slot, slots.count))
+        } else {
+            slots.insert(FavoriteSlot(tab: nil), at: min(slot, slots.count))
+        }
+        return slots
+    }
 
     var body: some View {
         let count = page.favorites.count
@@ -271,14 +288,23 @@ struct Favorites: View {
                 columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: columns),
                 spacing: 6
             ) {
-                ForEach(Array(page.favorites.enumerated()), id: \.element.id) { index, tab in
-                    FavoriteTile(model: model, tab: tab, active: tab.id == page.selected)
-                        .draggable(String(tab.id))
-                        .dropDestination(for: String.self) { ids, _ in
-                            drop(ids) { model.move($0, to: page.roots.favorites, index) }
-                        }
+                ForEach(shownFavorites, id: \.self) { slot in
+                    if let tab = slot.tab {
+                        FavoriteTile(model: model, tab: tab, active: tab.id == page.selected)
+                            .opacity(tab.id == model.dragged && model.favoriteSlot != nil ? 0 : 1)
+                            .onDrag { model.startDrag(.tab(tab)) }
+                    } else {
+                        Color.clear.frame(height: 50)
+                    }
                 }
             }
+            .animation(.easeInOut(duration: 0.12), value: shownFavorites)
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { _size.wrappedValue = $0 }
+            .onDrop(
+                of: [.plainText],
+                delegate: FavoritesDrop(
+                    model: model, favorites: page.roots.favorites, count: count,
+                    columns: columns, size: _size.wrappedValue))
             .padding(.bottom, 8)
         }
     }
@@ -460,29 +486,21 @@ struct ItemRows: View {
 
     var body: some View {
         ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-            Group {
+            DropRow(model: model, item: item, place: { model.move($0, to: parent, index + $1) }) {
                 switch item {
                 case .tab(let tab):
-                    TabRow(model: model, tab: tab, active: tab.id == selected)
-                case .folder(let id, let title, let expanded, let children):
-                    // Dropped on, a folder takes the node in, after its tabs.
+                    if case .split(tab.id, let leading) = model.dropTarget {
+                        SplitPreview(tab: tab, leading: leading, tint: model.themeColor)
+                    } else {
+                        TabRow(model: model, tab: tab, active: tab.id == selected)
+                    }
+                case .folder(let id, let title, let expanded, _):
                     FolderRow(model: model, id: id, title: title, expanded: expanded)
-                        .dropDestination(for: String.self) { ids, _ in
-                            drop(ids) { model.move($0, to: id, children.count) }
-                        }
                 case .split(let id, let tabs):
                     SplitRow(model: model, id: id, tabs: tabs, selected: selected)
                 }
             }
             .padding(.leading, CGFloat(depth) * 14)
-            .draggable(String(item.id))
-            .dropDestination(for: String.self) { ids, location in
-                // On the middle of a tab, the tab dropped joins it in a split, like Arc's.
-                if case .tab(let tab) = item, abs(location.y - rowHeight / 2) < rowHeight / 4 {
-                    return drop(ids) { model.split($0, onto: tab.id) }
-                }
-                return drop(ids) { model.move($0, to: parent, index) }
-            }
             if case .folder(let id, _, true, let children) = item {
                 ItemRows(
                     model: model, items: children, parent: id, selected: selected,
@@ -491,9 +509,6 @@ struct ItemRows: View {
         }
     }
 }
-
-/// A tab's row's height, whose middle half takes a tab dropped into a split.
-private let rowHeight: CGFloat = 34
 
 /// Runs `move` with the id a drag carries, if it carries one.
 func drop(_ ids: [String], _ move: (Int) -> Void) -> Bool {
@@ -638,32 +653,96 @@ struct SplitRow: View {
     let id: Int
     let tabs: [Tab]
     let selected: Int?
+    private let _hovered = State<Bool>(initialValue: false)
+    private var hovered: Bool {
+        get { _hovered.wrappedValue }
+        nonmutating set { _hovered.wrappedValue = newValue }
+    }
 
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(tabs) { tab in
-                HStack(spacing: 6) {
-                    Favicon(url: tab.favicon, size: 14)
-                    Text(tab.label).lineLimit(1)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 8)
-                .frame(height: 30)
-                .frame(maxWidth: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(.primary.opacity(tab.id == selected ? 0.15 : 0)))
-                .contentShape(Rectangle())
-                .onTapGesture { model.run("select/\(tab.id)") }
-                .rightClick { model.run("menu/node/\(id)") }
-                .help(tab.label)
-                .dropDestination(for: String.self) { ids, _ in
-                    drop(ids) { model.split($0, onto: tab.id) }
+        // Its tabs share the row evenly, whatever they show, like Arc's.
+        let count = tabs.count + (joining == nil ? 0 : 1)
+        LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(minimum: 0), spacing: 4), count: count),
+            spacing: 0
+        ) {
+            ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
+                if joining == index { DropChip(tint: model.themeColor) }
+                chip(tab)
+            }
+            if joining == tabs.count { DropChip(tint: model.themeColor) }
+        }
+        .padding(2)
+        .frame(height: 34)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(.primary.opacity(active ? 0.15 : hovered ? 0.07 : 0))
+                .shadow(color: .black.opacity(active ? 0.08 : 0), radius: 1, y: 1))
+        .onHover { hovered = $0 }
+    }
+
+    /// The split holds the selected tab.
+    private var active: Bool { tabs.contains { $0.id == selected } }
+
+    /// Where a tab dropped on the row would join it, if one is.
+    private var joining: Int? {
+        if case .join(id, let index) = model.dropTarget { return index }
+        return nil
+    }
+
+    /// A tab of the split: while the row is hovered, a button takes its title's place, which
+    /// closes it, or with Option takes it out of the split, like Arc's. The title stays, unseen,
+    /// so that nothing moves.
+    private func chip(_ tab: Tab) -> some View {
+        HStack(spacing: 6) {
+            Favicon(url: tab.favicon, size: 14)
+            Text(tab.label).lineLimit(1).opacity(hovered ? 0 : 1)
+            Spacer(minLength: 0)
+        }
+        .overlay(alignment: .trailing) {
+            if hovered {
+                let separate = model.optionHeld
+                ChipButton(
+                    symbol: separate ? "rectangle.lefthalf.inset.filled.arrow.left" : "xmark",
+                    help: separate ? "Separate from Split View" : "Close \(tab.label)"
+                ) {
+                    model.run(separate ? "separate/\(tab.id)" : "close/\(tab.id)")
                 }
             }
         }
-        .padding(.horizontal, 2)
-        .frame(height: 34)
+        .padding(.leading, 8)
+        .padding(.trailing, 4)
+        .frame(height: 30)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(.primary.opacity(tab.id == selected ? 0.15 : 0.06)))
+        .contentShape(Rectangle())
+        .onTapGesture { model.run("select/\(tab.id)") }
+        .rightClick { model.run("menu/node/\(id)") }
+        .help(tab.label)
+    }
+}
+
+/// A split tab's button, tinted while hovered.
+private struct ChipButton: View {
+    let symbol: String
+    let help: String
+    let action: () -> Void
+    private let _hovered = State<Bool>(initialValue: false)
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .semibold))
+                .frame(width: 22, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(.primary.opacity(_hovered.wrappedValue ? 0.1 : 0)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { _hovered.wrappedValue = $0 }
+        .help(help)
     }
 }
 

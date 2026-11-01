@@ -276,20 +276,26 @@ pub enum Command {
     /// Moves a tab or a folder to an index among a container's or a folder's children, as the
     /// app counts them once the node has left: `move/<id>/<parent id>/<index>`.
     Move(NodeId, NodeId, usize),
-    /// Puts a tab beside another in a split row, in the other's place: `split/<tab id>/<target
-    /// id>`.
-    Split(NodeId, NodeId),
+    /// Puts a tab beside another in a split row, in the other's place, after it or before it:
+    /// `split/<tab id>/<target id>`, `split/<tab id>/<target id>/before`.
+    Split(NodeId, NodeId, bool),
     /// Adds a copy of a tab at an index among a container's or a folder's children:
     /// `duplicate/<tab id>/<parent id>/<index>`.
     Duplicate(NodeId, NodeId, usize),
-    /// Puts a copy of a tab beside another in a split row, in the other's place:
-    /// `split-duplicate/<tab id>/<target id>`.
-    SplitDuplicate(NodeId, NodeId),
+    /// Puts a copy of a tab beside another in a split row, as `Split` puts the tab:
+    /// `split-duplicate/<tab id>/<target id>`, `split-duplicate/<tab id>/<target id>/before`.
+    SplitDuplicate(NodeId, NodeId, bool),
     /// Takes a tab out of its split row, as the row after it: `separate/<tab id>`.
     Separate(NodeId),
     /// Moves the handle after a split's page at an index to a point along the split, in the
     /// window's points from its left or top edge: `pane/resize/<index>/<point>`.
     ResizePane(usize, f64),
+    /// Gives the sidebar the width its edge was dragged to, in the window's points from its left
+    /// edge: `sidebar/width/<point>`.
+    ResizeSidebar(f64),
+    /// Keeps the sizes a drag of the sidebar's edge or of a split's handle gave, once it ends:
+    /// `resized`.
+    Resized,
     /// Gives the pages on either side of a split's handle at an index equal parts:
     /// `pane/even/<index>`.
     EvenPanes(usize),
@@ -808,22 +814,13 @@ impl Command {
                     let id = serde_json::from_str(id).ok()?;
                     return percent_decode(title).map(|title| Self::Rename(id, title));
                 }
-                if let Some((tab, target)) =
-                    path.strip_prefix("split/").and_then(|r| r.split_once('/'))
-                {
-                    let tab = serde_json::from_str(tab).ok()?;
-                    return serde_json::from_str(target)
-                        .ok()
-                        .map(|target| Self::Split(tab, target));
+                if let Some(args) = path.strip_prefix("split/") {
+                    let (tab, target, before) = parse_split(args)?;
+                    return Some(Self::Split(tab, target, before));
                 }
-                if let Some((tab, target)) = path
-                    .strip_prefix("split-duplicate/")
-                    .and_then(|r| r.split_once('/'))
-                {
-                    let tab = serde_json::from_str(tab).ok()?;
-                    return serde_json::from_str(target)
-                        .ok()
-                        .map(|target| Self::SplitDuplicate(tab, target));
+                if let Some(args) = path.strip_prefix("split-duplicate/") {
+                    let (tab, target, before) = parse_split(args)?;
+                    return Some(Self::SplitDuplicate(tab, target, before));
                 }
                 if let Some(id) = path.strip_prefix("separate/") {
                     return serde_json::from_str(id).ok().map(Self::Separate);
@@ -834,6 +831,7 @@ impl Command {
                     return Some(Self::ResizePane(index.parse().ok()?, point));
                 }
                 match path {
+                    "resized" => return Some(Self::Resized),
                     "pane/add" => return Some(Self::AddPane(None)),
                     "pane/close" => return Some(Self::ClosePane),
                     "pane/flip" => return Some(Self::FlipPanes(None)),
@@ -851,6 +849,10 @@ impl Command {
                 }
                 if path.starts_with("pane/close-split/") {
                     return id("pane/close-split/").map(Self::CloseSplit);
+                }
+                if let Some(point) = path.strip_prefix("sidebar/width/") {
+                    let point: f64 = point.parse().ok().filter(|p: &f64| p.is_finite())?;
+                    return Some(Self::ResizeSidebar(point));
                 }
                 if let Some(index) = path.strip_prefix("pane/even/") {
                     return index.parse().ok().map(Self::EvenPanes);
@@ -895,6 +897,19 @@ impl Command {
 }
 
 /// A node, a parent and an index among its children: `<id>/<parent id>/<index>`.
+/// A tab, the tab to put it beside, and whether before it: `<tab id>/<target id>[/before]`.
+fn parse_split(args: &str) -> Option<(NodeId, NodeId, bool)> {
+    let mut args = args.split('/');
+    let tab = serde_json::from_str(args.next()?).ok()?;
+    let target = serde_json::from_str(args.next()?).ok()?;
+    let before = match args.next() {
+        None => false,
+        Some("before") => true,
+        Some(_) => return None,
+    };
+    args.next().is_none().then_some((tab, target, before))
+}
+
 fn parse_place(args: &str) -> Option<(NodeId, NodeId, usize)> {
     let mut args = args.split('/');
     let (id, parent, index) = (args.next()?, args.next()?, args.next()?);
@@ -1219,10 +1234,15 @@ mod tests {
 
     #[test]
     fn parses_a_split() {
-        let Some(Command::Split(tab, target)) = Command::parse("split/4/7") else {
+        let Some(Command::Split(tab, target, false)) = Command::parse("split/4/7") else {
             panic!("not a split")
         };
         assert_eq!(serde_json::to_string(&(tab, target)).unwrap(), "[4,7]");
+        assert!(matches!(
+            Command::parse("split/4/7/before"),
+            Some(Command::Split(_, _, true))
+        ));
+        assert_eq!(Command::parse("split/4/7/after"), None);
         assert_eq!(Command::parse("split/4"), None);
         assert_eq!(Command::parse("split/4/x"), None);
     }
@@ -1236,7 +1256,8 @@ mod tests {
         assert_eq!(serde_json::to_string(&(tab, parent)).unwrap(), "[12,6]");
         assert_eq!(index, 3);
         assert_eq!(Command::parse("duplicate/12/6"), None);
-        let Some(Command::SplitDuplicate(tab, target)) = Command::parse("split-duplicate/4/7")
+        let Some(Command::SplitDuplicate(tab, target, false)) =
+            Command::parse("split-duplicate/4/7")
         else {
             panic!("not a split of a duplicate")
         };
@@ -1253,6 +1274,11 @@ mod tests {
         );
         assert_eq!(Command::parse("pane/resize/1/NaN"), None);
         assert_eq!(Command::parse("pane/even/2"), Some(Command::EvenPanes(2)));
+        assert_eq!(
+            Command::parse("sidebar/width/312.5"),
+            Some(Command::ResizeSidebar(312.5))
+        );
+        assert_eq!(Command::parse("sidebar/width/inf"), None);
         assert_eq!(Command::parse("pane/add"), Some(Command::AddPane(None)));
         assert_eq!(Command::parse("pane/flip"), Some(Command::FlipPanes(None)));
         assert!(matches!(

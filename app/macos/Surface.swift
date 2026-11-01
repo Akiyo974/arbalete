@@ -37,8 +37,9 @@ final class ChildPanel: NSPanel, NSWindowDelegate {
     }
 
     /// Shows the panel at `frame`, in `parent`'s points from its content's top left corner, above
-    /// its other child windows; or hides it without a frame.
-    func place(in parent: NSWindow, _ frame: NSRect?) {
+    /// its other child windows unless `raise` is off; or hides it without a frame. Raising it
+    /// takes it out of the window a moment, which ends a drag of it.
+    func place(in parent: NSWindow, _ frame: NSRect?, raise: Bool = true) {
         guard let frame, let content = parent.contentView else {
             if isVisible {
                 let key = isKeyWindow
@@ -54,7 +55,7 @@ final class ChildPanel: NSPanel, NSWindowDelegate {
             x: frame.minX, y: height - frame.maxY, width: frame.width, height: frame.height)
         setFrame(parent.convertToScreen(rect), display: true)
         // Above the other child windows, like the page's, which CEF may add or order since.
-        if parent.childWindows?.last != self {
+        if self.parent !== parent || (raise && parent.childWindows?.last != self) {
             parent.removeChildWindow(self)
             parent.addChildWindow(self, ordered: .above)
         }

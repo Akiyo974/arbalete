@@ -22,6 +22,8 @@ pub struct Settings {
     pub suspend_tabs: bool,
     /// The sites never suspended, by host (and port), like `mail.google.com`.
     pub awake_sites: Vec<String>,
+    /// The sidebar's width, in points, which dragging its edge changes.
+    pub sidebar_width: i32,
 }
 
 impl Default for Settings {
@@ -32,6 +34,7 @@ impl Default for Settings {
             show_toolbar: false,
             suspend_tabs: true,
             awake_sites: Vec::new(),
+            sidebar_width: 260,
         }
     }
 }
@@ -68,11 +71,13 @@ mod tests {
             show_toolbar: true,
             suspend_tabs: false,
             awake_sites: vec!["mail.google.com".into()],
+            sidebar_width: 320,
         };
         save(&settings, &path).unwrap();
         assert_eq!(load(&path), settings);
         fs::write(&path, r#"{ "warnBeforeQuit": true }"#).unwrap();
         assert!(load(&path).restore_session && load(&path).suspend_tabs);
+        assert_eq!(load(&path).sidebar_width, 260);
         fs::write(&path, "not json").unwrap();
         assert_eq!(load(&path), Settings::default());
         fs::remove_dir_all(dir).unwrap();

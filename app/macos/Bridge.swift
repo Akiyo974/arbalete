@@ -21,6 +21,19 @@ final class AppModel: ObservableObject {
     @Published var libraryShown = false
     /// The list of profiles shows above the footer.
     @Published var profilesShown = false
+    /// The node a drag in the sidebar carries, whether a tab, and where it would land
+    /// (SidebarDrop.swift).
+    @Published var dragged: Int?
+    var draggedTab = false
+    @Published var dropTarget: DropTarget?
+    /// Where in the favorites a drag would land.
+    @Published var favoriteSlot: Int?
+    /// Option is held: a split's tabs offer to leave it rather than close.
+    @Published var optionHeld = false
+    private var flags: Any?
+    /// A split a tab resting on another's middle will offer, once it rests long enough.
+    var pendingSplit: DropTarget?
+    var splitWait: DispatchWorkItem?
     /// How far a two-finger swipe has moved the displayed Space's page, in points.
     @Published var swipe: CGFloat = 0
     @Published var section = LibrarySection.spaces
@@ -34,6 +47,14 @@ final class AppModel: ObservableObject {
     init(window: UInt32, send: @escaping Send) {
         self.window = window
         self.send = send
+        flags = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.optionHeld = event.modifierFlags.contains(.option)
+            return event
+        }
+    }
+
+    deinit {
+        if let flags { NSEvent.removeMonitor(flags) }
     }
 
     func run(_ path: String) {
@@ -165,11 +186,12 @@ final class AppModel: ObservableObject {
         run("move/\(id)/\(parent)/\(to)")
     }
 
-    /// Puts a tab beside another in a split, or a copy of it with Option held, like Arc's.
-    func split(_ id: Int, onto target: Int) {
+    /// Puts a tab beside another in a split, after it or `before` it, or a copy of it with
+    /// Option held, like Arc's.
+    func split(_ id: Int, onto target: Int, before: Bool = false) {
         guard id != target else { return }
         let command = NSEvent.modifierFlags.contains(.option) ? "split-duplicate" : "split"
-        run("\(command)/\(id)/\(target)")
+        run("\(command)/\(id)/\(target)\(before ? "/before" : "")")
     }
 
     /// Shows the library, on a section or the one it showed last.
@@ -204,12 +226,18 @@ final class AppModel: ObservableObject {
 
     /// Tells the app the card's color, which an empty Space shows, a little tinted by the
     /// displayed Space's leading color (WindowColors in app/src/command.rs).
+    /// The card's color, which an empty Space shows and a split's pages' bars take.
+    var cardColor: String {
+        let theme = space?.theme
+        let panel = isDark(theme) ? "#1e1a28" : "#f8f6fb"
+        return theme?.colors.first.map { mix($0, panel, 0.08) } ?? panel
+    }
+
     private func paintWindow() {
         let theme = space?.theme
-        let dark = isDark(theme)
-        let panel = dark ? "#1e1a28" : "#f8f6fb"
+        let panel = isDark(theme) ? "#1e1a28" : "#f8f6fb"
         let lead = theme?.colors.first
-        let card = lead.map { mix($0, panel, 0.08) } ?? panel
+        let card = cardColor
         let command = "window/colors/\(card.dropFirst())/0/\((lead ?? panel).dropFirst())"
         if command != colors {
             colors = command
@@ -230,6 +258,7 @@ final class NativeWindow {
     let themePicker: ThemePickerModel
     let importModel: ImportModel
     let splitHandles: SplitHandles
+    let paneBars: PaneBars
     /// The panels above the page, by the name of the web view they stand for, like "overlay".
     var surfaces: [String: Surface] = [:]
 
@@ -280,6 +309,7 @@ final class NativeWindow {
         importSurface.takesKeyboard = true
         surfaces["import"] = importSurface
         splitHandles = SplitHandles(in: window, model: app)
+        paneBars = PaneBars(in: window, model: app)
     }
 
     /// Closes its panels, the window they belong to closing.
@@ -287,6 +317,7 @@ final class NativeWindow {
         sidebar.close()
         surfaces.values.forEach { $0.close() }
         splitHandles.close()
+        paneBars.close()
     }
 
     /// Gives one of its views an event, by the name of the web view it stands for.

@@ -885,6 +885,16 @@ impl Sidebar {
     /// after `target` in the split it is in, with an equal part of the room, like Arc's. A tab
     /// moved out of another split leaves it, and a split left with one tab becomes that tab.
     pub fn split(&mut self, tab: NodeId, target: NodeId) -> Result<NodeId, Error> {
+        self.split_beside(tab, target, false)
+    }
+
+    /// Puts `tab` beside `target` in a split as `split` does, but before it with `before`.
+    pub fn split_beside(
+        &mut self,
+        tab: NodeId,
+        target: NodeId,
+        before: bool,
+    ) -> Result<NodeId, Error> {
         self.check_tab(tab)?;
         self.check_tab(target)?;
         let parent = self.movable(target)?;
@@ -892,7 +902,7 @@ impl Sidebar {
             return Err(Error::NotSplittable);
         }
         if self.is_split(parent) {
-            return self.join(tab, parent, target);
+            return self.join(tab, parent, target, before);
         }
         let index = self.nodes[&parent]
             .children
@@ -904,13 +914,19 @@ impl Sidebar {
             .insert(index.expect("a child of its parent"), split);
         self.place(target, parent, split, 0);
         let from = self.movable(tab)?;
-        self.place(tab, from, split, 1);
+        self.place(tab, from, split, usize::from(!before));
         Ok(split)
     }
 
-    /// Adds `tab` to `split`, right after `target`, with an equal part of the room: the other
-    /// tabs give it up in proportion to theirs.
-    fn join(&mut self, tab: NodeId, split: NodeId, target: NodeId) -> Result<NodeId, Error> {
+    /// Adds `tab` to `split`, right after `target`, or right before it with `before`, with an
+    /// equal part of the room: the other tabs give it up in proportion to theirs.
+    fn join(
+        &mut self,
+        tab: NodeId,
+        split: NodeId,
+        target: NodeId,
+        before: bool,
+    ) -> Result<NodeId, Error> {
         let count = self.nodes[&split].children.len() + 1;
         if count > MAX_SPLIT_TABS {
             return Err(Error::SplitFull);
@@ -921,7 +937,8 @@ impl Sidebar {
             .iter()
             .position(|&id| id == target);
         let from = self.movable(tab)?;
-        self.place(tab, from, split, index.expect("a tab of the split") + 1);
+        let index = index.expect("a tab of the split") + usize::from(!before);
+        self.place(tab, from, split, index);
         let share = 1.0 / count as f64;
         let children = self.nodes[&split].children.clone();
         let mut others = factors.into_iter();
@@ -995,10 +1012,15 @@ impl Sidebar {
     }
 
     /// Puts a copy of `tab` beside `target` in a split, as `split` puts `tab` itself.
-    pub fn split_duplicate(&mut self, tab: NodeId, target: NodeId) -> Result<NodeId, Error> {
+    pub fn split_duplicate(
+        &mut self,
+        tab: NodeId,
+        target: NodeId,
+        before: bool,
+    ) -> Result<NodeId, Error> {
         let parent = self.movable(target)?;
         let copy = self.duplicate(tab, parent, usize::MAX)?;
-        self.split(copy, target).inspect_err(|_| {
+        self.split_beside(copy, target, before).inspect_err(|_| {
             self.remove(copy).expect("just added");
         })
     }
@@ -3026,6 +3048,17 @@ mod tests {
     }
 
     #[test]
+    fn a_tab_joins_a_split_before_its_target_or_after() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let [a, b, c] = ["a", "b", "c"].map(|url| sidebar.open_tab(home.id, url).unwrap());
+        let split = sidebar.split_beside(b, a, true).unwrap();
+        assert_eq!(children(&sidebar, split), [b, a]);
+        sidebar.split_beside(c, a, true).unwrap();
+        assert_eq!(children(&sidebar, split), [b, c, a]);
+    }
+
+    #[test]
     fn separates_or_removes_a_whole_split() {
         let mut sidebar = Sidebar::default();
         let home = home(&sidebar);
@@ -3147,15 +3180,21 @@ mod tests {
         let home = home(&sidebar);
         let favorites = sidebar.profiles()[0].favorites;
         let [a, b, c] = ["a", "b", "c"].map(|url| sidebar.open_tab(home.id, url).unwrap());
-        let split = sidebar.split_duplicate(c, a).unwrap();
+        let split = sidebar.split_duplicate(c, a, false).unwrap();
         let copy = children(&sidebar, split)[1];
         assert_eq!(children(&sidebar, home.today), [split, b, c]);
         assert_eq!(children(&sidebar, split), [a, copy]);
         assert_eq!(sidebar.tab_mut(copy).unwrap().url, "c");
         sidebar.move_node(b, favorites, 0).unwrap();
         let count = sidebar.tabs().count();
-        assert_eq!(sidebar.split_duplicate(c, b), Err(Error::NotSplittable));
-        assert_eq!(sidebar.split_duplicate(c, a), Err(Error::NotAContainer));
+        assert_eq!(
+            sidebar.split_duplicate(c, b, false),
+            Err(Error::NotSplittable)
+        );
+        assert_eq!(
+            sidebar.split_duplicate(c, a, false),
+            Err(Error::NotAContainer)
+        );
         assert_eq!(sidebar.tabs().count(), count);
     }
 

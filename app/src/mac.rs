@@ -1221,6 +1221,34 @@ pub fn copy(url: &str) {
 /// its content view, whose layer holds what the window's compositor draws.
 pub fn round_card(view: *mut c_void) {
     round(view, CARD_RADIUS);
+    corners(view, false);
+}
+
+/// A split's page's corners, like Arc's: smaller, and only below, under the bar at its top.
+const PANE_RADIUS: f64 = 6.0;
+
+/// Rounds the card a page of a split is in, under its bar: its bottom corners only.
+pub fn round_pane(view: *mut c_void) {
+    round(view, PANE_RADIUS);
+    corners(view, true);
+}
+
+/// Rounds a page's view's bottom corners only, or all four.
+fn corners(view: *mut c_void, bottom: bool) {
+    // SAFETY: CEF gives the window's NSView, which the window keeps alive.
+    let Some(view) = (unsafe { view.cast::<NSView>().as_ref() }) else {
+        return;
+    };
+    let layer: Option<Retained<AnyObject>> = unsafe { msg_send![view, layer] };
+    let Some(layer) = layer else { return };
+    // The bottom is where y is least, unless the view counts down from its top.
+    let (min, max) = (0b0011_usize, 0b1100_usize);
+    let mask = match (bottom, view.isFlipped()) {
+        (false, _) => min | max,
+        (true, false) => min,
+        (true, true) => max,
+    };
+    let _: () = unsafe { msg_send![&*layer, setMaskedCorners: mask] };
 }
 
 /// The content view of the window a view, which CEF gives, is in.
@@ -1371,6 +1399,50 @@ pub fn shift(view: *mut c_void, x: f64) {
             setValue: &*x,
             forKeyPath: ns_string!("transform.translation.x")
         ];
+        let _: () = msg_send![transaction, commit];
+    }
+}
+
+/// Hides what of a card's window, which a view CEF gives is in, lies left of `left`, in its
+/// parent window's points, with the card's rounded corners; or shows it whole without `left`.
+/// The page keeps its size: CEF lays nothing out again.
+pub fn crop_card(view: *mut c_void, left: Option<f64>) {
+    // SAFETY: CEF gives the page's NSView, which its window keeps alive.
+    let Some(window) = (unsafe { view.cast::<NSView>().as_ref() }).and_then(NSView::window) else {
+        return;
+    };
+    let (Some(content), Some(parent)) = (window.contentView(), window.parentWindow()) else {
+        return;
+    };
+    content.setWantsLayer(true);
+    let layer: Option<Retained<AnyObject>> = unsafe { msg_send![&*content, layer] };
+    let (Some(layer), Some(class)) = (layer, AnyClass::get(c"CALayer")) else {
+        return;
+    };
+    let hidden = left.map_or(0.0, |left| {
+        left - (window.frame().origin.x - parent.frame().origin.x)
+    });
+    let bounds = content.bounds();
+    let mask: Option<Retained<AnyObject>> = (hidden > 0.0).then(|| unsafe {
+        let mask: Retained<AnyObject> = msg_send![class, layer];
+        let frame = NSRect::new(
+            objc2_foundation::NSPoint::new(hidden, 0.0),
+            NSSize::new((bounds.size.width - hidden).max(0.0), bounds.size.height),
+        );
+        let _: () = msg_send![&*mask, setFrame: frame];
+        let _: () = msg_send![&*mask, setCornerRadius: CARD_RADIUS];
+        let black = NSColor::blackColor();
+        let black: *const CGColor = msg_send![&*black, CGColor];
+        let _: () = msg_send![&*mask, setBackgroundColor: black];
+        mask
+    });
+    let Some(transaction) = AnyClass::get(c"CATransaction") else {
+        return;
+    };
+    unsafe {
+        let _: () = msg_send![transaction, begin];
+        let _: () = msg_send![transaction, setDisableActions: Bool::YES];
+        let _: () = msg_send![&*layer, setMask: mask.as_deref()];
         let _: () = msg_send![transaction, commit];
     }
 }

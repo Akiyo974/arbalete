@@ -54,6 +54,14 @@ final class SidebarHost {
     private let catchers = [NSView(), NSView()]
     /// While the sidebar hides, its edge of the window shows it again on hover.
     private let edge = Tracking()
+    /// While it is docked, the room between it and the page resizes it, like Arc's: a window of
+    /// its own, as the main one keeps the clicks on its views.
+    private let resize = SidebarResize()
+    private lazy var resizer: ChildPanel = {
+        let panel = ChildPanel(view: resize)
+        panel.ignoresMouseEvents = false
+        return panel
+    }()
     private var watch: AnyCancellable?
     private var revealed = false
     private var rightClicks: Any?
@@ -66,6 +74,8 @@ final class SidebarHost {
         effect.state = .active
         effect.autoresizingMask = [.width, .height]
         let host = NSHostingView(rootView: SidebarView(model: model))
+        // Its frame follows the sidebar's width, which its edge sets: no size of its own.
+        host.sizingOptions = []
         host.autoresizingMask = [.width, .height]
         let leave = Tracking()
         leave.autoresizingMask = [.width, .height]
@@ -85,6 +95,7 @@ final class SidebarHost {
         edge.isHidden = true
         edge.autoresizingMask = [.height]
         window.contentView?.addSubview(edge)
+        resize.send = { model.run($0) }
         // Right clicks never reach the views under the pointer that want them, the rows and
         // Spaces whose menus they open, only their release does: this hands it over.
         rightClicks = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseUp]) { [weak self] event in
@@ -106,6 +117,7 @@ final class SidebarHost {
         if let rightClicks { NSEvent.removeMonitor(rightClicks) }
         rightClicks = nil
         panel.close()
+        resizer.close()
     }
 
     /// Shows the sidebar at `frame`, from the window's top left corner, or hides it.
@@ -115,6 +127,12 @@ final class SidebarHost {
             edge.frame = NSRect(x: 0, y: 0, width: 8, height: content.bounds.height)
         }
         edge.isHidden = frame != nil
+        // From the sidebar's edge across the margin before the page.
+        resizer.place(
+            in: window,
+            frame.flatMap { frame in
+                floating ? nil : NSRect(x: frame.maxX - 2, y: 0, width: 11, height: frame.height)
+            }, raise: false)
         effect.isHidden = !floating
         container.layer?.cornerRadius = floating ? 10 : 0
         container.layer?.masksToBounds = floating
@@ -132,6 +150,34 @@ final class SidebarHost {
         // Past the window's buttons and the sidebar's toggle, before the navigation buttons.
         drag.frame = NSRect(x: 108, y: bounds.height - 40, width: max(0, bounds.width - 208), height: 40)
         panel.invalidateShadow()
+    }
+}
+
+/// Resizes the docked sidebar when dragged, to the pointer.
+final class SidebarResize: NSView {
+    var send: (String) -> Void = { _ in }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(
+            NSTrackingArea(
+                rect: .zero,
+                options: [.cursorUpdate, .mouseMoved, .activeAlways, .inVisibleRect],
+                owner: self))
+    }
+
+    override func cursorUpdate(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
+    override func mouseMoved(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) {}
+    override func mouseUp(with event: NSEvent) { send("resized") }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let parent = window?.parent else { return }
+        // In the main window's points from its left edge, like the app's.
+        send("sidebar/width/\(parent.convertPoint(fromScreen: NSEvent.mouseLocation).x)")
     }
 }
 

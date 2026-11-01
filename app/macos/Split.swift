@@ -64,6 +64,7 @@ final class SplitHandleView: NSView {
     override func mouseExited(with event: NSEvent) { pill.isHidden = dragging }
 
     override func mouseUp(with event: NSEvent) {
+        if dragging { send("resized") }
         dragging = false
         let point = convert(event.locationInWindow, from: nil)
         pill.isHidden = !bounds.contains(point)
@@ -121,10 +122,13 @@ final class SplitHandles {
                 view.stacked = stacked
                 view.needsLayout = true
             }
-            panel.place(in: parent, frame)
+            // Raised below once only, if needed: raising it would end a drag of it.
+            panel.place(in: parent, frame, raise: false)
         }
         // Above the pages, which CEF may order above them once it shows the card again.
         DispatchQueue.main.async { [self] in
+            guard let last = parent.childWindows?.last, !panels.contains(where: { $0 === last })
+            else { return }
             for panel in panels where panel.isVisible {
                 parent.removeChildWindow(panel)
                 parent.addChildWindow(panel, ordered: .above)
