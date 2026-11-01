@@ -309,7 +309,7 @@ final class NativeWindow {
         importSurface.takesKeyboard = true
         surfaces["import"] = importSurface
         splitHandles = SplitHandles(in: window, model: app)
-        paneBars = PaneBars(in: window, model: app)
+        paneBars = PaneBars(model: app)
     }
 
     /// Closes its panels, the window they belong to closing.

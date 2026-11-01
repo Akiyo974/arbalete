@@ -4204,6 +4204,11 @@ fn send_panes() {
         let split = tabs
             .first()
             .map(|&tab| STATE.with_borrow(|state| state.sidebar.row_of(tab)));
+        // In the card's view, which holds the pages.
+        let card = win()
+            .card
+            .with_borrow(|card| card.as_ref().map(OverlayController::bounds))
+            .unwrap_or_default();
         let panes: Vec<_> = tabs
             .iter()
             .zip(split_rects())
@@ -4222,7 +4227,7 @@ fn send_panes() {
                 };
                 json!({
                     "tab": tab, "split": split,
-                    "x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height,
+                    "x": rect.x - card.x, "y": rect.y - card.y, "width": rect.width, "height": rect.height,
                     "bar": PANE_BAR_HEIGHT,
                     "url": url.unwrap_or_default(),
                     "back": can(true), "forward": can(false),
@@ -4231,7 +4236,7 @@ fn send_panes() {
                 })
             })
             .collect();
-        crate::native::panes(win().id, &json!(panes).to_string());
+        crate::native::panes(win().id, win().card_view.get(), &json!(panes).to_string());
     }
 }
 

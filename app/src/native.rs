@@ -32,7 +32,7 @@ unsafe extern "C" {
     fn arbalete_ui_settings_focused() -> bool;
     fn arbalete_ui_make_default_browser();
     fn arbalete_ui_split(window: u32, stacked: bool, frames: *const f64, count: usize);
-    fn arbalete_ui_panes(window: u32, panes: *const c_char);
+    fn arbalete_ui_panes(window: u32, card: *mut std::ffi::c_void, panes: *const c_char);
     fn arbalete_ui_is_default_browser() -> bool;
     fn arbalete_ui_place_sidebar(
         window: u32,
@@ -149,12 +149,12 @@ pub fn split_handles(window: u32, stacked: bool, frames: &[cef::Rect]) {
     unsafe { arbalete_ui_split(window, stacked, values.as_ptr(), frames.len()) };
 }
 
-/// Shows the bars of a split's pages and the focused one's outline, as `panes` (JSON) lays them
-/// out, or takes them away with none.
-pub fn panes(window: u32, panes: &str) {
+/// Shows the bars of a split's pages and the focused one's outline in the card's view, `card`, as
+/// `panes` (JSON) lays them out from its top left corner, or takes them away with none.
+pub fn panes(window: u32, card: Option<*mut std::ffi::c_void>, panes: &str) {
     let panes = CString::new(panes).unwrap_or_default();
-    // SAFETY: a C string, which the call reads before returning.
-    unsafe { arbalete_ui_panes(window, panes.as_ptr()) };
+    // SAFETY: a C string, which the call reads before returning, and the card's live NSView.
+    unsafe { arbalete_ui_panes(window, card.unwrap_or(std::ptr::null_mut()), panes.as_ptr()) };
 }
 
 /// Makes Arbalete the default browser, once the user confirms.

@@ -1,11 +1,11 @@
 // The bars at the top of a split's pages and the focused page's outline, like Arc's Split View:
-// the app places them over each page's card (send_panes in app/src/shell.rs). The pages are
-// windows of their own, so the bars and the outline are child windows too.
+// the app places them over each page (send_panes in app/src/shell.rs). They are views of the
+// card's window, above the pages it holds, so they move with them in one go.
 
 import AppKit
 import SwiftUI
 
-/// A page of the split shown, as the app sends it.
+/// A page of the split shown, as the app sends it: from the card's top left corner.
 struct Pane: Decodable, Equatable {
     var tab: Int
     var split: Int?
@@ -26,82 +26,88 @@ struct Pane: Decodable, Equatable {
 private let outlineWidth: CGFloat = 2
 private let paneRadius: CGFloat = 6
 
+/// A view the page under it keeps the clicks through.
+private final class Outline: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 /// The bars and the outline of the split a window shows, made as it needs them.
 @MainActor
 final class PaneBars {
-    private let parent: NSWindow
     private let model: AppModel
-    private var bars: [(panel: ChildPanel, host: NSHostingView<PaneBar>)] = []
-    private let outline: ChildPanel = {
-        let view = NSView()
+    private var bars: [NSHostingView<PaneBar>] = []
+    private let outline: Outline = {
+        let view = Outline()
         view.wantsLayer = true
         view.layer?.cornerRadius = paneRadius
         view.layer?.borderWidth = outlineWidth
-        let panel = ChildPanel(view: view)
-        // The page under it keeps the clicks.
-        panel.ignoresMouseEvents = true
-        return panel
+        return view
     }()
 
-    init(in parent: NSWindow, model: AppModel) {
-        self.parent = parent
+    init(model: AppModel) {
         self.model = model
     }
 
-    func place(_ panes: [Pane]) {
+    /// Lays `panes` out in `card`, the card's view, or takes them away without it.
+    func place(_ panes: [Pane], in card: NSView?) {
         while bars.count < panes.count {
             let host = NSHostingView(rootView: PaneBar(model: model, pane: nil))
             host.sizingOptions = []
             host.wantsLayer = true
-            // Rounded like the card at its top only: the page goes on below.
             host.layer?.cornerRadius = paneRadius
-            // Its top is where y is least when the view counts down from it.
-            host.layer?.maskedCorners =
-                host.isFlipped
-                ? [.layerMinXMinYCorner, .layerMaxXMinYCorner]
-                : [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
             host.layer?.masksToBounds = true
-            let panel = ChildPanel(view: host)
-            panel.ignoresMouseEvents = false
-            bars.append((panel, host))
+            bars.append(host)
         }
-        for (index, bar) in bars.enumerated() {
+        guard let card else {
+            close()
+            return
+        }
+        // Rects from the card's top left corner, in its own coordinates.
+        func frame(_ x: Double, _ y: Double, _ width: Double, _ height: Double) -> NSRect {
+            NSRect(
+                x: x, y: card.isFlipped ? y : card.bounds.height - y - height, width: width,
+                height: height)
+        }
+        // Above the pages, which CEF may add or order since.
+        let covered = card.subviews.last.map(ours) == false
+        func raise(_ view: NSView) {
+            if view.superview !== card || covered {
+                card.addSubview(view, positioned: .above, relativeTo: nil)
+            }
+        }
+        for (index, host) in bars.enumerated() {
             guard index < panes.count else {
-                bar.panel.place(in: parent, nil)
+                host.removeFromSuperview()
                 continue
             }
             let pane = panes[index]
-            bar.host.rootView = PaneBar(model: model, pane: pane)
-            bar.host.layer?.backgroundColor = NSColor(color(model.cardColor)).cgColor
-            bar.panel.place(
-                in: parent, NSRect(x: pane.x, y: pane.y, width: pane.width, height: pane.bar),
-                raise: false)
+            host.rootView = PaneBar(model: model, pane: pane)
+            host.layer?.backgroundColor = NSColor(color(model.cardColor)).cgColor
+            // Rounded like the card at its top only: the page goes on below.
+            host.layer?.maskedCorners =
+                card.isFlipped
+                ? [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+                : [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+            host.frame = frame(pane.x, pane.y, pane.width, pane.bar)
+            raise(host)
         }
         // Around the focused page, once at least two show.
-        let focused = panes.count > 1 ? panes.first(where: \.focused) : nil
-        if let focused {
-            outline.contentView?.layer?.borderColor =
-                NSColor(model.themeColor).cgColor
-        }
-        outline.place(
-            in: parent,
-            focused.map { NSRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height) },
-            raise: false)
-        // Above the pages, which CEF may order above them.
-        DispatchQueue.main.async { [self] in
-            let ours = bars.map(\.panel) + [outline]
-            guard let last = parent.childWindows?.last, !ours.contains(where: { $0 === last })
-            else { return }
-            for panel in ours where panel.isVisible {
-                parent.removeChildWindow(panel)
-                parent.addChildWindow(panel, ordered: .above)
-            }
+        if panes.count > 1, let focused = panes.first(where: \.focused) {
+            outline.layer?.borderColor = NSColor(model.themeColor).cgColor
+            outline.frame = frame(focused.x, focused.y, focused.width, focused.height)
+            raise(outline)
+        } else {
+            outline.removeFromSuperview()
         }
     }
 
+    private func ours(_ view: NSView) -> Bool {
+        view === outline || bars.contains { $0 === view }
+    }
+
     func close() {
-        bars.forEach { $0.panel.close() }
-        outline.close()
+        bars.forEach { $0.removeFromSuperview() }
+        outline.removeFromSuperview()
     }
 }
 
@@ -168,10 +174,14 @@ struct PaneBar: View {
 }
 
 @_cdecl("arbalete_ui_panes")
-public func placePanes(_ id: UInt32, _ panes: UnsafePointer<CChar>) {
+public func placePanes(
+    _ id: UInt32, _ card: UnsafeMutableRawPointer?, _ panes: UnsafePointer<CChar>
+) {
     MainActor.assumeIsolated {
         let data = Data(String(cString: panes).utf8)
         let panes = (try? JSONDecoder().decode([Pane].self, from: data)) ?? []
-        nativeWindows[id]?.paneBars.place(panes)
+        // The card's view, which its window keeps alive.
+        let card = card.map { Unmanaged<NSView>.fromOpaque($0).takeUnretainedValue() }
+        nativeWindows[id]?.paneBars.place(panes, in: card)
     }
 }
