@@ -52,6 +52,8 @@ fn yes() -> bool {
 
 /// How many favorites a profile holds at most: the grid keeps 3 rows of 4 tiles.
 pub const MAX_FAVORITES: usize = 12;
+/// A split shows at most this many tabs side by side, like Arc's Split View.
+pub const MAX_SPLIT_TABS: usize = 4;
 
 /// The colors a profile or a Space can take: a small palette, which the UI draws (ui/src/bridge.ts).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -195,8 +197,8 @@ pub enum NodeKind {
         expanded: bool,
     },
     Tab(Tab),
-    /// Two tabs side by side in one row, its two children; it never holds fewer, nor goes into the
-    /// favorites.
+    /// From two to `MAX_SPLIT_TABS` tabs side by side in one row, its children; it never holds
+    /// fewer, nor goes into the favorites. Its layout is apart (`Sidebar::split_layout`).
     Split,
 }
 
@@ -312,8 +314,10 @@ pub enum Error {
     RootNode,
     /// The browser always keeps a Space to open tabs in.
     LastSpace,
-    /// A split joins two different tabs, neither a favorite nor already in a split.
+    /// A split joins different tabs, none a favorite, and a tab joins one split at a time.
     NotSplittable,
+    /// A split holds at most `MAX_SPLIT_TABS` tabs.
+    SplitFull,
     /// A profile holds at most `MAX_FAVORITES` favorites.
     FavoritesFull,
     /// A theme holds at most `MAX_THEME_COLORS` `#rrggbb` colors, and factors from 0 to 1.
@@ -345,6 +349,28 @@ pub struct Sidebar {
     /// Where the links other apps open go.
     #[serde(default)]
     url_routing: UrlRouting,
+    /// How each split lays its tabs out, by split, when it differs from side by side in equal
+    /// parts.
+    #[serde(default)]
+    splits: HashMap<NodeId, Layout>,
+}
+
+/// How a split lays its tabs out: along one axis, each taking its factor of the room.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+struct Layout {
+    /// One above the other, rather than side by side.
+    stacked: bool,
+    /// Each tab's part of the room, by tab, which `split_layout` scales to add up to 1.
+    factors: HashMap<NodeId, f64>,
+}
+
+/// How a split shows its tabs, in order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SplitLayout {
+    /// One above the other, rather than side by side.
+    pub stacked: bool,
+    /// Each tab's part of the room, adding up to 1.
+    pub factors: Vec<f64>,
 }
 
 impl Default for Sidebar {
@@ -371,6 +397,7 @@ impl Sidebar {
             next_id: 1,
             archive: Vec::new(),
             url_routing: UrlRouting::default(),
+            splits: HashMap::new(),
         }
     }
 
@@ -854,14 +881,18 @@ impl Sidebar {
         Ok(())
     }
 
-    /// Puts `tab` beside `target` in a split taking `target`'s place, `target` first. A tab moved
-    /// out of another split leaves its other tab alone in a row.
+    /// Puts `tab` beside `target` in a split taking `target`'s place, `target` first, or right
+    /// after `target` in the split it is in, with an equal part of the room, like Arc's. A tab
+    /// moved out of another split leaves it, and a split left with one tab becomes that tab.
     pub fn split(&mut self, tab: NodeId, target: NodeId) -> Result<NodeId, Error> {
         self.check_tab(tab)?;
         self.check_tab(target)?;
         let parent = self.movable(target)?;
-        if tab == target || self.is_favorite(target) || self.in_split(target) {
+        if tab == target || self.is_favorite(target) || self.row_of(tab) == self.row_of(target) {
             return Err(Error::NotSplittable);
+        }
+        if self.is_split(parent) {
+            return self.join(tab, parent, target);
         }
         let index = self.nodes[&parent]
             .children
@@ -875,6 +906,92 @@ impl Sidebar {
         let from = self.movable(tab)?;
         self.place(tab, from, split, 1);
         Ok(split)
+    }
+
+    /// Adds `tab` to `split`, right after `target`, with an equal part of the room: the other
+    /// tabs give it up in proportion to theirs.
+    fn join(&mut self, tab: NodeId, split: NodeId, target: NodeId) -> Result<NodeId, Error> {
+        let count = self.nodes[&split].children.len() + 1;
+        if count > MAX_SPLIT_TABS {
+            return Err(Error::SplitFull);
+        }
+        let factors = self.split_layout(split).factors;
+        let index = self.nodes[&split]
+            .children
+            .iter()
+            .position(|&id| id == target);
+        let from = self.movable(tab)?;
+        self.place(tab, from, split, index.expect("a tab of the split") + 1);
+        let share = 1.0 / count as f64;
+        let children = self.nodes[&split].children.clone();
+        let mut others = factors.into_iter();
+        let layout = self.splits.entry(split).or_default();
+        layout.factors = children
+            .into_iter()
+            .map(|id| {
+                let factor = if id == tab {
+                    share
+                } else {
+                    others.next().unwrap_or(share) * (1.0 - share)
+                };
+                (id, factor)
+            })
+            .collect();
+        Ok(split)
+    }
+
+    /// How `split` lays its tabs out, in order: side by side in equal parts unless changed.
+    pub fn split_layout(&self, split: NodeId) -> SplitLayout {
+        let children = self
+            .nodes
+            .get(&split)
+            .map_or(&[][..], |node| &node.children[..]);
+        let layout = self.splits.get(&split);
+        let equal = 1.0 / children.len().max(1) as f64;
+        let factors: Vec<f64> = children
+            .iter()
+            .map(|id| {
+                layout
+                    .and_then(|layout| layout.factors.get(id))
+                    .copied()
+                    .filter(|factor| factor.is_finite() && *factor > 0.0)
+                    .unwrap_or(equal)
+            })
+            .collect();
+        let sum: f64 = factors.iter().sum();
+        SplitLayout {
+            stacked: layout.is_some_and(|layout| layout.stacked),
+            factors: factors.iter().map(|factor| factor / sum).collect(),
+        }
+    }
+
+    /// Gives `split`'s tabs these parts of the room, in order, scaled to add up to 1.
+    pub fn set_split_factors(&mut self, split: NodeId, factors: &[f64]) -> Result<(), Error> {
+        let children = self.split_children(split)?;
+        if factors.len() != children.len() || factors.iter().any(|f| !f.is_finite() || *f <= 0.0) {
+            return Err(Error::NotSplittable);
+        }
+        let sum: f64 = factors.iter().sum();
+        let layout = self.splits.entry(split).or_default();
+        layout.factors = children
+            .into_iter()
+            .zip(factors.iter().map(|f| f / sum))
+            .collect();
+        Ok(())
+    }
+
+    /// Lays `split`'s tabs out one above the other, or side by side again.
+    pub fn set_split_stacked(&mut self, split: NodeId, stacked: bool) -> Result<(), Error> {
+        self.split_children(split)?;
+        self.splits.entry(split).or_default().stacked = stacked;
+        Ok(())
+    }
+
+    fn split_children(&self, split: NodeId) -> Result<Vec<NodeId>, Error> {
+        if !self.is_split(split) {
+            return Err(Error::UnknownNode);
+        }
+        Ok(self.nodes[&split].children.clone())
     }
 
     /// Puts a copy of `tab` beside `target` in a split, as `split` puts `tab` itself.
@@ -1246,9 +1363,13 @@ impl Sidebar {
         let parent = self.movable(id)?;
         self.children_mut(parent).retain(|child| *child != id);
         self.dissolve(parent);
+        if let Some(layout) = self.splits.get_mut(&parent) {
+            layout.factors.remove(&id);
+        }
         let mut pending = vec![id];
         while let Some(id) = pending.pop() {
             let node = self.nodes.remove(&id).expect("children are known nodes");
+            self.splits.remove(&id);
             pending.extend(node.children);
         }
         for space in &mut self.spaces {
@@ -1267,6 +1388,9 @@ impl Sidebar {
     fn place(&mut self, id: NodeId, from: NodeId, to: NodeId, index: usize) {
         let was_pinned = self.is_pinned(id);
         self.children_mut(from).retain(|child| *child != id);
+        if let Some(layout) = self.splits.get_mut(&from) {
+            layout.factors.remove(&id);
+        }
         let children = self.children_mut(to);
         children.insert(index.min(children.len()), id);
         self.nodes.get_mut(&id).expect("a known node").parent = Some(to);
@@ -1306,6 +1430,7 @@ impl Sidebar {
             return;
         }
         let node = self.nodes.remove(&split).expect("a known split");
+        self.splits.remove(&split);
         let parent = node.parent.expect("a split has a parent");
         for &child in &node.children {
             self.nodes.get_mut(&child).expect("a known tab").parent = Some(parent);
@@ -1334,10 +1459,6 @@ impl Sidebar {
 
     fn is_split(&self, id: NodeId) -> bool {
         matches!(self.nodes.get(&id).map(|n| &n.kind), Some(NodeKind::Split))
-    }
-
-    fn in_split(&self, id: NodeId) -> bool {
-        self.row_of(id) != id
     }
 
     fn next_id(&mut self) -> u64 {
@@ -2861,9 +2982,59 @@ mod tests {
         assert_eq!(sidebar.node(c).unwrap().parent, Some(split));
         assert_eq!((sidebar.row_of(a), sidebar.row_of(b)), (split, b));
         assert_eq!(sidebar.next_tab(home.id, true), Some(a));
-        assert_eq!(sidebar.split(b, c), Err(Error::NotSplittable));
+        assert_eq!(sidebar.split(a, c), Err(Error::NotSplittable));
         assert_eq!(sidebar.split(b, b), Err(Error::NotSplittable));
         assert_eq!(sidebar.split(split, b), Err(Error::NotATab));
+    }
+
+    #[test]
+    fn a_split_takes_up_to_four_tabs_each_with_an_equal_part() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let [a, b, c, d, e] =
+            ["a", "b", "c", "d", "e"].map(|url| sidebar.open_tab(home.id, url).unwrap());
+        let split = sidebar.split(b, a).unwrap();
+        assert_eq!(sidebar.split_layout(split).factors, [0.5, 0.5]);
+        sidebar.set_split_factors(split, &[3.0, 1.0]).unwrap();
+        assert_eq!(sidebar.split(c, a), Ok(split));
+        assert_eq!(children(&sidebar, split), [a, c, b]);
+        let factors = sidebar.split_layout(split).factors;
+        assert!((factors[1] - 1.0 / 3.0).abs() < 1e-9);
+        assert!((factors[0] / factors[2] - 3.0).abs() < 1e-9);
+        sidebar.split(d, b).unwrap();
+        assert_eq!(sidebar.split(e, d), Err(Error::SplitFull));
+        assert_eq!(children(&sidebar, split), [a, c, b, d]);
+        assert_eq!(sidebar.split_layout(split).factors[3], 0.25);
+        sidebar.separate(a).unwrap();
+        let factors = sidebar.split_layout(split).factors;
+        assert!((factors.iter().sum::<f64>() - 1.0).abs() < 1e-9);
+        assert_eq!(factors.len(), 3);
+    }
+
+    #[test]
+    fn keeps_a_split_stacked_and_its_parts_across_sessions() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let [a, b] = ["a", "b"].map(|url| sidebar.open_tab(home.id, url).unwrap());
+        let split = sidebar.split(b, a).unwrap();
+        sidebar.set_split_stacked(split, true).unwrap();
+        sidebar.set_split_factors(split, &[1.0, 3.0]).unwrap();
+        assert_eq!(
+            sidebar.set_split_factors(split, &[1.0]),
+            Err(Error::NotSplittable)
+        );
+        assert_eq!(sidebar.set_split_stacked(a, true), Err(Error::UnknownNode));
+        let saved: Sidebar =
+            serde_json::from_str(&serde_json::to_string(&sidebar).unwrap()).unwrap();
+        assert_eq!(
+            saved.split_layout(split),
+            SplitLayout {
+                stacked: true,
+                factors: vec![0.25, 0.75]
+            }
+        );
+        sidebar.separate(b).unwrap();
+        assert!(sidebar.splits.is_empty());
     }
 
     #[test]
