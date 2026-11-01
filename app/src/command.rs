@@ -293,12 +293,18 @@ pub enum Command {
     /// Gives the pages on either side of a split's handle at an index equal parts:
     /// `pane/even/<index>`.
     EvenPanes(usize),
-    /// Opens the Command Bar for a page to show beside the selected one, in its split: `pane/add`.
-    AddPane,
+    /// Opens the Command Bar for a page to show beside the selected tab, or a given one, in its
+    /// split: `pane/add`, `pane/add/<tab id>`.
+    AddPane(Option<NodeId>),
     /// Closes the selected tab of a split: `pane/close`.
     ClosePane,
-    /// Lays the shown split's pages out one above the other, or side by side again: `pane/flip`.
-    FlipPanes,
+    /// Lays the pages of the split shown, or a given one, out one above the other, or side by
+    /// side again: `pane/flip`, `pane/flip/<split id>`.
+    FlipPanes(Option<NodeId>),
+    /// Takes every tab out of a split, as rows in its place: `pane/separate-all/<split id>`.
+    SeparateAll(NodeId),
+    /// Closes a split's tabs, which may be reopened: `pane/close-split/<split id>`.
+    CloseSplit(NodeId),
     /// Creates a profile, with a Space of its own, for the UI to rename: `profile/new`.
     NewProfile,
     /// Renames a profile: `profile/rename/<profile id>/<percent-encoded name>`.
@@ -828,10 +834,23 @@ impl Command {
                     return Some(Self::ResizePane(index.parse().ok()?, point));
                 }
                 match path {
-                    "pane/add" => return Some(Self::AddPane),
+                    "pane/add" => return Some(Self::AddPane(None)),
                     "pane/close" => return Some(Self::ClosePane),
-                    "pane/flip" => return Some(Self::FlipPanes),
+                    "pane/flip" => return Some(Self::FlipPanes(None)),
                     _ => {}
+                }
+                let id = |prefix| serde_json::from_str(path.strip_prefix(prefix)?).ok();
+                if path.starts_with("pane/add/") {
+                    return id("pane/add/").map(|tab| Self::AddPane(Some(tab)));
+                }
+                if path.starts_with("pane/flip/") {
+                    return id("pane/flip/").map(|split| Self::FlipPanes(Some(split)));
+                }
+                if path.starts_with("pane/separate-all/") {
+                    return id("pane/separate-all/").map(Self::SeparateAll);
+                }
+                if path.starts_with("pane/close-split/") {
+                    return id("pane/close-split/").map(Self::CloseSplit);
                 }
                 if let Some(index) = path.strip_prefix("pane/even/") {
                     return index.parse().ok().map(Self::EvenPanes);
@@ -1234,8 +1253,25 @@ mod tests {
         );
         assert_eq!(Command::parse("pane/resize/1/NaN"), None);
         assert_eq!(Command::parse("pane/even/2"), Some(Command::EvenPanes(2)));
-        assert_eq!(Command::parse("pane/add"), Some(Command::AddPane));
-        assert_eq!(Command::parse("pane/flip"), Some(Command::FlipPanes));
+        assert_eq!(Command::parse("pane/add"), Some(Command::AddPane(None)));
+        assert_eq!(Command::parse("pane/flip"), Some(Command::FlipPanes(None)));
+        assert!(matches!(
+            Command::parse("pane/add/4"),
+            Some(Command::AddPane(Some(_)))
+        ));
+        assert!(matches!(
+            Command::parse("pane/flip/4"),
+            Some(Command::FlipPanes(Some(_)))
+        ));
+        assert!(matches!(
+            Command::parse("pane/separate-all/4"),
+            Some(Command::SeparateAll(_))
+        ));
+        assert!(matches!(
+            Command::parse("pane/close-split/4"),
+            Some(Command::CloseSplit(_))
+        ));
+        assert_eq!(Command::parse("pane/close-split/x"), None);
     }
 
     #[test]

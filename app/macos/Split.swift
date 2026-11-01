@@ -96,6 +96,13 @@ final class SplitHandles {
             }
             panel.place(in: parent, frame)
         }
+        // Above the pages, which CEF may order above them once it shows the card again.
+        DispatchQueue.main.async { [self] in
+            for panel in panels where panel.isVisible {
+                parent.removeChildWindow(panel)
+                parent.addChildWindow(panel, ordered: .above)
+            }
+        }
     }
 
     func close() { panels.forEach { $0.close() } }

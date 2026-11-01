@@ -340,7 +340,7 @@ define_class!(
 
         #[unsafe(method(arbaleteAddPane:))]
         fn add_pane(&self, _sender: Option<&AnyObject>) {
-            crate::shell::run(Command::AddPane);
+            crate::shell::run(Command::AddPane(None));
         }
 
         #[unsafe(method(arbaleteClosePane:))]
@@ -350,7 +350,7 @@ define_class!(
 
         #[unsafe(method(arbaleteFlipPanes:))]
         fn flip_panes(&self, _sender: Option<&AnyObject>) {
-            crate::shell::run(Command::FlipPanes);
+            crate::shell::run(Command::FlipPanes(None));
         }
 
         #[unsafe(method(arbaleteMakeDefaultBrowser:))]

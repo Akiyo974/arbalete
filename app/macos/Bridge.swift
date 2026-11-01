@@ -165,6 +165,13 @@ final class AppModel: ObservableObject {
         run("move/\(id)/\(parent)/\(to)")
     }
 
+    /// Puts a tab beside another in a split, or a copy of it with Option held, like Arc's.
+    func split(_ id: Int, onto target: Int) {
+        guard id != target else { return }
+        let command = NSEvent.modifierFlags.contains(.option) ? "split-duplicate" : "split"
+        run("\(command)/\(id)/\(target)")
+    }
+
     /// Shows the library, on a section or the one it showed last.
     func openLibrary(_ section: LibrarySection?) {
         libraryShown = true

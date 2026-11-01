@@ -2,7 +2,9 @@
 //! (app/src/mac.rs) and runs the item picked (shell::perform).
 
 use crate::command::{Command, SiteData, Target};
-use arbalete_core::sidebar::{MAX_FAVORITES, NodeId, NodeKind, Sidebar, Space, Tab};
+use arbalete_core::sidebar::{
+    MAX_FAVORITES, MAX_SPLIT_TABS, NodeId, NodeKind, Sidebar, Space, Tab,
+};
 use serde_json::json;
 
 pub enum Entry {
@@ -49,8 +51,8 @@ pub fn build(sidebar: &Sidebar, target: Target) -> Option<Vec<Entry>> {
             NodeKind::Tab(tab) if sidebar.is_favorite(id) => Some(favorite(sidebar, id, &tab.url)),
             NodeKind::Tab(tab) => Some(tab_menu(sidebar, id, tab)),
             NodeKind::Folder { title, .. } => Some(folder(sidebar, id, title)),
-            // A split's menus are its tabs', from each half of its row.
-            NodeKind::Container | NodeKind::Split => None,
+            NodeKind::Split => Some(split_menu(sidebar, id)),
+            NodeKind::Container => None,
         },
         Target::Space(id) => {
             let space = sidebar.spaces().iter().find(|space| space.id == id)?;
@@ -192,6 +194,89 @@ fn tab_menu(sidebar: &Sidebar, id: NodeId, tab: &Tab) -> Vec<Entry> {
             action: Action::Run(Command::CloseTabsBelow(tab)),
         }));
     }
+    menu
+}
+
+/// A split row's menu, like Arc's: the split's own items, then each tab's as a submenu.
+fn split_menu(sidebar: &Sidebar, split: NodeId) -> Vec<Entry> {
+    let tabs: Vec<(NodeId, &Tab)> = sidebar
+        .node(split)
+        .map(|node| node.children.as_slice())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|&id| match &sidebar.node(id)?.kind {
+            NodeKind::Tab(tab) => Some((id, tab)),
+            _ => None,
+        })
+        .collect();
+    let (Some(&(first, _)), Some(&(last, _))) = (tabs.first(), tabs.last()) else {
+        return Vec::new();
+    };
+    let flip = if sidebar.split_layout(split).stacked {
+        "Convert to Horizontal Split View"
+    } else {
+        "Convert to Vertical Split View"
+    };
+    let mut menu = vec![
+        item(
+            "separate-all",
+            "Separate All Tabs",
+            Action::Run(Command::SeparateAll(split)),
+        ),
+        Entry::Item(Item {
+            id: "add-tab".to_string(),
+            title: "Add Tab…".to_string(),
+            checked: false,
+            enabled: tabs.len() < MAX_SPLIT_TABS,
+            action: Action::Run(Command::AddPane(Some(last))),
+        }),
+        item("flip", flip, Action::Run(Command::FlipPanes(Some(split)))),
+        Entry::Separator,
+        Entry::Item(Item {
+            id: "tab-options".to_string(),
+            title: "Tab Options".to_string(),
+            checked: false,
+            enabled: false,
+            action: Action::Run(Command::Select(first)),
+        }),
+    ];
+    menu.extend(tabs.iter().map(|&(id, tab)| {
+        let mute = if tab.muted { "Unmute" } else { "Mute" };
+        Entry::Submenu(
+            tab.label().to_string(),
+            vec![
+                item(
+                    "separate",
+                    "Separate from Split View",
+                    Action::Run(Command::Separate(id)),
+                ),
+                Entry::Separator,
+                item("share", "Share…", Action::Share(tab.url.clone())),
+                item("mute", mute, Action::Run(Command::ToggleMute(id))),
+                copy_link(&tab.url),
+                Entry::Separator,
+                item("close", "Close Tab", Action::Run(Command::Close(Some(id)))),
+            ],
+        )
+    }));
+    menu.extend([
+        Entry::Separator,
+        duplicate(split),
+        move_to(sidebar, first),
+        Entry::Separator,
+        item(
+            "close-split",
+            "Close Split View",
+            Action::Run(Command::CloseSplit(split)),
+        ),
+        Entry::Item(Item {
+            id: "close-below".to_string(),
+            title: "Close Tabs Below".to_string(),
+            checked: false,
+            enabled: has_rows_below(sidebar, split),
+            action: Action::Run(Command::CloseTabsBelow(first)),
+        }),
+    ]);
     menu
 }
 
@@ -419,6 +504,48 @@ mod tests {
 
     fn choose(sidebar: &Sidebar, id: NodeId, item: &str) -> Option<Action> {
         find(build(sidebar, Target::Node(id))?, item)
+    }
+
+    #[test]
+    fn a_split_row_has_arcs_menu_with_one_submenu_per_tab() {
+        let mut sidebar = Sidebar::default();
+        let home = sidebar.spaces()[0].id;
+        let [a, b] = ["https://a.test/", "https://b.test/"].map(|url| {
+            let tab = sidebar.open_tab(home, url).unwrap();
+            sidebar.tab_mut(tab).unwrap().title = url.trim_end_matches('/')[8..].to_string();
+            tab
+        });
+        let split = sidebar.split(b, a).unwrap();
+        let menu = build(&sidebar, Target::Node(split)).unwrap();
+        assert_eq!(
+            titles(&menu)[..6],
+            [
+                "Separate All Tabs",
+                "Add Tab…",
+                "Convert to Vertical Split View",
+                "-",
+                "(Tab Options)",
+                "a.test ▸",
+            ]
+        );
+        assert_eq!(
+            choose(&sidebar, split, "separate-all"),
+            Some(Action::Run(Command::SeparateAll(split)))
+        );
+        assert_eq!(
+            choose(&sidebar, split, "separate"),
+            Some(Action::Run(Command::Separate(a)))
+        );
+        assert_eq!(
+            choose(&sidebar, split, "close-split"),
+            Some(Action::Run(Command::CloseSplit(split)))
+        );
+        for url in ["c", "d"] {
+            let tab = sidebar.open_tab(home, url).unwrap();
+            sidebar.split(tab, b).unwrap();
+        }
+        let menu = build(&sidebar, Target::Node(split)).unwrap();
+        assert_eq!(titles(&menu)[1], "(Add Tab…)");
     }
 
     #[test]

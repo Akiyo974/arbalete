@@ -470,14 +470,18 @@ struct ItemRows: View {
                         .dropDestination(for: String.self) { ids, _ in
                             drop(ids) { model.move($0, to: id, children.count) }
                         }
-                case .split(_, let tabs):
-                    SplitRow(model: model, tabs: tabs, selected: selected)
+                case .split(let id, let tabs):
+                    SplitRow(model: model, id: id, tabs: tabs, selected: selected)
                 }
             }
             .padding(.leading, CGFloat(depth) * 14)
             .draggable(String(item.id))
-            .dropDestination(for: String.self) { ids, _ in
-                drop(ids) { model.move($0, to: parent, index) }
+            .dropDestination(for: String.self) { ids, location in
+                // On the middle of a tab, the tab dropped joins it in a split, like Arc's.
+                if case .tab(let tab) = item, abs(location.y - rowHeight / 2) < rowHeight / 4 {
+                    return drop(ids) { model.split($0, onto: tab.id) }
+                }
+                return drop(ids) { model.move($0, to: parent, index) }
             }
             if case .folder(let id, _, true, let children) = item {
                 ItemRows(
@@ -487,6 +491,9 @@ struct ItemRows: View {
         }
     }
 }
+
+/// A tab's row's height, whose middle half takes a tab dropped into a split.
+private let rowHeight: CGFloat = 34
 
 /// Runs `move` with the id a drag carries, if it carries one.
 func drop(_ ids: [String], _ move: (Int) -> Void) -> Bool {
@@ -628,6 +635,7 @@ struct NameField: View {
 /// focused, the only one with a background, like Arc's.
 struct SplitRow: View {
     @ObservedObject var model: AppModel
+    let id: Int
     let tabs: [Tab]
     let selected: Int?
 
@@ -647,8 +655,11 @@ struct SplitRow: View {
                         .fill(.primary.opacity(tab.id == selected ? 0.15 : 0)))
                 .contentShape(Rectangle())
                 .onTapGesture { model.run("select/\(tab.id)") }
-                .rightClick { model.run("menu/node/\(tab.id)") }
+                .rightClick { model.run("menu/node/\(id)") }
                 .help(tab.label)
+                .dropDestination(for: String.self) { ids, _ in
+                    drop(ids) { model.split($0, onto: tab.id) }
+                }
             }
         }
         .padding(.horizontal, 2)

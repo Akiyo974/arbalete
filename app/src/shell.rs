@@ -1604,11 +1604,11 @@ fn place_card() {
         return;
     }
     card.set_bounds(Some(&win().sidebar_mode.get().layout(&size).card));
-    place_split_handles();
     // Once the sidebar sent the window's colors, which first show it.
     if win().colored.get() {
         card.set_visible(1);
     }
+    place_split_handles();
 }
 
 /// Moves the card `offset` points right of where it rests beside the docked sidebar, which pages
@@ -3155,15 +3155,17 @@ pub fn split_shown() -> Option<bool> {
     win().split.borrow().1.as_ref().map(|layout| layout.stacked)
 }
 
-/// Lays the shown split's pages out one above the other, or side by side again.
-fn flip_panes() {
-    let Some(stacked) = split_shown() else { return };
-    let Some(tab) = win().split.borrow().0.first().copied() else {
-        return;
-    };
+/// Lays the pages of `split`, or of the split shown, out one above the other, or side by side
+/// again.
+fn flip_panes(split: Option<NodeId>) {
+    let shown = win().split.borrow().0.first().copied();
     let flipped = STATE.with_borrow_mut(|state| {
-        let split = state.sidebar.row_of(tab);
-        state.sidebar.set_split_stacked(split, !stacked)
+        let sidebar = &mut state.sidebar;
+        let split = split
+            .or_else(|| Some(sidebar.row_of(shown?)))
+            .ok_or(Error::UnknownNode)?;
+        let stacked = sidebar.split_layout(split).stacked;
+        sidebar.set_split_stacked(split, !stacked)
     });
     if flipped.is_ok() {
         save_session();
@@ -4590,7 +4592,10 @@ fn run_command(command: Command) {
                 open_tab(&url);
             }
         }
-        (Command::AddPane, _) => {
+        (Command::AddPane(tab), _) => {
+            if let Some(tab) = tab {
+                select_tab(tab);
+            }
             if selected().is_some() {
                 show_overlay(true);
                 win().adding_pane.set(true);
@@ -4598,7 +4603,16 @@ fn run_command(command: Command) {
         }
         (Command::ClosePane, _) if split_shown().is_some() => close_tab(None),
         (Command::ClosePane, _) => {}
-        (Command::FlipPanes, _) => flip_panes(),
+        (Command::FlipPanes(split), _) => flip_panes(split),
+        (Command::SeparateAll(split), _) => {
+            if update_sidebar(|sidebar| sidebar.separate_all(split)).is_ok() {
+                show_selected();
+            }
+        }
+        (Command::CloseSplit(split), _) => close_rows(|sidebar| {
+            let profile = sidebar.profile_of(split).ok_or(Error::UnknownNode)?;
+            Ok((sidebar.remove_split(split)?, profile))
+        }),
         (Command::Close(None), _) if settings_focused() => close_settings(),
         (Command::Close(None), _) if focused_little().is_some() => {
             if let Some(window) = focused_little().and_then(little_window) {
