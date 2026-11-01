@@ -14,9 +14,10 @@ final class Backdrop {
 
     init(content: NSView, model: AppModel) {
         effect = NSVisualEffectView(frame: content.frame)
-        effect.material = .underWindowBackground
+        // Like Arc's: a dark or light blur as the theme's appearance is, behind the window.
         effect.blendingMode = .behindWindow
         effect.state = .followsWindowActiveState
+        effect.isEmphasized = true
         effect.autoresizingMask = [.width, .height]
         let tint = NSHostingView(rootView: BackdropTint(model: model))
         tint.frame = effect.bounds
@@ -24,7 +25,9 @@ final class Backdrop {
         effect.addSubview(tint)
         content.superview?.addSubview(effect, positioned: .below, relativeTo: content)
         watch = model.$state.sink { [effect] _ in
-            effect.appearance = NSAppearance(named: isDark(model.space?.theme) ? .darkAqua : .aqua)
+            let dark = isDark(model.space?.theme)
+            effect.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            effect.material = dark ? .dark : .light
         }
     }
 }
