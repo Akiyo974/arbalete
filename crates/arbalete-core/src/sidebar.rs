@@ -5,6 +5,7 @@
 //! nodes of a single tree, stored flat and linked by `parent` and `children`.
 
 use crate::search::SearchEngine;
+use crate::url_routing::{Destination, UrlRouting};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -341,6 +342,9 @@ pub struct Sidebar {
     /// The tabs archived, the most recent first.
     #[serde(default)]
     archive: Vec<Archived>,
+    /// Where the links other apps open go.
+    #[serde(default)]
+    url_routing: UrlRouting,
 }
 
 impl Default for Sidebar {
@@ -366,7 +370,31 @@ impl Sidebar {
             nodes: HashMap::new(),
             next_id: 1,
             archive: Vec::new(),
+            url_routing: UrlRouting::default(),
         }
+    }
+
+    /// Where the links other apps open go.
+    pub fn url_routing(&self) -> &UrlRouting {
+        &self.url_routing
+    }
+
+    /// Replaces the routes and the default destination; a Space it does not know becomes the
+    /// Space shown last.
+    pub fn set_url_routing(&mut self, mut routing: UrlRouting) {
+        let known: Vec<_> = self.spaces.iter().map(|s| s.id).collect();
+        let destinations = routing
+            .routes
+            .iter_mut()
+            .map(|route| &mut route.destination);
+        for destination in destinations.chain([&mut routing.default]) {
+            if let Destination::Space(space) = destination
+                && !known.contains(space)
+            {
+                *destination = Destination::MostRecentSpace;
+            }
+        }
+        self.url_routing = routing;
     }
 
     pub fn profiles(&self) -> &[Profile] {
@@ -662,6 +690,7 @@ impl Sidebar {
             self.displayed = Some(neighbor.id);
         }
         let space = self.spaces.remove(index);
+        self.url_routing.forget_space(id);
         let mut pending = vec![space.pinned, space.today];
         while let Some(id) = pending.pop() {
             let node = self.nodes.remove(&id).expect("children are known nodes");
@@ -2247,6 +2276,40 @@ mod tests {
         sidebar.select(home.id, second).unwrap();
         sidebar.set_view(&view);
         assert_eq!(sidebar.space(home.id).unwrap().selected, None);
+    }
+
+    #[test]
+    fn url_routing_sends_links_of_unknown_or_deleted_spaces_to_the_space_shown_last() {
+        use crate::url_routing::{Match, Route};
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let work = sidebar.add_space("Work", home.profile).unwrap();
+        let route = |text: &str, destination| Route {
+            matching: Match::Contains,
+            text: text.to_string(),
+            destination,
+        };
+        sidebar.set_url_routing(UrlRouting {
+            routes: vec![
+                route("a", Destination::Space(work)),
+                route("b", Destination::Space(SpaceId(999))),
+            ],
+            default: Destination::Space(work),
+        });
+        assert_eq!(
+            sidebar.url_routing().routes[0].destination,
+            Destination::Space(work)
+        );
+        assert_eq!(
+            sidebar.url_routing().routes[1].destination,
+            Destination::MostRecentSpace
+        );
+        sidebar.delete_space(work).unwrap();
+        assert_eq!(
+            sidebar.url_routing().routes[0].destination,
+            Destination::MostRecentSpace
+        );
+        assert_eq!(sidebar.url_routing().default, Destination::MostRecentSpace);
     }
 
     #[test]

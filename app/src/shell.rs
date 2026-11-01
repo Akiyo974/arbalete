@@ -19,6 +19,7 @@ use arbalete_core::sidebar::{
     ArchiveAfter, Color, Error, NodeId, NodeKind, ProfileId, Sidebar, Space, SpaceId, Tab,
     View as WindowView,
 };
+use arbalete_core::url_routing::Destination;
 use arbalete_core::{favicon, store};
 use cef::wrapper::stream_resource_handler::StreamResourceHandler;
 use cef::*;
@@ -1854,14 +1855,33 @@ struct Little {
     title: String,
 }
 
-/// Opens a link another app asked to open, or an empty page from the menu, in a Little Arbalete
-/// window; links arriving before the main window exists wait for it.
+/// Opens a link another app asked to open where URL Routing sends it, or an empty page from the
+/// menu in a Little Arbalete window; links arriving before the main window exists wait for it.
 pub fn open_link(url: Option<String>) {
     if win().window.with_borrow(Option::is_none) {
         PENDING_LINKS.with_borrow_mut(|links| links.extend(url));
         return;
     }
-    open_little(url);
+    let Some(url) = url else {
+        return open_little(None);
+    };
+    match STATE.with_borrow(|state| state.sidebar.url_routing().destination(&url)) {
+        Destination::Little => open_little(Some(url)),
+        Destination::MostRecentSpace => open_in_window(None, &url),
+        Destination::Space(space) => open_in_window(Some(space), &url),
+    }
+}
+
+/// Opens a link from another app in a new tab of the focused window, in `space` or the Space it
+/// shows, and brings the window to the front.
+fn open_in_window(space: Option<SpaceId>, url: &str) {
+    if let Some(space) = space {
+        show_space(space);
+    }
+    open_tab(url);
+    if let Some(window) = win().window.with_borrow(Clone::clone) {
+        window.activate();
+    }
 }
 
 /// Opens a Little Arbalete window on `url`, in the displayed Space's profile, like Arc's Little
@@ -4745,7 +4765,7 @@ wrap_window_delegate! {
                 show_import();
             }
             for link in PENDING_LINKS.take() {
-                open_little(Some(link));
+                open_link(Some(link));
             }
             for view in RESTORED_WINDOWS.take() {
                 open_window(view, false);
