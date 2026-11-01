@@ -205,6 +205,9 @@ thread_local! {
     static WINDOWS: RefCell<Vec<Rc<Win>>> = RefCell::new(vec![Rc::new(Win::new(0))]);
     /// The window commands and events are about, by its id.
     static FOCUSED: Cell<u32> = const { Cell::new(0) };
+    /// Whether the split shown lays its pages one above the other, and each page's slot's
+    /// length along it (SlotDelegate).
+    static SLOT_LENGTHS: RefCell<(bool, Vec<i32>)> = const { RefCell::new((false, Vec::new())) };
     /// The sidebar's width as a drag of its edge began, while it goes on.
     static SIDEBAR_DRAG: Cell<Option<i32>> = const { Cell::new(None) };
     /// The extensions' bridge's browser (make_bridge).
@@ -4117,10 +4120,31 @@ fn split_rects() -> Vec<Rect> {
         .collect()
 }
 
+/// How long each of a split's pages is along `room`, by its part, 10 points apart; the last
+/// takes what is left.
+fn pane_lengths(room: i32, factors: &[f64]) -> Vec<i32> {
+    let count = factors.len() as i32;
+    let shared = f64::from(room - SPLIT_GAP * (count - 1).max(0));
+    let mut left = room - SPLIT_GAP * (count - 1).max(0);
+    factors
+        .iter()
+        .enumerate()
+        .map(|(index, factor)| {
+            let length = if index as i32 == count - 1 {
+                left
+            } else {
+                (shared * factor).round() as i32
+            };
+            left -= length;
+            length.max(1)
+        })
+        .collect()
+}
+
 /// Shares the card between the split's pages by their parts, 10 points apart, then puts the
 /// handles between them and the bars above them.
 fn lay_out_split() {
-    let (tabs, Some(layout)) = win().split.borrow().clone() else {
+    let (_, Some(layout)) = win().split.borrow().clone() else {
         return;
     };
     let Some(split) = win().split_view.with_borrow(Clone::clone) else {
@@ -4134,7 +4158,20 @@ fn lay_out_split() {
     ) {
         card.set_bounds(Some(&win().sidebar_mode.get().layout(&size).card));
     }
-    let boxed = split
+    // Each slot as long as its part of the card, worked out here: the layout's weights did not
+    // share the room by them.
+    let card = win()
+        .card
+        .with_borrow(|card| card.as_ref().map(OverlayController::bounds));
+    let room = card.map_or(0, |card| {
+        if layout.stacked {
+            card.height
+        } else {
+            card.width
+        }
+    });
+    SLOT_LENGTHS.set((layout.stacked, pane_lengths(room, &layout.factors)));
+    split
         .set_to_box_layout(Some(&BoxLayoutSettings {
             horizontal: (!layout.stacked).into(),
             between_child_spacing: SPLIT_GAP,
@@ -4143,10 +4180,8 @@ fn lay_out_split() {
         }))
         .expect("box layout");
     let slots = win().slots.borrow().clone();
-    for (slot, factor) in slots.iter().zip(&layout.factors).take(tabs.len()) {
-        // Whole thousandths: the layout shares the room by integer weights.
-        let weight = (factor * 1000.0).round() as i32;
-        boxed.set_flex_for_view(Some(&mut View::from(slot)), weight.max(1));
+    for slot in &slots {
+        slot.invalidate_layout();
     }
     if let Some(panel) = card_panel() {
         panel.layout();
@@ -5267,7 +5302,8 @@ wrap_window_delegate! {
             card.add_child_view(Some(&mut View::from(&split)));
             win().split_view.set(Some(split));
             for _ in 0..MAX_SPLIT_TABS {
-                let slot = panel_create(None).expect("slot");
+                let index = win().slots.borrow().len();
+                let slot = panel_create(Some(&mut SlotDelegate::new(index))).expect("slot");
                 let column = slot
                     .set_to_box_layout(Some(&BoxLayoutSettings {
                         horizontal: 0,
@@ -5669,6 +5705,28 @@ fn no_width() -> i32 {
 /// layout stacks it: an empty view, without a page of its own.
 fn place_view(width: fn() -> i32, height: i32) -> Panel {
     panel_create(Some(&mut PlaceDelegate::new(width, height))).expect("a place")
+}
+
+// A split's slot: as long, along the split, as lay_out_split worked out (SLOT_LENGTHS).
+wrap_panel_delegate! {
+    struct SlotDelegate {
+        index: usize,
+    }
+
+    impl ViewDelegate {
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            let (stacked, length) = SLOT_LENGTHS.with_borrow(|(stacked, lengths)| {
+                (*stacked, lengths.get(self.index).copied().unwrap_or(1))
+            });
+            if stacked {
+                Size { width: 1, height: length }
+            } else {
+                Size { width: length, height: 1 }
+            }
+        }
+    }
+
+    impl PanelDelegate {}
 }
 
 wrap_panel_delegate! {
@@ -6557,10 +6615,16 @@ mod tests {
     use super::{
         CARD_MARGIN, DraggableRegion, EDGE_WIDTH, FLOAT_INSET, LIBRARY_WIDTH, MemoryPressure,
         RECENT_TABS, Rect, SIDEBAR_WIDTH, SidebarMode, Size, UiState, favicon_file, lead_part,
-        lerp_rect, margin_regions, origin, remember, site, slide_duration, step, suspend_delays,
-        toggled, ui_path, win,
+        lerp_rect, margin_regions, origin, pane_lengths, remember, site, slide_duration, step,
+        suspend_delays, toggled, ui_path, win,
     };
     use arbalete_core::sidebar::NodeId;
+
+    #[test]
+    fn a_split_shares_its_room_by_the_parts_10_points_apart() {
+        assert_eq!(pane_lengths(1010, &[0.5, 0.25, 0.25]), [495, 248, 247]);
+        assert_eq!(pane_lengths(810, &[0.5, 0.5]), [400, 400]);
+    }
 
     #[test]
     fn a_split_handle_keeps_the_pages_wide_enough_and_snaps_to_halves() {
