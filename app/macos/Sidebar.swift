@@ -39,13 +39,16 @@ struct SidebarView: View {
     }
 }
 
+/// The sidebar's toolbar's symbols, as large as Arc's.
+private let toolbarSymbol: CGFloat = 16
+
 /// The window's buttons' room, the sidebar's toggle, and the page's navigation buttons.
 struct SidebarToolbar: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
         HStack(spacing: 2) {
-            IconButton(symbol: "sidebar.left", label: "Toggle sidebar") {
+            IconButton(symbol: "sidebar.left", label: "Toggle sidebar", symbolSize: toolbarSymbol) {
                 model.run("sidebar/toggle")
             }
             Spacer()
@@ -53,7 +56,7 @@ struct SidebarToolbar: View {
                 NavButtons(model: model)
             }
         }
-        .padding(.leading, 76)
+        .padding(.leading, 72)
         .frame(height: 40)
         // Centered with the window's buttons, on a split's bars, like Arc's.
         .padding(.top, windowButtonsCenter - 20)
@@ -66,11 +69,17 @@ struct NavButtons: View {
 
     var body: some View {
         let page = model.state?.page
-        IconButton(symbol: "chevron.left", label: "Back") { model.run("back") }
+        IconButton(symbol: "chevron.left", label: "Back", symbolSize: toolbarSymbol) {
+            model.run("back")
+        }
             .disabled(!(page?.canGoBack ?? false))
-        IconButton(symbol: "chevron.right", label: "Forward") { model.run("forward") }
+        IconButton(symbol: "chevron.right", label: "Forward", symbolSize: toolbarSymbol) {
+            model.run("forward")
+        }
             .disabled(!(page?.canGoForward ?? false))
-        IconButton(symbol: "arrow.clockwise", label: "Reload") { model.run("reload") }
+        IconButton(symbol: "arrow.clockwise", label: "Reload", symbolSize: toolbarSymbol) {
+            model.run("reload")
+        }
     }
 }
 
@@ -79,6 +88,8 @@ struct IconButton: View {
     let symbol: String
     let label: String
     var size: CGFloat = 28
+    /// The symbol's point size.
+    var symbolSize: CGFloat = 13
     let action: () -> Void
     private let _hovered = State<Bool>(initialValue: false)
     private var hovered: Bool {
@@ -89,7 +100,7 @@ struct IconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: symbolSize, weight: .medium))
                 .frame(width: size, height: size)
                 .background(
                     RoundedRectangle(cornerRadius: 7).fill(.primary.opacity(hovered ? 0.1 : 0)))

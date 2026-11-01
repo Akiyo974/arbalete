@@ -256,13 +256,17 @@ final class AppModel: ObservableObject {
 }
 
 /// What the interface puts in one of the app's windows.
-/// How far below the window's top its buttons and the sidebar's toolbar are centered: on a
-/// split's bars, like Arc's (the card's margin, 5 points, the split's inset, 5, and half a bar,
-/// 16, in app/src/shell.rs).
-let windowButtonsCenter: CGFloat = 26
+/// How far below the window's top its buttons and the sidebar's toolbar are centered, like
+/// Arc's.
+let windowButtonsCenter: CGFloat = 24
 
-/// Centers the window's buttons `windowButtonsCenter` below its top: their titlebar grows to
-/// twice that, the buttons in its middle.
+/// Where the window's buttons' circles start from its left edge, and how far apart they are,
+/// like Arc's.
+private let windowButtonsLeading: CGFloat = 13.5
+private let windowButtonsSpacing: CGFloat = 23.5
+
+/// Places the window's buttons like Arc's: centered `windowButtonsCenter` below its top, their
+/// titlebar grown to twice that, the first circle `windowButtonsLeading` from the left edge.
 @MainActor
 func centerWindowButtons(_ window: NSWindow) {
     guard let close = window.standardWindowButton(.closeButton), let bar = close.superview,
@@ -273,10 +277,15 @@ func centerWindowButtons(_ window: NSWindow) {
         x: container.frame.minX, y: window.frame.height - height, width: container.frame.width,
         height: height)
     bar.frame = container.bounds
-    for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+    for (index, kind) in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+        .enumerated()
+    {
         guard let button = window.standardWindowButton(kind) else { continue }
-        button.setFrameOrigin(
-            NSPoint(x: button.frame.minX, y: (height - button.frame.height) / 2))
+        // The circle, 14 points wide, in the middle of the button.
+        let x =
+            windowButtonsLeading - (button.frame.width - 14) / 2 + CGFloat(index)
+            * windowButtonsSpacing
+        button.setFrameOrigin(NSPoint(x: x, y: (height - button.frame.height) / 2))
     }
 }
 
