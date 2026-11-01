@@ -77,8 +77,9 @@ extension AppModel {
         return NSItemProvider(object: String(item.id) as NSString)
     }
 
-    /// The pointer moves over a row: a split shows once it rests on a tab's middle.
-    func hover(_ target: DropTarget?) {
+    /// The pointer moves over a row: a split shows once it rests on a tab's middle; until then,
+    /// the drop lands before or after the tab, by `nearest`, the half the pointer is in.
+    func hover(_ target: DropTarget?, nearest: DropTarget? = nil) {
         // A row may still hear of a drag once it has ended.
         guard dragged != nil else {
             dropTarget = nil
@@ -95,8 +96,8 @@ extension AppModel {
             return
         }
         pendingSplit = .split(tab, leading: leading)
+        dropTarget = nearest
         guard splitWait == nil else { return }
-        dropTarget = nil
         let wait = DispatchWorkItem { [weak self] in
             guard let self else { return }
             splitWait = nil
@@ -235,7 +236,9 @@ private struct RowDrop: DropDelegate {
         let band = edgeBand - Measure.inset
         let x = info.location.x
         model.edge(x <= band ? true : x >= size.width - band ? false : nil)
-        model.hover(target(at: info.location))
+        model.hover(
+            target(at: info.location),
+            nearest: info.location.y < size.height / 2 ? .before(item.id) : .after(item.id))
         return DropProposal(operation: NSEvent.modifierFlags.contains(.option) ? .copy : .move)
     }
 
