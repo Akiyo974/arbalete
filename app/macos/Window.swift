@@ -16,7 +16,8 @@ final class Backdrop {
         effect = NSVisualEffectView(frame: content.frame)
         // Like Arc's: a dark or light blur as the theme's appearance is, behind the window.
         effect.blendingMode = .behindWindow
-        effect.state = .followsWindowActiveState
+        // Like Arc's, what lies behind shows through even while another window is in front.
+        effect.state = .active
         effect.isEmphasized = true
         effect.autoresizingMask = [.width, .height]
         let tint = NSHostingView(rootView: BackdropTint(model: model))

@@ -23,7 +23,8 @@ private let splitDelay = 0.2
 
 extension AppModel {
     /// The sidebar's theme color, which marks where a drop lands, like Arc's.
-    var themeColor: Color { space?.theme.colors.first.map(color) ?? .accentColor }
+    /// The displayed Space's leading color, or Arc's indigo without one.
+    var themeColor: Color { color(space?.theme.colors.first ?? "#333ce8") }
 
     /// A row starts a drag: the node it carries, and whether it is a tab, which may split.
     func startDrag(_ item: Item) -> NSItemProvider {

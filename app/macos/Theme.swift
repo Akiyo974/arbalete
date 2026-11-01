@@ -38,15 +38,15 @@ func color(_ hex: String) -> Color {
     return Color(red: rgb[0], green: rgb[1], blue: rgb[2])
 }
 
-/// A theme's colors over the blur, like Arc's: black over a dark blur or white over a light
-/// one, at 35%, then a gradient from the left edge to the right one and a third color rising from
+/// A theme's colors over the blur, like Arc's: black over a dark blur, at half, or white over a
+/// light one, at 35%, then a gradient from the left edge to the right one and a third color rising from
 /// the bottom edge, from faint to half opaque as the theme is more intense.
 struct Tint: View {
     let theme: Theme?
 
     var body: some View {
         ZStack {
-            (isDark(theme) ? Color.black : Color.white).opacity(0.35)
+            isDark(theme) ? Color.black.opacity(0.5) : Color.white.opacity(0.35)
             colors
         }
     }
