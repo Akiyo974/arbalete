@@ -113,6 +113,7 @@ let shortcuts: [(String, [(String, String)])] = [
 @MainActor
 final class SettingsModel: ObservableObject {
     @Published var detail: SettingsDetail?
+    @Published var pane = panes[0].title
     let app: AppModel
     private var window: NSWindow?
 
@@ -137,12 +138,15 @@ final class SettingsModel: ObservableObject {
             return
         }
         let window = SettingsWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
-            styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 440),
+            styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.title = "Settings"
+        window.title = pane
+        window.select = { [weak self, weak window] pane in
+            self?.pane = pane
+            window?.title = pane
+        }
+        window.showPanes(selected: pane)
         window.contentView = NSHostingView(rootView: SettingsView(settings: self))
         window.center()
         window.closed = { [weak self] in self?.window = nil }
@@ -154,9 +158,18 @@ final class SettingsModel: ObservableObject {
     var isKey: Bool { window?.isKeyWindow ?? false }
 }
 
-final class SettingsWindow: NSWindow, NSWindowDelegate {
+/// The settings' panes, in the toolbar like Arc's: a symbol above each title.
+private let panes = [
+    (title: "General", symbol: "gearshape"),
+    (title: "Profiles", symbol: "person"),
+    (title: "Links", symbol: "macwindow.on.rectangle"),
+    (title: "Shortcuts", symbol: "keyboard"),
+]
+
+final class SettingsWindow: NSWindow, NSWindowDelegate, NSToolbarDelegate {
     var closed: () -> Void = {}
     var escaped: () -> Void = {}
+    var select: (String) -> Void = { _ in }
 
     override init(
         contentRect: NSRect, styleMask: NSWindow.StyleMask, backing: NSWindow.BackingStoreType,
@@ -169,23 +182,49 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
     override func cancelOperation(_ sender: Any?) { escaped() }
 
     func windowWillClose(_ notification: Notification) { closed() }
+
+    func showPanes(selected: String) {
+        let toolbar = NSToolbar(identifier: "settings")
+        toolbar.delegate = self
+        toolbar.selectedItemIdentifier = NSToolbarItem.Identifier(selected)
+        toolbarStyle = .preference
+        self.toolbar = toolbar
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        panes.map { NSToolbarItem.Identifier($0.title) }
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarDefaultItemIdentifiers(toolbar)
+    }
+
+    func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarDefaultItemIdentifiers(toolbar)
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        guard let pane = panes.first(where: { $0.title == identifier.rawValue }) else { return nil }
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        item.label = pane.title
+        item.image = NSImage(systemSymbolName: pane.symbol, accessibilityDescription: nil)
+        item.target = self
+        item.action = #selector(choose(_:))
+        return item
+    }
+
+    @objc private func choose(_ item: NSToolbarItem) { select(item.itemIdentifier.rawValue) }
 }
 
 struct SettingsView: View {
     @ObservedObject var settings: SettingsModel
-    private let tab = State(initialValue: "General")
 
     var body: some View {
-        // A segmented picker rather than a TabView, whose tabs macOS moves to the toolbar and
-        // sometimes lays out a single tab wide.
-        VStack(spacing: 16) {
-            Picker("", selection: tab.projectedValue) {
-                ForEach(["General", "Profiles", "Links", "Shortcuts"], id: \.self) { Text($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            switch tab.wrappedValue {
+        Group {
+            switch settings.pane {
             case "Profiles": ProfilesSettings(settings: settings)
             case "Links": LinksSettings(settings: settings)
             case "Shortcuts": ShortcutsList()
@@ -193,9 +232,8 @@ struct SettingsView: View {
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .padding(.top, 28)
         .padding(16)
-        .frame(minWidth: 600, minHeight: 440)
+        .frame(minWidth: 600, minHeight: 400)
     }
 }
 
