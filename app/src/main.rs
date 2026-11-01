@@ -38,6 +38,8 @@ fn main() {
     let settings = Settings {
         root_cache_path: CefString::from(root.to_str().unwrap()),
         cache_path: CefString::from(root.join("Default").to_str().unwrap()),
+        // The extensions' bridge runs in a page without a window (shell::make_bridge).
+        windowless_rendering_enabled: 1,
         ..Default::default()
     };
     let mut app = shell::ArbaleteApp::new(root.clone());

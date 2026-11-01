@@ -198,6 +198,8 @@ thread_local! {
     static WINDOWS: RefCell<Vec<Rc<Win>>> = RefCell::new(vec![Rc::new(Win::new(0))]);
     /// The window commands and events are about, by its id.
     static FOCUSED: Cell<u32> = const { Cell::new(0) };
+    /// The extensions' bridge's browser (make_bridge).
+    static BRIDGE: RefCell<Option<Browser>> = const { RefCell::new(None) };
     /// The other windows as quitting started, which the session keeps while they close.
     static QUIT_WINDOWS: RefCell<Option<Vec<WindowView>>> = const { RefCell::new(None) };
     /// Stands for the window once every window has closed, while the app quits.
@@ -226,7 +228,7 @@ struct Win {
     window: RefCell<Option<Window>>,
     /// Beside the card, at the window's left edge. It must not reach under the card: a web view
     /// below the overlays receives no real mouse event on macOS, only synthesized ones.
-    sidebar: RefCell<Option<BrowserView>>,
+    sidebar: RefCell<Option<Panel>>,
     /// Holds the content views, inset from the window's edges and from the sidebar. An overlay, as
     /// macOS only rounds the corners of a window of its own. Without a selected tab, its own
     /// color paints an empty Space's panel.
@@ -281,9 +283,6 @@ struct Win {
     wide_library: Cell<bool>,
     /// Under way while the sidebar moves to its mode.
     slide: RefCell<Option<Slide>>,
-    /// The sidebar's draggable regions, which move the window while the sidebar is shown, with
-    /// the margins around the card.
-    drag_regions: RefCell<Vec<DraggableRegion>>,
     /// The tab shown last, which showing another marks as shown until then (Sidebar::touch).
     last_shown: Cell<Option<NodeId>>,
     #[cfg(target_os = "macos")]
@@ -332,7 +331,6 @@ impl Win {
             library: Cell::new(false),
             wide_library: Cell::new(false),
             slide: RefCell::new(None),
-            drag_regions: RefCell::new(Vec::new()),
             last_shown: Cell::new(None),
             #[cfg(target_os = "macos")]
             swipe: RefCell::default(),
@@ -1100,7 +1098,7 @@ fn native_surface(view: *const ()) -> Option<&'static str> {
     let current = win();
     let place = |cell: &RefCell<Option<Panel>>| std::ptr::from_ref(cell).cast::<()>();
     [
-        (std::ptr::from_ref(&current.sidebar).cast(), "sidebar"),
+        (place(&current.sidebar), "sidebar"),
         (place(&current.overlay_view), "overlay"),
         (place(&current.find_view), "find"),
         (place(&current.site_view), "site"),
@@ -1115,15 +1113,6 @@ fn native_surface(view: *const ()) -> Option<&'static str> {
     .into_iter()
     .find(|(native, _)| std::ptr::eq(view, *native))
     .map(|(_, surface)| surface)
-}
-
-/// Dispatches an event in a view's page, like `dispatch`.
-#[cfg(not(target_os = "macos"))]
-fn dispatch_in(view: &BrowserView, event: &str) {
-    if let Some(frame) = view.browser().and_then(|browser| browser.main_frame()) {
-        let code = format!("dispatchEvent({event})");
-        frame.execute_java_script(Some(&CefString::from(code.as_str())), None, 0);
-    }
 }
 
 /// Shows the Command Bar above the page, empty to open a tab, or hides it.
@@ -1553,14 +1542,11 @@ fn update_drag_regions() {
     };
     let mode = win().sidebar_mode.get();
     let size = window.size();
-    let mut regions = if fills_window() {
+    let regions = if fills_window() {
         Vec::new()
     } else {
         margin_regions(&size, &mode.layout(&size).card, mode.margins_start())
     };
-    if mode == SidebarMode::Shown {
-        regions.extend(win().drag_regions.with_borrow(Clone::clone));
-    }
     window.set_draggable_regions(Some(&regions));
 }
 
@@ -1857,13 +1843,12 @@ fn show_dev_tools(host: &BrowserHost, at: Option<(i32, i32)>) {
     );
 }
 
-/// A Little Arbalete window: its bar and its page, in the profile it was opened in, and what the
-/// bar shows of the page.
+/// A Little Arbalete window: its page, in the profile it was opened in, and what its bar shows of
+/// the page.
 struct Little {
     id: u32,
     profile: ProfileId,
     window: Window,
-    bar: BrowserView,
     page: BrowserView,
     url: String,
     title: String,
@@ -1961,17 +1946,14 @@ fn send_little(id: u32) {
         let search = json!({ "name": engine.name(), "url": engine.url() });
         let detail =
             json!({ "url": little.url, "title": little.title, "space": space, "search": search });
-        Some((little.bar.clone(), detail))
+        Some(detail)
     });
-    if let Some((bar, detail)) = found {
+    if let Some(detail) = found {
         let event = format!(r#"new CustomEvent("arbalete:little", {{ detail: {detail} }})"#);
         #[cfg(target_os = "macos")]
-        {
-            let _ = bar;
-            crate::native::event(win().id, &format!("little/{id}"), &event);
-        }
+        crate::native::event(win().id, &format!("little/{id}"), &event);
         #[cfg(not(target_os = "macos"))]
-        dispatch_in(&bar, &event);
+        let _ = event;
     }
 }
 
@@ -2151,11 +2133,28 @@ fn restore_archived(rank: usize) {
 }
 
 /// The displayed Space's profile.
-/// The sidebar's browser, which outlives every page: the extensions' DevTools session runs in it.
-pub fn sidebar_host() -> Option<BrowserHost> {
-    win()
-        .sidebar
-        .with_borrow(|sidebar| sidebar.as_ref()?.browser()?.host())
+/// The extensions' bridge's browser, which outlives every page and window: their DevTools
+/// session runs in it.
+pub fn bridge_host() -> Option<BrowserHost> {
+    BRIDGE.with_borrow(|bridge| bridge.as_ref()?.host())
+}
+
+/// Makes the extensions' bridge's browser: a blank page without a window, the only one the app
+/// keeps for itself, as DevTools sessions run in a browser.
+fn make_bridge() {
+    let info = WindowInfo {
+        windowless_rendering_enabled: 1,
+        ..Default::default()
+    };
+    let browser = browser_host_create_browser_sync(
+        Some(&info),
+        Some(&mut BridgeClient::new()),
+        Some(&CefString::from("about:blank")),
+        Some(&BrowserSettings::default()),
+        None,
+        None,
+    );
+    BRIDGE.set(browser);
 }
 
 pub fn displayed_profile() -> ProfileId {
@@ -4593,6 +4592,7 @@ wrap_browser_process_handler! {
             restore(self.data_dir.join(store::FILE_NAME));
             check_archive();
             DOWNLOADS.set(downloads::load(&self.data_dir.join(downloads::FILE_NAME)));
+            make_bridge();
             window_create_top_level(Some(&mut MainWindowDelegate::new(0)));
         }
 
@@ -4658,7 +4658,7 @@ wrap_window_delegate! {
                     ..Default::default()
                 }))
                 .expect("box layout");
-            let sidebar = browser_view(UiClient::new(), "about:blank", docked_width, None);
+            let sidebar = place_view(docked_width, 1);
             // On macOS, the native sidebar stands in for it (app/macos).
             sidebar.set_visible((!cfg!(target_os = "macos")).into());
             let mut view = View::from(&sidebar);
@@ -4793,14 +4793,13 @@ wrap_window_delegate! {
                 return 1;
             }
             CLOSING.set(true);
-            let current = win();
-            let mut views: Vec<_> = current.sidebar.with_borrow(Clone::clone).into_iter().collect();
-            views.extend(PAGES.with_borrow(|pages| pages.values().map(|live| live.view.clone()).collect::<Vec<_>>()));
+            let mut hosts: Vec<_> = PAGES.with_borrow(|pages| {
+                pages.values().filter_map(|live| live.view.browser()?.host()).collect()
+            });
+            hosts.extend(bridge_host());
             let mut closed = 1;
-            for view in views {
-                if let Some(host) = view.browser().and_then(|browser| browser.host()) {
-                    closed &= host.try_close_browser();
-                }
+            for host in hosts {
+                closed &= host.try_close_browser();
             }
             closed
         }
@@ -4972,7 +4971,8 @@ wrap_window_delegate! {
                     ..Default::default()
                 }))
                 .expect("box layout");
-            let bar = browser_view_sized(UiClient::new(), "about:blank", || 1, LITTLE_BAR_HEIGHT, None);
+            // Room for the native bar, at the top.
+            let bar = place_view(|| 1, LITTLE_BAR_HEIGHT);
             window.add_child_view(Some(&mut View::from(&bar)));
             let mut context = profile_context(self.profile);
             let start = if self.url.is_empty() { "about:blank" } else { &self.url };
@@ -4984,7 +4984,6 @@ wrap_window_delegate! {
                 id: self.id,
                 profile: self.profile,
                 window: window.clone(),
-                bar,
                 page,
                 url: self.url.clone(),
                 title: String::new(),
@@ -5005,19 +5004,12 @@ wrap_window_delegate! {
             LITTLE.with_borrow_mut(|littles| littles.retain(|little| little.id != self.id));
         }
 
-        /// The window closes once its bar and its page can.
+        /// The window closes once its page can.
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
-            let views = LITTLE.with_borrow(|littles| {
-                let little = littles.iter().find(|l| l.id == self.id)?;
-                Some([little.bar.clone(), little.page.clone()])
+            let host = LITTLE.with_borrow(|littles| {
+                littles.iter().find(|l| l.id == self.id)?.page.browser()?.host()
             });
-            let mut closed = 1;
-            for view in views.into_iter().flatten() {
-                if let Some(host) = view.browser().and_then(|browser| browser.host()) {
-                    closed &= host.try_close_browser();
-                }
-            }
-            closed
+            host.map_or(1, |host| host.try_close_browser())
         }
 
         // Its bar draws its title, like the main window's sidebar: only macOS keeps standard
@@ -5135,6 +5127,33 @@ wrap_client! {
 
         fn drag_handler(&self) -> Option<DragHandler> {
             Some(UiDragHandler::new())
+        }
+    }
+}
+
+// The extensions' bridge's page, drawn nowhere.
+wrap_client! {
+    struct BridgeClient {}
+
+    impl Client {
+        fn render_handler(&self) -> Option<RenderHandler> {
+            Some(BridgeRender::new())
+        }
+
+        fn life_span_handler(&self) -> Option<LifeSpanHandler> {
+            Some(BrowserLifeSpan::new(None))
+        }
+    }
+}
+
+wrap_render_handler! {
+    struct BridgeRender {}
+
+    impl RenderHandler {
+        fn view_rect(&self, _browser: Option<&mut Browser>, rect: Option<&mut Rect>) {
+            if let Some(rect) = rect {
+                *rect = Rect { x: 0, y: 0, width: 1, height: 1 };
+            }
         }
     }
 }
@@ -5262,40 +5281,15 @@ wrap_drag_handler! {
     struct UiDragHandler {}
 
     impl DragHandler {
-        // The sidebar sits at the window's origin: its coordinates are the window's. Only the
-        // sidebar beside the page moves the window: the views above the page are separate
-        // windows on macOS, which the window's regions do not reach. The settings page fills
-        // its own window, which its title and toolbar move, and a Little Arbalete window's bar
-        // its own.
+        // The settings page fills its own window, which its title and toolbar move.
         fn on_draggable_regions_changed(&self, browser: Option<&mut Browser>, _frame: Option<&mut Frame>, regions: Option<&[DraggableRegion]>) {
             let settings = SETTINGS_VIEW.with_borrow(|view| view.as_ref()?.browser());
             if let (Some(browser), Some(mut settings)) = (browser.as_deref(), settings)
                 && browser.is_same(Some(&mut settings)) == 1
+                && let Some(window) = SETTINGS_WINDOW.with_borrow(Clone::clone)
             {
-                if let Some(window) = SETTINGS_WINDOW.with_borrow(Clone::clone) {
-                    window.set_draggable_regions(regions);
-                }
-                return;
-            }
-            // A Little Arbalete window's bar, at its window's top.
-            let little = browser.as_deref().and_then(|browser| {
-                LITTLE.with_borrow(|littles| {
-                    let little = littles.iter().find(|little| {
-                        little.bar.browser().is_some_and(|mut bar| browser.is_same(Some(&mut bar)) == 1)
-                    })?;
-                    Some(little.window.clone())
-                })
-            });
-            if let Some(window) = little {
                 window.set_draggable_regions(regions);
-                return;
             }
-            let Some(mut sidebar) = win().sidebar.with_borrow(|view| view.as_ref()?.browser()) else { return };
-            if browser.is_none_or(|browser| browser.is_same(Some(&mut sidebar)) == 0) {
-                return;
-            }
-            win().drag_regions.set(regions.unwrap_or_default().to_vec());
-            update_drag_regions();
         }
     }
 }

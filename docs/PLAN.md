@@ -393,8 +393,9 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
 
   Unloading saves about 92 %. A live page costs about 57 MB in its renderer, and about 13 MB in the GPU process
   once hidden: Chromium keeps its last frame, the card's size at Retina scale, to show it again at once. The
-  native panels no longer sit over blank web pages, which cost a renderer each, some 30 MB, seven a window:
-  without them, the unloaded state went from about 0.92 GB to 0.66 GB.
+  native panels no longer sit over blank web pages, which cost a renderer each, some 30 MB, eight a window:
+  without them, the unloaded state went from about 0.92 GB to 0.66 GB. The one blank page left, for the whole
+  app, holds the extensions' DevTools session.
 
 ### Phase 8 — Link routing
 - Registration as the default browser on each OS.

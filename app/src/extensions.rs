@@ -580,12 +580,12 @@ pub fn profile_ready(profile: ProfileId, dir: &Path) {
     refresh(profile, dir);
 }
 
-/// Starts watching the extensions from the sidebar's browser, which outlives the pages, with the
+/// Starts watching the extensions from the bridge's browser, which outlives the pages, with the
 /// first page, then learns which target each page is.
 pub fn page_created(profile: ProfileId, browser: &Browser) {
     let Some(host) = browser.host() else { return };
     let started = BRIDGE.with_borrow(|bridge| bridge.host.is_some());
-    if !started && let Some(sidebar) = crate::shell::sidebar_host() {
+    if !started && let Some(sidebar) = crate::shell::bridge_host() {
         let registration = sidebar.add_dev_tools_message_observer(Some(&mut BridgeObserver::new()));
         BRIDGE.with_borrow_mut(|bridge| {
             bridge.host = Some(sidebar.clone());
