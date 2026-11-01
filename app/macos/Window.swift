@@ -43,6 +43,7 @@ struct BackdropTint: View {
 @MainActor
 final class SidebarHost {
     private let window: NSWindow
+    private let model: AppModel
     private let panel = ChildPanel(view: NSView())
     private let container = NSView()
     private let effect = NSVisualEffectView()
@@ -68,6 +69,7 @@ final class SidebarHost {
 
     init(window: NSWindow, model: AppModel) {
         self.window = window
+        self.model = model
         container.wantsLayer = true
         effect.material = .sidebar
         effect.blendingMode = .behindWindow
@@ -134,8 +136,13 @@ final class SidebarHost {
                 floating ? nil : NSRect(x: frame.maxX - 3, y: 0, width: 8, height: frame.height)
             }, raise: false)
         effect.isHidden = !floating
-        container.layer?.cornerRadius = floating ? 10 : 0
+        // Floating, like Arc's: rounded 12 points, with a 1-point border.
+        container.layer?.cornerRadius = floating ? 12 : 0
         container.layer?.masksToBounds = floating
+        container.layer?.borderWidth = floating ? 1 : 0
+        container.layer?.borderColor =
+            (isDark(model.space?.theme)
+            ? NSColor.white.withAlphaComponent(0.2) : NSColor.black.withAlphaComponent(0.1)).cgColor
         panel.hasShadow = floating
         panel.place(in: window, frame)
         if container.superview != panel.contentView {

@@ -112,16 +112,16 @@ const IMPORT_SIZE: Size = Size {
     height: 480,
 };
 
-/// A Little Arbalete window's size, and its bar's height, which holds the window buttons
-/// (ui/src/Little.tsx).
+/// A Little Arbalete window's size, and its bar's height, which holds the window buttons, like
+/// Little Arc's: a 31-point row with 8 points above and below.
 const LITTLE_SIZE: Size = Size {
-    width: 960,
-    height: 680,
+    width: 768,
+    height: 600,
 };
-const LITTLE_BAR_HEIGHT: i32 = 40;
+const LITTLE_BAR_HEIGHT: i32 = 47;
 
-/// The height of the bar above the page, in toolbar mode (ui/src/Toolbar.tsx).
-const PAGE_TOOLBAR_HEIGHT: i32 = 36;
+/// The height of the bar above the page, in toolbar mode, like Arc's.
+const PAGE_TOOLBAR_HEIGHT: i32 = 40;
 
 /// The height of the settings window's title row, which holds the window buttons
 /// (ui/src/index.css). Not on macOS, whose settings window is native.

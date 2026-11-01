@@ -185,6 +185,10 @@ struct PageToolbar: View {
         }
         .padding(.horizontal, 6)
         .frame(maxHeight: .infinity)
+        // A hairline under the bar, over the page, like Arc's.
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.ink((0x000000, 0.05), (0xFFFFFF, 0.05))).frame(height: 1)
+        }
         .overlay(alignment: .bottom) {
             if let page = model.state?.page, page.loading {
                 ProgressView(value: page.progress).progressViewStyle(.linear).controlSize(.mini)

@@ -65,6 +65,7 @@ final class LittleBar: ObservableObject {
 struct LittleBarView: View {
     @ObservedObject var bar: LittleBar
     private let text = State(initialValue: "")
+    private let _hovered = State(initialValue: false)
 
     var body: some View {
         if let page = bar.page {
@@ -80,24 +81,43 @@ struct LittleBarView: View {
                         }
                         .onExitCommand { bar.editing = false }
                 } else {
+                    // The page's address in a pill the width of the bar, like Little Arc's.
                     Button {
                         bar.editing = true
                     } label: {
-                        Label(domain(page.url), systemImage: "link").lineLimit(1)
+                        Text(domain(page.url)).lineLimit(1)
+                            .padding(.horizontal, 10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(height: 31)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5).fill(
+                                    _hovered.wrappedValue
+                                        ? Color.ink((0x0E0F10, 0.10), (0xFAFBFF, 0.15))
+                                        : Color.ink((0x0E0F10, 0.06), (0xFAFBFF, 0.10))))
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .onHover { _hovered.wrappedValue = $0 }
                     .help(page.url)
                 }
-                Spacer()
                 Button {
                     bar.app.run("little/\(bar.id)/open")
                 } label: {
-                    Text("Open in \(page.space.emoji.map { "\($0) " } ?? "")\(page.space.title)  ⌘O")
+                    HStack(spacing: 6) {
+                        Text(page.space.emoji ?? "")
+                            .frame(width: 26, height: 26)
+                            .background(RoundedRectangle(cornerRadius: 4).fill(.black.opacity(0.15)))
+                        Text("Open in \(page.space.title)")
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .help("Open in \(page.space.title) (⌘O)")
                 .disabled(empty)
             }
             .padding(.leading, 80)
-            .padding(.trailing, 10)
+            .padding(.trailing, 7)
+            .padding(.vertical, 8)
             .frame(maxHeight: .infinity)
         }
     }
