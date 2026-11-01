@@ -247,6 +247,30 @@ final class AppModel: ObservableObject {
 }
 
 /// What the interface puts in one of the app's windows.
+/// How far below the window's top its buttons and the sidebar's toolbar are centered: on a
+/// split's bars, like Arc's (the card's margin, 5 points, the split's inset, 5, and half a bar,
+/// 16, in app/src/shell.rs).
+let windowButtonsCenter: CGFloat = 26
+
+/// Centers the window's buttons `windowButtonsCenter` below its top: their titlebar grows to
+/// twice that, the buttons in its middle.
+@MainActor
+func centerWindowButtons(_ window: NSWindow) {
+    guard let close = window.standardWindowButton(.closeButton), let bar = close.superview,
+        let container = bar.superview
+    else { return }
+    let height = windowButtonsCenter * 2
+    container.frame = NSRect(
+        x: container.frame.minX, y: window.frame.height - height, width: container.frame.width,
+        height: height)
+    bar.frame = container.bounds
+    for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+        guard let button = window.standardWindowButton(kind) else { continue }
+        button.setFrameOrigin(
+            NSPoint(x: button.frame.minX, y: (height - button.frame.height) / 2))
+    }
+}
+
 @MainActor
 final class NativeWindow {
     let model: AppModel
@@ -261,12 +285,24 @@ final class NativeWindow {
     let paneBars: PaneBars
     /// The panels above the page, by the name of the web view they stand for, like "overlay".
     var surfaces: [String: Surface] = [:]
+    private var observers: [NSObjectProtocol] = []
 
     init(window: NSWindow, content: NSView, app: AppModel) {
         model = app
         window.isOpaque = false
         window.backgroundColor = .clear
         window.titlebarAppearsTransparent = true
+        centerWindowButtons(window)
+        // AppKit lays the buttons out again as the window changes.
+        observers = [
+            NSWindow.didResizeNotification, NSWindow.didEndLiveResizeNotification,
+            NSWindow.didExitFullScreenNotification, NSWindow.didBecomeKeyNotification,
+        ].map {
+            NotificationCenter.default.addObserver(forName: $0, object: window, queue: .main) {
+                [weak window] _ in
+                MainActor.assumeIsolated { window.map(centerWindowButtons) }
+            }
+        }
         backdrop = Backdrop(content: content, model: app)
         sidebar = SidebarHost(window: window, model: app)
         let bar = CommandBar(app: app)
@@ -314,6 +350,7 @@ final class NativeWindow {
 
     /// Closes its panels, the window they belong to closing.
     func close() {
+        observers.forEach(NotificationCenter.default.removeObserver)
         sidebar.close()
         surfaces.values.forEach { $0.close() }
         splitHandles.close()

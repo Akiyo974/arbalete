@@ -55,6 +55,8 @@ struct SidebarToolbar: View {
         }
         .padding(.leading, 76)
         .frame(height: 40)
+        // Centered with the window's buttons, on a split's bars, like Arc's.
+        .padding(.top, windowButtonsCenter - 20)
     }
 }
 
