@@ -138,7 +138,7 @@ final class SettingsModel: ObservableObject {
             return
         }
         let window = SettingsWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 440),
+            contentRect: NSRect(x: 0, y: 0, width: 684, height: 440),
             styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.title = pane
@@ -210,7 +210,9 @@ final class SettingsWindow: NSWindow, NSWindowDelegate, NSToolbarDelegate {
         guard let pane = panes.first(where: { $0.title == identifier.rawValue }) else { return nil }
         let item = NSToolbarItem(itemIdentifier: identifier)
         item.label = pane.title
-        item.image = NSImage(systemSymbolName: pane.symbol, accessibilityDescription: nil)
+        // 18 points, medium, like Arc's.
+        item.image = NSImage(systemSymbolName: pane.symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 18, weight: .medium))
         item.target = self
         item.action = #selector(choose(_:))
         return item
@@ -233,7 +235,9 @@ struct SettingsView: View {
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .padding(16)
-        .frame(minWidth: 600, minHeight: 400)
+        // Every pane 684 points wide, like Arc's.
+        .frame(width: 684)
+        .frame(minHeight: 400)
     }
 }
 
