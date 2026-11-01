@@ -3,11 +3,15 @@
 import AppKit
 import SwiftUI
 
-/// Whether a theme shows light text: as its mode forces, or as the system's appearance is in
-/// automatic appearance, like Arc's.
+/// Whether a theme shows light text: as its mode forces; in automatic appearance, like Arc's, as
+/// the system's appearance is, unless its leading color is nearly white or nearly black.
 @MainActor func isDark(_ theme: Theme?) -> Bool {
-    guard let theme, theme.mode != "auto" else { return systemDark() }
-    return theme.mode == "dark"
+    guard let theme else { return systemDark() }
+    if theme.mode != "auto" { return theme.mode == "dark" }
+    guard let lead = theme.colors.first.map(luminance) else { return systemDark() }
+    if lead > 0.5 { return false }
+    if lead < 0.03 { return true }
+    return systemDark()
 }
 
 @MainActor func systemDark() -> Bool {

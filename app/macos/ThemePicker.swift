@@ -191,7 +191,6 @@ struct ThemePickerView: View {
 
     var body: some View {
         let theme = picker.theme
-        let dark = isDark(theme)
         VStack(spacing: 10) {
             Pad(picker: picker)
             Palette(picker: picker)
@@ -207,12 +206,8 @@ struct ThemePickerView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        // The window's colors, through the panel's blur, darkened for its light controls.
-        .background(
-            ZStack {
-                Tint(theme: theme)
-                Color.black.opacity(dark ? 0.45 : 0.3)
-            })
+        // Like Arc's, frosted glass: the window, which shows the colors as they change, shows
+        // through the panel's blur.
         .foregroundStyle(.white)
         .environment(\.colorScheme, .dark)
     }

@@ -353,7 +353,9 @@ final class NativeWindow {
         surfaces["site"] = siteSurface
         let picker = ThemePickerModel(app: app)
         themePicker = picker
-        let themeSurface = Surface(in: window, radius: 20) { ThemePickerView(picker: picker) }
+        let themeSurface = Surface(in: window, radius: 20, material: .hudWindow) {
+            ThemePickerView(picker: picker)
+        }
         themeSurface.takesKeyboard = true
         themeSurface.resigned = { app.run("theme/hide") }
         surfaces["theme"] = themeSurface
