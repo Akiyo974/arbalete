@@ -25,6 +25,8 @@ pub struct Item {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     Run(Command),
+    /// Runs commands one after the other, like closing each of several tabs.
+    RunEach(Vec<Command>),
     /// Asks the sidebar to do what only it does, like editing a name: a DOM event and its detail.
     Ask(&'static str, serde_json::Value),
     CopyLink(String),
@@ -137,6 +139,52 @@ pub fn find(entries: Vec<Entry>, id: &str) -> Option<Action> {
         Entry::Submenu(_, entries) => find(entries, id),
         _ => None,
     })
+}
+
+/// The menu of several tabs selected at once, like Arc's: their links, moving and closing them all.
+pub fn tabs_menu(sidebar: &Sidebar, ids: &[NodeId]) -> Vec<Entry> {
+    let urls: Vec<&str> = ids
+        .iter()
+        .filter_map(|&id| match &sidebar.node(id)?.kind {
+            NodeKind::Tab(tab) => Some(tab.url.as_str()),
+            _ => None,
+        })
+        .collect();
+    let spaces = sidebar
+        .spaces()
+        .iter()
+        .map(|space| {
+            Entry::Item(Item {
+                id: format!("move/{}", serde_json::to_string(&space.id).expect("an id")),
+                title: match &space.emoji {
+                    Some(emoji) => format!("{emoji}  {}", space.title),
+                    None => space.title.clone(),
+                },
+                checked: false,
+                enabled: true,
+                action: Action::RunEach(
+                    ids.iter()
+                        .map(|&id| Command::MoveToSpace(id, space.id))
+                        .collect(),
+                ),
+            })
+        })
+        .collect();
+    vec![
+        item(
+            "copy-links",
+            "Copy Links",
+            Action::CopyLink(urls.join("\n")),
+        ),
+        Entry::Separator,
+        Entry::Submenu("Move to".to_string(), spaces),
+        Entry::Separator,
+        item(
+            "close",
+            &format!("Close {} Tabs", urls.len()),
+            Action::RunEach(ids.iter().map(|&id| Command::Close(Some(id))).collect()),
+        ),
+    ]
 }
 
 fn tab_menu(sidebar: &Sidebar, id: NodeId, tab: &Tab) -> Vec<Entry> {

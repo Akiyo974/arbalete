@@ -583,13 +583,24 @@ struct TabRow: View {
         .frame(height: Measure.rowFill)
         .background(
             RoundedRectangle(cornerRadius: Measure.radius)
-                .fill(active ? Ink.selected : hovered ? Ink.item : .clear)
+                .fill(
+                    active
+                        ? Ink.selected
+                        : model.marked.contains(tab.id) ? Ink.marked : hovered ? Ink.item : .clear)
                 .shadow(color: active ? Ink.selectedShadow : .clear, radius: 1, y: 1))
         .padding(.vertical, (Measure.row - Measure.rowFill) / 2)
         .contentShape(Rectangle())
-        .onTapGesture { model.run("select/\(tab.id)") }
+        .onTapGesture { model.click(tab.id) }
         .onHover { hovered = $0 }
-        .rightClick { model.run("menu/node/\(tab.id)") }
+        .rightClick {
+            // Several tabs selected at once share one menu.
+            let tabs = model.acting(on: tab.id)
+            if tabs.count > 1 {
+                model.run("menu/tabs/\(percentEncoded("\(tabs)"))")
+            } else {
+                model.run("menu/node/\(tab.id)")
+            }
+        }
     }
 }
 

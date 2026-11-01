@@ -26,10 +26,48 @@ extension AppModel {
     /// The displayed Space's leading color, or Arc's indigo without one.
     var themeColor: Color { color(space?.theme.colors.first ?? "#333ce8") }
 
+    /// A click on a tab, like Arc's: with ⌘ it joins the tabs selected at once or leaves them,
+    /// with ⇧ the tabs from the one shown to it are; otherwise it is selected alone.
+    func click(_ id: Int) {
+        let flags = NSEvent.modifierFlags
+        let shown = activeTab?.id
+        if flags.contains(.command) {
+            var marked = self.marked.isEmpty ? [shown].compactMap { $0 } : self.marked
+            if let index = marked.firstIndex(of: id) {
+                marked.remove(at: index)
+            } else {
+                marked.append(id)
+            }
+            self.marked = marked.count > 1 ? marked : []
+            return
+        }
+        if flags.contains(.shift), let shown, let from = order.firstIndex(of: shown),
+            let to = order.firstIndex(of: id), from != to
+        {
+            marked = Array(order[min(from, to)...max(from, to)])
+            return
+        }
+        marked = []
+        run("select/\(id)")
+    }
+
+    /// The tabs a drag or a menu from the tab `id` acts on, in the sidebar's order: the ones
+    /// selected at once, when it is one of them.
+    func acting(on id: Int) -> [Int] {
+        marked.contains(id) ? order.filter(marked.contains) : [id]
+    }
+
+    /// The displayed Space's tabs, top to bottom.
+    private var order: [Int] {
+        guard let page else { return [] }
+        return (page.pinned + page.today).flatMap(\.tabs).map(\.id)
+    }
+
     /// A row starts a drag: the node it carries, and whether it is a tab, which may split.
     func startDrag(_ item: Item) -> NSItemProvider {
         dragged = item.id
         if case .tab = item { draggedTab = true } else { draggedTab = false }
+        draggedTabs = draggedTab ? acting(on: item.id) : [item.id]
         return NSItemProvider(object: String(item.id) as NSString)
     }
 
@@ -136,18 +174,25 @@ private struct RowDrop: DropDelegate {
     func dropExited(info: DropInfo) { model.leave(item.id) }
 
     func performDrop(info: DropInfo) -> Bool {
-        guard let (id, target) = model.endDrag(), id != item.id else { return false }
+        let ids = model.draggedTabs
+        model.marked = []
+        guard let (id, target) = model.endDrag(), !ids.contains(item.id), id != item.id else {
+            return false
+        }
         switch target {
-        case .before: place(id, 0)
+        // Several tabs keep their order: each goes before the row, or after it from the last.
+        case .before: ids.forEach { place($0, 0) }
         case .after:
             // After an open folder is before what it holds.
             if case .folder(let folder, _, true, _) = item {
-                model.move(id, to: folder, 0)
+                ids.enumerated().forEach { model.move($1, to: folder, $0) }
             } else {
-                place(id, 1)
+                ids.reversed().forEach { place($0, 1) }
             }
         case .into(let folder):
-            if case .folder(_, _, _, let children) = item { model.move(id, to: folder, children.count) }
+            if case .folder(_, _, _, let children) = item {
+                ids.enumerated().forEach { model.move($1, to: folder, children.count + $0) }
+            }
         case .split(let tab, let leading): model.split(id, onto: tab, before: leading)
         case .join(_, let index):
             guard case .split(_, let tabs) = item, !tabs.isEmpty else { return false }

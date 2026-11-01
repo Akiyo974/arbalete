@@ -3505,6 +3505,7 @@ fn choose_menu(target: Target, item: &str) {
 pub fn perform(action: Action) {
     match action {
         Action::Run(command) => run(command),
+        Action::RunEach(commands) => commands.into_iter().for_each(run),
         Action::Ask(event, detail) => ask(event, &detail),
         #[cfg(target_os = "macos")]
         Action::CopyLink(url) => crate::mac::copy(&url),
@@ -4938,6 +4939,13 @@ fn run_command(command: Command) {
             }
         }
         (Command::Menu(target), _) => show_menu(target),
+        (Command::TabsMenu(ids), _) => {
+            let entries = STATE.with_borrow(|state| menu::tabs_menu(&state.sidebar, &ids));
+            #[cfg(target_os = "macos")]
+            crate::mac::pop_up(entries);
+            #[cfg(not(target_os = "macos"))]
+            let _ = entries;
+        }
         (Command::MenuTargets { view, targets }, _) => {
             win()
                 .menu_targets

@@ -253,6 +253,8 @@ pub enum Command {
     /// Opens the native menu of a sidebar row at the pointer: `menu/node/<tab or folder id>`, or
     /// of a Space's header, `menu/space/<space id>`.
     Menu(Target),
+    /// Shows the menu of several tabs selected at once, by their ids: `menu/tabs/<json ids>`.
+    TabsMenu(Vec<NodeId>),
     /// The rows, Space header and pinned extensions a view shows, where a right-click opens
     /// their menu: `menu/targets/<docked, revealed or toolbar>/<percent-encoded JSON array of
     /// targets>`, like `[{"target":{"node":12},"x":7,"y":180,"width":250,"height":41}]`.
@@ -734,6 +736,11 @@ impl Command {
                         _ => Target::parse(&format!("{kind}/{id}"))?,
                     };
                     return Some(Self::ChooseMenu(target, item.to_string()));
+                }
+                if let Some(ids) = path.strip_prefix("menu/tabs/") {
+                    return serde_json::from_str(&percent_decode(ids)?)
+                        .ok()
+                        .map(Self::TabsMenu);
                 }
                 if let Some(target) = path.strip_prefix("menu/") {
                     return Target::parse(target).map(Self::Menu);
@@ -1569,6 +1576,10 @@ mod tests {
             Some(Command::ChooseMenu(Target::Site, "clear-cache".into()))
         );
         assert_eq!(Command::parse("menu/node/x"), None);
+        assert!(matches!(
+            Command::parse("menu/tabs/%5B1%2C2%5D"),
+            Some(Command::TabsMenu(ids)) if ids.len() == 2
+        ));
         assert_eq!(Command::parse("menu/tab/12"), None);
         assert_eq!(Command::parse("menu/choose/node/12"), None);
         assert_eq!(Command::parse("menu/choose/node/x/pin"), None);

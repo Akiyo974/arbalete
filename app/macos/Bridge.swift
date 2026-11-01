@@ -25,6 +25,10 @@ final class AppModel: ObservableObject {
     /// (SidebarDrop.swift).
     @Published var dragged: Int?
     var draggedTab = false
+    /// The tabs a drag carries, several when they were selected at once.
+    var draggedTabs: [Int] = []
+    /// The tabs selected at once with ⌘ or ⇧, besides the one shown, like Arc's; none otherwise.
+    @Published var marked: [Int] = []
     @Published var dropTarget: DropTarget?
     /// Where in the favorites a drag would land.
     @Published var favoriteSlot: Int?

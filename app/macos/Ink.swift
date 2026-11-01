@@ -25,6 +25,8 @@ enum Ink {
     /// The selected tab's row, and its shadow in light themes.
     static let selected = Color.ink((0xFFFFFF, 0.85), (0xFAFBFF, 0.20))
     static let selectedShadow = Color.ink((0x000000, 0.20), (0x000000, 0))
+    /// A tab among several selected at once.
+    static let marked = Color.ink((0x000000, 0.10), (0xFAFBFF, 0.10))
     /// A tab of a split, or of a row inside another.
     static let child = Color.ink((0x000000, 0.07), (0xFFFFFF, 0.07))
     static let separator = Color.ink((0x000000, 0.15), (0xFFFFFF, 0.15))
