@@ -244,9 +244,6 @@ private struct LinksSettings: View {
             let routing = detail.urlRouting
             Form {
                 Section {
-                    DefaultBrowser()
-                }
-                Section {
                     ForEach(routing.routes.indices, id: \.self) { index in
                         RouteRow(
                             route: routing.routes[index], spaces: detail.spaces,
@@ -302,54 +299,6 @@ private struct LinksSettings: View {
 
 /// Whether Arbalete opens the links of other apps, as macOS says, and a button to make it so,
 /// which macOS asks the user to confirm.
-private struct DefaultBrowser: View {
-    private let isDefault = State(initialValue: DefaultBrowser.check())
-    private let failure = State<String?>(initialValue: nil)
-
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Default browser")
-                Text(failure.wrappedValue
-                    ?? (isDefault.wrappedValue
-                        ? "Links from other apps open in Arbalete."
-                        : "Links from other apps open in another browser."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if !isDefault.wrappedValue {
-                Button("Make Default") { makeDefault() }
-            }
-        }
-    }
-
-    /// Whether any copy of Arbalete is the default: macOS never picks one in a temporary folder.
-    private static func check() -> Bool {
-        guard let url = URL(string: "https://example.com"),
-            let app = NSWorkspace.shared.urlForApplication(toOpen: url)
-        else { return false }
-        return Bundle(url: app)?.bundleIdentifier == Bundle.main.bundleIdentifier
-    }
-
-    private func makeDefault() {
-        let app = Bundle.main.bundleURL
-        // Registered first, this copy is the one macOS picks among those with its identifier.
-        LSRegisterURL(app as CFURL, true)
-        NSWorkspace.shared.setDefaultApplication(at: app, toOpenURLsWithScheme: "http") { error in
-            guard error == nil else { return done(error) }
-            NSWorkspace.shared.setDefaultApplication(at: app, toOpenURLsWithScheme: "https", completion: done)
-        }
-    }
-
-    private func done(_ error: Error?) {
-        DispatchQueue.main.async {
-            failure.wrappedValue = error?.localizedDescription
-            isDefault.wrappedValue = DefaultBrowser.check()
-        }
-    }
-}
-
 /// A route: how and what it matches in a url, and where those links open.
 private struct RouteRow: View {
     let route: UrlRouting.Route
@@ -477,6 +426,25 @@ public func showSettings(_ shown: Bool) {
     MainActor.assumeIsolated {
         settingsModel?.show(shown)
     }
+}
+
+/// Makes this copy of Arbalete the default browser, from Arbalete › Set as Default Browser, like
+/// Arc: macOS asks to confirm. Registered first, this copy is the one macOS picks among those with
+/// its identifier.
+@_cdecl("arbalete_ui_make_default_browser")
+public func makeDefaultBrowser() {
+    let app = Bundle.main.bundleURL
+    LSRegisterURL(app as CFURL, true)
+    NSWorkspace.shared.setDefaultApplication(at: app, toOpenURLsWithScheme: "http") { error in
+        guard error == nil else { return failed(error) }
+        NSWorkspace.shared.setDefaultApplication(
+            at: app, toOpenURLsWithScheme: "https", completion: failed)
+    }
+}
+
+private func failed(_ error: Error?) {
+    guard let error else { return }
+    DispatchQueue.main.async { NSApp.presentError(error) }
 }
 
 @_cdecl("arbalete_ui_settings_focused")

@@ -398,8 +398,8 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
   app, holds the extensions' DevTools session.
 
 ### Phase 8 — URL Routing
-- Registration as the default browser on each OS. Done on macOS: the app declares the http and https schemes,
-  and the settings' Links tab says whether it opens other apps' links, with a button that asks macOS to.
+- Registration as the default browser on each OS. Done on macOS: the app declares the http and https schemes
+  and HTML files, and Arbalete › Set as Default Browser asks macOS to make it the default, like Arc.
 - Receiving external URLs (URL open event on macOS; single instance + command-line arguments elsewhere). Done
   on macOS.
 - Rules, like Arc's: a route sends the links whose url contains a text, or whose host or url is it, to a

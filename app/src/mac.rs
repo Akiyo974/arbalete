@@ -313,6 +313,11 @@ define_class!(
             crate::shell::run(Command::ShowSettings);
         }
 
+        #[unsafe(method(arbaleteMakeDefaultBrowser:))]
+        fn make_default_browser(&self, _sender: Option<&AnyObject>) {
+            crate::native::make_default_browser();
+        }
+
         #[unsafe(method(arbaleteLibrary:))]
         fn library(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::ShowLibraryPage);
@@ -509,6 +514,12 @@ pub fn setup_menu() {
                     ns_string!("Settings…"),
                     sel!(arbaleteSettings:),
                     ns_string!(","),
+                ),
+                item(
+                    mtm,
+                    ns_string!("Set as Default Browser"),
+                    sel!(arbaleteMakeDefaultBrowser:),
+                    ns_string!(""),
                 ),
                 NSMenuItem::separatorItem(mtm),
                 item(
