@@ -1228,13 +1228,17 @@ pub fn round_card(view: *mut c_void) {
     }
 }
 
+/// A split's page's corners, like Arc's: smaller than the card's, and only below, under the bar
+/// at its top.
+const PANE_RADIUS: f64 = 6.0;
+
 /// Rounds each page of a split, which share the card's window, view `view`: their bottom
 /// corners, under their bars; the card itself, whose room between them shows the window, is
 /// not.
 pub fn round_split(view: *mut c_void) {
     round(view, 0.0);
     for page in pages(view) {
-        round(page, CARD_RADIUS);
+        round(page, PANE_RADIUS);
         corners(page, true);
     }
 }

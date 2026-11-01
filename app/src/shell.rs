@@ -73,8 +73,11 @@ const FLOATING_DOCK_DURATION: u32 = 50;
 /// The time between two steps of a native slide: about a frame.
 const FRAME_MS: i64 = 8;
 
-/// The room between a split's pages, in which their dividers sit: the card's margin, like Arc's.
-const SPLIT_GAP: i32 = CARD_MARGIN;
+/// The room between a split's pages, in which their dividers sit, like Arc's.
+const SPLIT_GAP: i32 = 10;
+/// How far a split's pages are inset in the card, so that they stand as far from the window's
+/// edges as from each other, like Arc's.
+const SPLIT_INSET: i32 = SPLIT_GAP - CARD_MARGIN;
 /// The bar at the top of each page of a split, above the page, like Arc's.
 const PANE_BAR_HEIGHT: i32 = 32;
 
@@ -4173,11 +4176,17 @@ fn lay_out_split() {
         } else {
             card.width
         }
-    });
+    }) - 2 * SPLIT_INSET;
     SLOT_LENGTHS.set((layout.stacked, pane_lengths(room, &layout.factors)));
     split
         .set_to_box_layout(Some(&BoxLayoutSettings {
             horizontal: (!layout.stacked).into(),
+            inside_border_insets: Insets {
+                top: SPLIT_INSET,
+                left: SPLIT_INSET,
+                bottom: SPLIT_INSET,
+                right: SPLIT_INSET,
+            },
             between_child_spacing: SPLIT_GAP,
             cross_axis_alignment: AxisAlignment::STRETCH,
             ..Default::default()
@@ -6630,20 +6639,20 @@ mod tests {
     use arbalete_core::sidebar::NodeId;
 
     #[test]
-    fn a_split_shares_its_room_by_the_parts_5_points_apart() {
-        assert_eq!(pane_lengths(1010, &[0.5, 0.25, 0.25]), [500, 250, 250]);
-        assert_eq!(pane_lengths(805, &[0.5, 0.5]), [400, 400]);
+    fn a_split_shares_its_room_by_the_parts_10_points_apart() {
+        assert_eq!(pane_lengths(1010, &[0.5, 0.25, 0.25]), [495, 248, 247]);
+        assert_eq!(pane_lengths(810, &[0.5, 0.5]), [400, 400]);
     }
 
     #[test]
     fn a_split_handle_keeps_the_pages_wide_enough_and_snaps_to_halves() {
-        // Two pages of 500 points from 100, the handle 5 points wide between them.
+        // Two pages of 500 points from 100, the handle 10 points wide between them.
         let part = |point| lead_part((100.0, 500.0), 500.0, point);
-        assert!((part(402.5) - 0.3).abs() < 1e-9);
+        assert!((part(405.0) - 0.3).abs() < 1e-9);
         assert_eq!(part(150.0), 0.22);
         assert_eq!(part(1000.0), 0.78);
         assert_eq!(part(612.0), 0.5);
-        assert!((part(622.5) - 0.52).abs() < 1e-9);
+        assert!((part(625.0) - 0.52).abs() < 1e-9);
     }
 
     #[test]
