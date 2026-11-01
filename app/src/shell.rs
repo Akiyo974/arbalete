@@ -4812,6 +4812,10 @@ wrap_window_delegate! {
             if let Some(next) = WINDOWS.with_borrow(|windows| windows.first().map(|win| win.id)) {
                 focus(next);
                 show_selected();
+            } else if let Some(host) = bridge_host() {
+                // The bridge closes last, which quits (browser_closed): closed with the pages, it
+                // could quit while the windows still close their overlays, and the app crashed.
+                host.close_browser(1);
             }
             // Once another window holds the sidebar: quitting keeps every window for the next
             // session.
@@ -4829,10 +4833,9 @@ wrap_window_delegate! {
                 return 1;
             }
             CLOSING.set(true);
-            let mut hosts: Vec<_> = PAGES.with_borrow(|pages| {
+            let hosts: Vec<_> = PAGES.with_borrow(|pages| {
                 pages.values().filter_map(|live| live.view.browser()?.host()).collect()
             });
-            hosts.extend(bridge_host());
             let mut closed = 1;
             for host in hosts {
                 closed &= host.try_close_browser();
