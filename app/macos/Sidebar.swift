@@ -624,7 +624,8 @@ struct NameField: View {
     }
 }
 
-/// Two tabs in one row: a click on either shows that tab.
+/// A split's tabs in one row, in equal parts: a click on one shows the split with that tab
+/// focused, the only one with a background, like Arc's.
 struct SplitRow: View {
     @ObservedObject var model: AppModel
     let tabs: [Tab]
@@ -640,9 +641,10 @@ struct SplitRow: View {
                 }
                 .padding(.horizontal, 8)
                 .frame(height: 30)
+                .frame(maxWidth: .infinity)
                 .background(
-                    RoundedRectangle(cornerRadius: 7)
-                        .fill(.primary.opacity(tab.id == selected ? 0.15 : 0.06)))
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(.primary.opacity(tab.id == selected ? 0.15 : 0)))
                 .contentShape(Rectangle())
                 .onTapGesture { model.run("select/\(tab.id)") }
                 .rightClick { model.run("menu/node/\(tab.id)") }

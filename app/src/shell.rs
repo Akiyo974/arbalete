@@ -16,8 +16,8 @@ use arbalete_core::import::browsers::{self, Family};
 use arbalete_core::import::{self, Choice, safari};
 use arbalete_core::search::SearchEngine;
 use arbalete_core::sidebar::{
-    ArchiveAfter, Color, Error, NodeId, NodeKind, ProfileId, Sidebar, Space, SpaceId, Tab,
-    View as WindowView,
+    ArchiveAfter, Color, Error, NodeId, NodeKind, ProfileId, Sidebar, Space, SpaceId, SplitLayout,
+    Tab, View as WindowView,
 };
 use arbalete_core::url_routing::Destination;
 use arbalete_core::{favicon, store};
@@ -72,6 +72,9 @@ const FLOATING_DOCK_DURATION: u32 = 50;
 
 /// The time between two steps of a native slide: about a frame.
 const FRAME_MS: i64 = 8;
+
+/// The room between a split's pages, in which their dividers sit, like Arc's.
+const SPLIT_GAP: i32 = 10;
 
 /// The overlay's size: one text field for now (ui/src/Overlay.tsx).
 /// The Command Bar's width, at most, and its search row's height: its results add to it
@@ -244,6 +247,10 @@ struct Win {
     reveal: RefCell<Option<OverlayController>>,
     /// The bar above the page, at the card's top while it is shown (View › Show Toolbar).
     toolbar_view: RefCell<Option<Panel>>,
+    /// Holds the pages of a split's tabs, side by side or one above the other, in the card.
+    split_view: RefCell<Option<Panel>>,
+    /// The tabs `split_view` shows, in order, and how: empty while it shows none.
+    split: RefCell<(Vec<NodeId>, Option<SplitLayout>)>,
     /// The find bar, at the card's top right corner; created the first time it is shown.
     find_view: RefCell<Option<Panel>>,
     find: RefCell<Option<OverlayController>>,
@@ -310,6 +317,8 @@ impl Win {
             reveal_view: RefCell::new(None),
             reveal: RefCell::new(None),
             toolbar_view: RefCell::new(None),
+            split_view: RefCell::new(None),
+            split: RefCell::default(),
             find_view: RefCell::new(None),
             find: RefCell::new(None),
             find_text: RefCell::new(String::new()),
@@ -3780,23 +3789,53 @@ fn show_selected() {
         }
     });
     prune_pages();
-    let (Some(tab), Some((profile, url))) = (tab, selected()) else {
+    let Some(tab) = tab.filter(|_| selected().is_some()) else {
         hide_content();
         return;
     };
-    if let Some(view) = PAGES.with_borrow(|pages| Some(pages.get(&tab)?.view.clone())) {
-        return show_content(tab, &view);
+    // A split's tabs show together, the selected one focused.
+    let (tabs, layout) = STATE.with_borrow(|state| {
+        let sidebar = &state.sidebar;
+        let row = sidebar.row_of(tab);
+        if row == tab {
+            (vec![tab], None)
+        } else {
+            let tabs = sidebar
+                .node(row)
+                .map_or_else(Vec::new, |node| node.children.clone());
+            (tabs, Some(sidebar.split_layout(row)))
+        }
+    });
+    let views: Option<Vec<_>> = tabs.iter().map(|&tab| page(tab)).collect();
+    let Some(views) = views else { return };
+    match layout {
+        Some(layout) => show_split(tab, &tabs, &views, layout),
+        None => show_content(tab, &views[0]),
     }
+}
+
+/// A tab's page, opened the first time, hidden, once its profile's web data is ready: until
+/// then, none.
+fn page(tab: NodeId) -> Option<BrowserView> {
+    if let Some(view) = PAGES.with_borrow(|pages| Some(pages.get(&tab)?.view.clone())) {
+        return Some(view);
+    }
+    let (profile, url) = STATE.with_borrow_mut(|state| {
+        let profile = state.sidebar.profile_of(tab)?;
+        Some((profile, state.sidebar.tab_mut(tab)?.url.clone()))
+    })?;
     match CONTEXTS.with_borrow(|contexts| contexts.get(&profile).cloned()) {
         Some(Some(mut context)) => {
             let start = if url.is_empty() { "about:blank" } else { &url };
             if SNAPSHOTS.with_borrow(|snapshots| snapshots.contains_key(&tab)) {
                 REVIVED.with_borrow_mut(|revived| revived.insert(tab));
             }
+            // Any size, but not an empty one, which CEF would replace by its own: the layouts
+            // share the room between the pages by their weights alone.
             let view = browser_view(
                 ContentClient::new(profile, false),
                 start,
-                no_width,
+                || 1,
                 Some(&mut context),
             );
             view.set_visible(0);
@@ -3817,11 +3856,14 @@ fn show_selected() {
                     },
                 )
             });
-            show_content(tab, &view);
+            Some(view)
         }
         // The tab shows once its profile's web data is ready.
-        Some(None) => {}
-        None => create_profile_context(profile),
+        Some(None) => None,
+        None => {
+            create_profile_context(profile);
+            None
+        }
     }
 }
 
@@ -3844,53 +3886,131 @@ fn content_created(profile: ProfileId, browser: Option<&mut Browser>) {
     cover_revived(Some(browser), true);
     let Some(tab) = page_tab(browser) else { return };
     mute_page(tab);
-    if win().shown.get() == Some(tab) {
+    let shown = win().shown.get() == Some(tab);
+    if shown || win().split.borrow().0.contains(&tab) {
         #[cfg(target_os = "macos")]
         if let Some(host) = browser.host() {
             crate::mac::round_card(host.window_handle());
         }
+    }
+    if shown {
         send_page_state();
     }
 }
 
 /// Puts a tab's page in the window instead of the shown one, if any.
 fn show_content(tab: NodeId, view: &BrowserView) {
-    if win().shown.get() == Some(tab) {
+    if win().shown.get() == Some(tab) && win().split.borrow().0.is_empty() {
         return;
     }
     hide_content();
-    // A page shows in one window at a time, like Arc's: this one takes it from another, which
-    // shows its picture instead, dimmed by its Space's color.
+    take_page(tab);
+    if let Some(card) = card_panel() {
+        move_page(view, &card);
+    }
+    win().shown.set(Some(tab));
+    wake_page(tab, view);
+    if let Some(panel) = card_panel() {
+        panel.layout();
+    }
+    shown_on_card(view);
+}
+
+/// Shows a split's pages, `views` for its `tabs`, as `layout` lays them out, `focused`'s with the
+/// keyboard, like Arc's Split View: each its own card, with room between them.
+fn show_split(focused: NodeId, tabs: &[NodeId], views: &[BrowserView], layout: SplitLayout) {
+    let same = *win().split.borrow() == (tabs.to_vec(), Some(layout.clone()));
+    if !same {
+        hide_content();
+        let Some(split) = win().split_view.with_borrow(Clone::clone) else {
+            return;
+        };
+        let boxed = split
+            .set_to_box_layout(Some(&BoxLayoutSettings {
+                horizontal: (!layout.stacked).into(),
+                between_child_spacing: SPLIT_GAP,
+                cross_axis_alignment: AxisAlignment::STRETCH,
+                ..Default::default()
+            }))
+            .expect("box layout");
+        for (&tab, view) in tabs.iter().zip(views) {
+            take_page(tab);
+            move_page(view, &split);
+            wake_page(tab, view);
+        }
+        for (view, factor) in views.iter().zip(&layout.factors) {
+            // Whole thousandths: the layout shares the room by integer weights.
+            let weight = (factor * 1000.0).round() as i32;
+            boxed.set_flex_for_view(Some(&mut View::from(view)), weight.max(1));
+        }
+        split.set_visible(1);
+        // The room between the cards shows the window, like the margins around the card.
+        if let Some(panel) = card_panel() {
+            panel.set_background_color(0x0000_0001);
+            panel.layout();
+        }
+        *win().split.borrow_mut() = (tabs.to_vec(), Some(layout));
+        #[cfg(target_os = "macos")]
+        for view in views {
+            if let Some(host) = view.browser().and_then(|browser| browser.host()) {
+                crate::mac::round_card(host.window_handle());
+            }
+        }
+    }
+    win().shown.set(Some(focused));
+    if let Some(view) = tabs
+        .iter()
+        .position(|&tab| tab == focused)
+        .map(|i| &views[i])
+    {
+        view.request_focus();
+        shown_on_card(view);
+    }
+}
+
+/// Moves a page into `parent`, from wherever it is, without reloading it.
+fn move_page(view: &BrowserView, parent: &Panel) {
+    let here = view
+        .parent_view()
+        .is_some_and(|p| p.is_same(Some(&mut View::from(parent))) == 1);
+    if !here {
+        if let Some(from) = view.parent_view().and_then(|p| p.as_panel()) {
+            from.remove_child_view(Some(&mut View::from(view)));
+        }
+        parent.add_child_view(Some(&mut View::from(view)));
+    }
+}
+
+/// A page shows in one window at a time, like Arc's: this one takes a tab's page from another,
+/// which shows its picture instead, dimmed by its Space's color.
+fn take_page(tab: NodeId) {
     let current = FOCUSED.get();
     let others: Vec<_> = WINDOWS.with_borrow(|windows| {
         windows
             .iter()
-            .filter(|other| other.id != current && other.shown.get() == Some(tab))
+            .filter(|other| {
+                other.id != current
+                    && (other.shown.get() == Some(tab) || other.split.borrow().0.contains(&tab))
+            })
             .cloned()
             .collect()
     });
     for other in others {
-        other.shown.set(None);
+        let shown = other.shown.take();
+        *other.split.borrow_mut() = Default::default();
         #[cfg(target_os = "macos")]
-        if let (Some(card), Some(jpeg)) = (
-            other.card_view.get(),
-            SNAPSHOTS.with_borrow(|snapshots| snapshots.get(&tab).cloned()),
-        ) {
-            crate::mac::cover_page(card, &jpeg, Some(space_tint(tab)));
+        if let (Some(card), Some(shown)) = (other.card_view.get(), shown)
+            && let Some(jpeg) = SNAPSHOTS.with_borrow(|snapshots| snapshots.get(&shown).cloned())
+        {
+            crate::mac::cover_page(card, &jpeg, Some(space_tint(shown)));
         }
+        #[cfg(not(target_os = "macos"))]
+        let _ = shown;
     }
-    if let Some(card) = card_panel() {
-        let here = view
-            .parent_view()
-            .is_some_and(|parent| parent.is_same(Some(&mut View::from(&card))) == 1);
-        if !here {
-            if let Some(parent) = view.parent_view().and_then(|parent| parent.as_panel()) {
-                parent.remove_child_view(Some(&mut View::from(view)));
-            }
-            card.add_child_view(Some(&mut View::from(view)));
-        }
-    }
-    win().shown.set(Some(tab));
+}
+
+/// Lets a page shown run again, if it was frozen or asleep while hidden.
+fn wake_page(tab: NodeId, view: &BrowserView) {
     let frozen = PAGES.with_borrow_mut(|pages| {
         let live = pages.get_mut(&tab)?;
         live.hidden_since = None;
@@ -3904,9 +4024,10 @@ fn show_content(tab: NodeId, view: &BrowserView) {
         );
     }
     view.set_visible(1);
-    if let Some(panel) = card_panel() {
-        panel.layout();
-    }
+}
+
+/// The shown page, `view`, takes the card's corners, and the toolbar its state.
+fn shown_on_card(view: &BrowserView) {
     // The browser's window is the card's.
     #[cfg(target_os = "macos")]
     if let Some(host) = view.browser().and_then(|browser| browser.host()) {
@@ -3915,6 +4036,8 @@ fn show_content(tab: NodeId, view: &BrowserView) {
             .card_view
             .set(crate::mac::window_content(host.window_handle()));
     }
+    #[cfg(not(target_os = "macos"))]
+    let _ = view;
     send_page_state();
 }
 
@@ -3956,6 +4079,25 @@ fn send_page_state() {
 fn hide_content() {
     if let Some(shown) = content() {
         shown.set_visible(0);
+    }
+    let (split, _) = std::mem::take(&mut *win().split.borrow_mut());
+    if !split.is_empty() {
+        PAGES.with_borrow_mut(|pages| {
+            for tab in &split {
+                if let Some(live) = pages.get_mut(tab) {
+                    live.view.set_visible(0);
+                    live.hidden_since.get_or_insert_with(now);
+                }
+            }
+        });
+        if let Some(view) = win().split_view.with_borrow(Clone::clone) {
+            view.set_visible(0);
+        }
+        if let (Some(panel), Some((card_color, _, _))) =
+            (card_panel(), win().window_colors.with_borrow(Clone::clone))
+        {
+            panel.set_background_color(card_color);
+        }
     }
     // A picture of a page another window took no longer stands in for it.
     #[cfg(target_os = "macos")]
@@ -4721,6 +4863,10 @@ wrap_window_delegate! {
             card.add_child_view(Some(&mut view));
             layout.set_flex_for_view(Some(&mut view), 0);
             win().toolbar_view.set(Some(toolbar));
+            let split = panel_create(None).expect("split");
+            split.set_visible(0);
+            card.add_child_view(Some(&mut View::from(&split)));
+            win().split_view.set(Some(split));
             #[cfg(target_os = "macos")]
             crate::mac::toolbar_shown(app_settings().show_toolbar);
             let controller = window
@@ -5346,6 +5492,10 @@ wrap_client! {
             Some(BrowserLifeSpan::new((!self.little).then_some(self.profile)))
         }
 
+        fn focus_handler(&self) -> Option<FocusHandler> {
+            (!self.little).then(PageFocus::new)
+        }
+
         fn display_handler(&self) -> Option<DisplayHandler> {
             Some(ContentDisplayHandler::new(self.profile))
         }
@@ -5806,6 +5956,22 @@ wrap_life_span_handler! {
 
         fn on_before_close(&self, _browser: Option<&mut Browser>) {
             browser_closed();
+        }
+    }
+}
+
+// A click in a page of a split selects its tab, like Arc's Split View.
+wrap_focus_handler! {
+    struct PageFocus {}
+
+    impl FocusHandler {
+        fn on_got_focus(&self, browser: Option<&mut Browser>) {
+            let Some(tab) = browser.and_then(|browser| page_tab(browser)) else {
+                return;
+            };
+            if win().shown.get() != Some(tab) && win().split.borrow().0.contains(&tab) {
+                select_tab(tab);
+            }
         }
     }
 }
