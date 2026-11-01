@@ -205,8 +205,6 @@ thread_local! {
     static WINDOWS: RefCell<Vec<Rc<Win>>> = RefCell::new(vec![Rc::new(Win::new(0))]);
     /// The window commands and events are about, by its id.
     static FOCUSED: Cell<u32> = const { Cell::new(0) };
-    /// When the pages last took their cards' size while a resize went on (follow_pages).
-    static PAGES_LAID_OUT: Cell<i64> = const { Cell::new(0) };
     /// The sidebar's width as a drag of its edge began, while it goes on.
     static SIDEBAR_DRAG: Cell<Option<i32>> = const { Cell::new(None) };
     /// The extensions' bridge's browser (make_bridge).
@@ -606,10 +604,8 @@ fn library_width() -> i32 {
 }
 
 /// Gives the sidebar the width its edge was dragged to, `x` points from the window's left edge.
-///
-/// Until the drag ends (end_sidebar_resize), the cards keep their size and place, cropped where
-/// the sidebar now reaches: resizing the pages, which CEF lays out and paints again, makes the
-/// drag stutter, even now and then.
+/// The cards follow at once; the rest of the window is laid out once the drag ends
+/// (end_sidebar_resize).
 fn resize_sidebar(x: f64) {
     let mut width = (x.round() as i32).clamp(MIN_SIDEBAR, MAX_SIDEBAR);
     // Like Arc's, it snaps to its usual width near it.
@@ -627,97 +623,17 @@ fn resize_sidebar(x: f64) {
         #[cfg(target_os = "macos")]
         {
             place_native_sidebar();
-            follow_pages();
+            place_card();
         }
         #[cfg(not(target_os = "macos"))]
         relayout_library();
     });
 }
 
-/// How often the pages take the size of their cards while a resize goes on, in milliseconds.
-const PAGE_LAYOUT_EVERY: i64 = 40;
-
-/// Puts the window's pages where their cards now go while a resize goes on, like Arc's: each
-/// moves along at once, cropped to its card, and takes its size only every
-/// `PAGE_LAYOUT_EVERY`, as CEF laying a page out on every move would make the drag stutter. The
-/// bars, the outline and the handles follow at once.
-fn follow_pages() {
-    #[cfg(target_os = "macos")]
-    {
-        if now() - PAGES_LAID_OUT.get() >= PAGE_LAYOUT_EVERY {
-            PAGES_LAID_OUT.set(now());
-            lay_out_pages();
-            return;
-        }
-        let split = !win().split.borrow().0.is_empty();
-        for (page, rect) in page_frames() {
-            let frame = (
-                f64::from(rect.x),
-                f64::from(rect.y),
-                f64::from(rect.width),
-                f64::from(rect.height),
-            );
-            crate::mac::frame_card(page, Some(frame), split);
-        }
-        place_split_handles();
-        send_panes();
-    }
-    #[cfg(not(target_os = "macos"))]
-    lay_out_pages();
-}
-
-/// Gives the window's pages their cards' places and sizes, whole again.
-fn lay_out_pages() {
-    #[cfg(target_os = "macos")]
-    for (page, _) in page_frames() {
-        crate::mac::frame_card(page, None, false);
-    }
-    place_card();
-}
-
-/// The views of the pages the window shows, each in a card's window, and where each now goes:
-/// the card's place, or each split page's under its bar.
-#[cfg(target_os = "macos")]
-fn page_frames() -> Vec<(*mut std::ffi::c_void, Rect)> {
-    let split = win().split.borrow().0.clone();
-    let host = |tab: &NodeId| {
-        PAGES
-            .with_borrow(|pages| pages.get(tab)?.view.browser()?.host())
-            .map(|host| host.window_handle())
-    };
-    if split.is_empty() {
-        let size = win()
-            .window
-            .with_borrow(|window| window.as_ref().map(|w| w.size()));
-        let (Some(tab), Some(size)) = (win().shown.get(), size) else {
-            return Vec::new();
-        };
-        let card = win().sidebar_mode.get().layout(&size).card;
-        return host(&tab)
-            .map(|page| vec![(page, card)])
-            .unwrap_or_default();
-    }
-    split
-        .iter()
-        .zip(split_rects())
-        .filter_map(|(tab, rect)| {
-            let page = Rect {
-                y: rect.y + PANE_BAR_HEIGHT,
-                height: rect.height - PANE_BAR_HEIGHT,
-                ..rect
-            };
-            Some((host(tab)?, page))
-        })
-        .collect()
-}
-
 /// Lays the windows out for the sidebar's width, once a drag of its edge ends.
 fn end_sidebar_resize() {
     if SIDEBAR_DRAG.take().is_some() {
-        in_each_window(|| {
-            lay_out_pages();
-            relayout_library();
-        });
+        in_each_window(relayout_library);
     }
 }
 
@@ -4383,7 +4299,6 @@ fn lead_part((start, lead): (f64, f64), trail: f64, point: f64) -> f64 {
 /// Gives the pages on either side of the handle after the page at `index` equal parts.
 fn even_panes(index: usize) {
     share_panes(index, 0.5);
-    lay_out_pages();
     save_session();
 }
 
@@ -4405,7 +4320,7 @@ fn share_panes(index: usize, part: f64) {
     });
     if saved.is_ok() {
         win().split.borrow_mut().1 = Some(layout);
-        follow_pages();
+        lay_out_split();
     }
 }
 
@@ -4876,7 +4791,6 @@ fn run_command(command: Command) {
         // Kept once the drag ends, not on every move, which would stutter.
         (Command::Resized, _) => {
             end_sidebar_resize();
-            lay_out_pages();
             save_session();
             save_settings();
         }
