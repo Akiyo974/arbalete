@@ -414,16 +414,20 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
   middle of another in the sidebar (with Option, a copy of it) or by View › Add Split View (⌃⇧=),
   which opens the Command Bar for the page to add. Selecting one of its tabs shows every page of the
   split, side by side or one above the other (View › Convert to Vertical/Horizontal Split View),
-  each rounded, 10 points apart, the selected one focused; a click in another page selects its tab.
+  each rounded, 10 points apart and from the window's edges, the selected one focused, each under a
+  bar tinted by its page; a click in another page selects its tab, and ⌃⇧] and ⌃⇧[ select the next or
+  previous one.
   The handles between the pages resize them (each keeps 220 points, snapping to halves within 14),
   and a double click shares the room evenly. View › Close Split View Pane (⌃⇧−) closes the selected
-  tab; a split left with one tab becomes that tab. To do: dropping a tab from the sidebar on the
-  page, and keys for the next or previous page.
-- Peek.
-- Several tabs selected at once, like Arc: ⌘-click adds or removes a tab, ⇧-click selects a range, all
-  highlighted. Dragging one of them moves the whole selection, in its order: into the pinned section, into
-  the favorites (as far as they have room), into a folder, or to another Space by holding it over that
-  Space's icon in the switcher. Closing, archiving or moving from the menu acts on the whole selection too.
+  tab; a split left with one tab becomes that tab. A tab dragged from the sidebar onto the page opens
+  beside it, by the edge it is dropped on, or joins the split beside the page it is dropped on.
+- Peek, like Arc's. Done: a link clicked with ⇧, or one from a pinned tab or a favorite to another site,
+  shows in a card over the window, which its controls close or keep in a tab or a split; Escape or a
+  click beside it closes it.
+- Several tabs selected at once, like Arc. Done: ⌘-click adds or removes a tab, ⇧-click selects a range,
+  all highlighted; dragging one of them moves them all, in their order, before or after a row or into a
+  folder; their menu copies their links, moves them to a Space or closes them. To do: dropping them into
+  the favorites or on a Space's icon in the switcher.
 - Per-OS finish: macOS vibrancy, Windows Mica, Wayland/X11. Arc's window shows the desktop through an
   `NSVisualEffectView` (behind-window blending, its material by the theme's appearance) under its theme's
   gradient; so does Arbalete's on macOS, through its native interface, as CEF paints its windowed browsers
