@@ -35,7 +35,7 @@ const CORE_EVENT: u32 = u32::from_be_bytes(*b"aevt");
 const OPEN_DOCUMENTS: u32 = u32::from_be_bytes(*b"odoc");
 
 /// The page's corner radius, in points.
-const CARD_RADIUS: f64 = 8.0;
+const CARD_RADIUS: f64 = 6.0;
 
 /// Core Graphics' color, which only passes through here: no need for its bindings.
 #[repr(C)]

@@ -48,7 +48,7 @@ const LIBRARY_WIDTH: i32 = SIDEBAR_WIDTH + 180;
 
 /// The page is a card inset from the window's edges and from the sidebar. The window paints its
 /// margins with the colors the sidebar sends (Command::WindowColors).
-const CARD_MARGIN: i32 = 9;
+const CARD_MARGIN: i32 = 5;
 
 /// The window's color until the sidebar sends the displayed Space's: the dark one, its most
 /// common appearance (--window-end in ui/src/index.css).
@@ -586,8 +586,10 @@ fn docked_width() -> i32 {
 }
 
 /// The least and the most the sidebar's edge may make it wide.
-const MIN_SIDEBAR: i32 = 180;
+const MIN_SIDEBAR: i32 = 164;
 const MAX_SIDEBAR: i32 = 500;
+/// The width the sidebar's edge snaps to, like Arc's.
+const SNAP_SIDEBAR: i32 = 228;
 
 /// The sidebar's width, as dragging its edge set it.
 fn sidebar_width() -> i32 {
@@ -606,7 +608,11 @@ fn library_width() -> i32 {
 /// the sidebar now reaches: resizing the pages, which CEF lays out and paints again, makes the
 /// drag stutter, even now and then.
 fn resize_sidebar(x: f64) {
-    let width = (x.round() as i32).clamp(MIN_SIDEBAR, MAX_SIDEBAR);
+    let mut width = (x.round() as i32).clamp(MIN_SIDEBAR, MAX_SIDEBAR);
+    // Like Arc's, it snaps to its usual width near it.
+    if (width - SNAP_SIDEBAR).abs() < 14 {
+        width = SNAP_SIDEBAR;
+    }
     if width == sidebar_width() {
         return;
     }
@@ -6790,7 +6796,7 @@ mod tests {
         };
         let to = SidebarMode::Hidden.layout(&SIZE).card;
         assert_eq!(rect(&lerp_rect(&from, &to, 0.0)), rect(&from));
-        assert_eq!(rect(&lerp_rect(&from, &to, 0.5)), (139, 9, 852, 582));
+        assert_eq!(rect(&lerp_rect(&from, &to, 0.5)), (137, 7, 856, 586));
         assert_eq!(rect(&lerp_rect(&from, &to, 1.0)), rect(&to));
     }
 

@@ -199,7 +199,7 @@ struct DropChip: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: 8).fill(tint.opacity(0.5))
-            .frame(height: 30)
+            .frame(maxHeight: .infinity)
             .frame(maxWidth: .infinity)
     }
 }
@@ -225,7 +225,8 @@ struct SplitPreview: View {
             if !leading { empty }
         }
         .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 8))
-        .frame(height: 34)
+        .frame(height: Measure.rowFill)
+        .padding(.vertical, (Measure.row - Measure.rowFill) / 2)
     }
 
     private var empty: some View {

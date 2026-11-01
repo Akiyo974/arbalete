@@ -29,7 +29,7 @@ struct SidebarView: View {
                 RecentDownloads(model: model)
                 Footer(model: model)
             }
-            .padding(.horizontal, 6)
+            .padding(.horizontal, Measure.inset)
             .foregroundStyle(.primary)
             // Like Arc's, the sidebar's empty room offers the displayed Space's menu.
             .overlay(RightClick(underOthers: true) {
@@ -125,7 +125,7 @@ struct AddressRow: View {
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, 10)
-                    .frame(height: 34)
+                    .frame(height: Measure.rowFill)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -147,7 +147,7 @@ struct AddressRow: View {
             }
         }
         .padding(.trailing, 4)
-        .background(RoundedRectangle(cornerRadius: 10).fill(.primary.opacity(0.07)))
+        .background(RoundedRectangle(cornerRadius: Measure.radius).fill(Ink.item))
         .overlay(alignment: .bottom) {
             if let page = model.state?.page, page.loading {
                 ProgressView(value: page.progress)
@@ -285,8 +285,10 @@ struct Favorites: View {
             let rows = max(1, (count + 3) / 4)
             let columns = max(1, (count + rows - 1) / rows)
             LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: columns),
-                spacing: 6
+                columns: Array(
+                    repeating: GridItem(.flexible(minimum: Measure.tile), spacing: Measure.inset),
+                    count: columns),
+                spacing: Measure.inset
             ) {
                 ForEach(shownFavorites, id: \.self) { slot in
                     if let tab = slot.tab {
@@ -294,7 +296,7 @@ struct Favorites: View {
                             .opacity(tab.id == model.dragged && model.favoriteSlot != nil ? 0 : 1)
                             .onDrag { model.startDrag(.tab(tab)) }
                     } else {
-                        Color.clear.frame(height: 50)
+                        Color.clear.frame(height: Measure.tile)
                     }
                 }
             }
@@ -326,10 +328,11 @@ struct FavoriteTile: View {
         } label: {
             Favicon(url: tab.favicon, size: 20)
                 .frame(maxWidth: .infinity)
-                .frame(height: 50)
+                .frame(height: Measure.tile)
                 .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(.primary.opacity(active ? 0.22 : hovered ? 0.14 : 0.08)))
+                    RoundedRectangle(cornerRadius: Measure.radius)
+                        .fill(active ? Ink.selected : hovered ? Ink.itemHovered : Ink.item)
+                        .shadow(color: active ? Ink.selectedShadow : .clear, radius: 1, y: 1))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -465,8 +468,10 @@ struct NewTabRow: View {
                 Spacer()
             }
             .padding(.horizontal, 10)
-            .frame(height: 34)
-            .background(RoundedRectangle(cornerRadius: 8).fill(.primary.opacity(hovered ? 0.08 : 0)))
+            .frame(height: Measure.rowFill)
+            .background(
+                RoundedRectangle(cornerRadius: Measure.radius).fill(hovered ? Ink.item : .clear))
+            .padding(.vertical, (Measure.row - Measure.rowFill) / 2)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -500,7 +505,7 @@ struct ItemRows: View {
                     SplitRow(model: model, id: id, tabs: tabs, selected: selected)
                 }
             }
-            .padding(.leading, CGFloat(depth) * 14)
+            .padding(.leading, CGFloat(depth) * Measure.indent)
             if case .folder(let id, _, true, let children) = item {
                 ItemRows(
                     model: model, items: children, parent: id, selected: selected,
@@ -560,11 +565,14 @@ struct TabRow: View {
         }
         .padding(.leading, 10)
         .padding(.trailing, 5)
-        .frame(height: 34)
+        .font(.system(size: 14))
+        .foregroundStyle(Ink.primary)
+        .frame(height: Measure.rowFill)
         .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(.primary.opacity(active ? 0.15 : hovered ? 0.07 : 0))
-                .shadow(color: .black.opacity(active ? 0.08 : 0), radius: 1, y: 1))
+            RoundedRectangle(cornerRadius: Measure.radius)
+                .fill(active ? Ink.selected : hovered ? Ink.item : .clear)
+                .shadow(color: active ? Ink.selectedShadow : .clear, radius: 1, y: 1))
+        .padding(.vertical, (Measure.row - Measure.rowFill) / 2)
         .contentShape(Rectangle())
         .onTapGesture { model.run("select/\(tab.id)") }
         .onHover { hovered = $0 }
@@ -597,8 +605,11 @@ struct FolderRow: View {
             }
         }
         .padding(.horizontal, 10)
-        .frame(height: 34)
-        .background(RoundedRectangle(cornerRadius: 8).fill(.primary.opacity(hovered ? 0.07 : 0)))
+        .font(.system(size: 14))
+        .frame(height: Measure.rowFill)
+        .background(
+            RoundedRectangle(cornerRadius: Measure.radius).fill(hovered ? Ink.item : .clear))
+        .padding(.vertical, (Measure.row - Measure.rowFill) / 2)
         .contentShape(Rectangle())
         .gesture(
             TapGesture(count: 2).onEnded { model.renaming = id }
@@ -672,12 +683,13 @@ struct SplitRow: View {
             }
             if joining == tabs.count { DropChip(tint: model.themeColor) }
         }
-        .padding(2)
-        .frame(height: 34)
+        .padding(3)
+        .frame(height: Measure.rowFill)
         .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(.primary.opacity(active ? 0.15 : hovered ? 0.07 : 0))
-                .shadow(color: .black.opacity(active ? 0.08 : 0), radius: 1, y: 1))
+            RoundedRectangle(cornerRadius: Measure.radius)
+                .fill(active ? Ink.selected : hovered ? Ink.item : .clear)
+                .shadow(color: active ? Ink.selectedShadow : .clear, radius: 1, y: 1))
+        .padding(.vertical, (Measure.row - Measure.rowFill) / 2)
         .onHover { hovered = $0 }
     }
 
@@ -712,10 +724,11 @@ struct SplitRow: View {
         }
         .padding(.leading, 8)
         .padding(.trailing, 4)
-        .frame(height: 30)
+        .font(.system(size: 14))
+        .frame(maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(.primary.opacity(tab.id == selected ? 0.15 : 0.06)))
+                .fill(tab.id == selected ? Ink.selected : Ink.child))
         .contentShape(Rectangle())
         .onTapGesture { model.run("select/\(tab.id)") }
         .rightClick { model.run("menu/node/\(id)") }

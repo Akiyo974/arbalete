@@ -131,7 +131,7 @@ final class SidebarHost {
         resizer.place(
             in: window,
             frame.flatMap { frame in
-                floating ? nil : NSRect(x: frame.maxX - 2, y: 0, width: 11, height: frame.height)
+                floating ? nil : NSRect(x: frame.maxX - 3, y: 0, width: 8, height: frame.height)
             }, raise: false)
         effect.isHidden = !floating
         container.layer?.cornerRadius = floating ? 10 : 0
