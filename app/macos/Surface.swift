@@ -25,6 +25,16 @@ final class ChildPanel: NSPanel, NSWindowDelegate {
 
     override var canBecomeKey: Bool { true }
 
+    /// A click in it brings the app forward with its window, as a click in the window would: the
+    /// panel itself does not activate the app.
+    override func sendEvent(_ event: NSEvent) {
+        if [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type), !NSApp.isActive {
+            NSApp.activate()
+            parent?.makeKeyAndOrderFront(nil)
+        }
+        super.sendEvent(event)
+    }
+
     func windowDidResignKey(_ notification: Notification) {
         DispatchQueue.main.async {
             // The web overlay it stands for, out of sight, takes the keyboard as it shows.
