@@ -324,17 +324,17 @@ private struct DefaultBrowser: View {
         }
     }
 
+    /// Whether any copy of Arbalete is the default: macOS never picks one in a temporary folder.
     private static func check() -> Bool {
         guard let url = URL(string: "https://example.com"),
             let app = NSWorkspace.shared.urlForApplication(toOpen: url)
         else { return false }
-        return app.standardizedFileURL == Bundle.main.bundleURL.standardizedFileURL
+        return Bundle(url: app)?.bundleIdentifier == Bundle.main.bundleIdentifier
     }
 
     private func makeDefault() {
         let app = Bundle.main.bundleURL
-        // Other copies of Arbalete share its bundle identifier: registering this one first makes
-        // macOS pick it rather than another copy.
+        // Registered first, this copy is the one macOS picks among those with its identifier.
         LSRegisterURL(app as CFURL, true)
         NSWorkspace.shared.setDefaultApplication(at: app, toOpenURLsWithScheme: "http") { error in
             guard error == nil else { return done(error) }

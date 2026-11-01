@@ -46,6 +46,9 @@ run = [
   "plutil -insert CFBundleURLTypes -json '[{\"CFBundleURLName\":\"Web site URL\",\"CFBundleURLSchemes\":[\"http\",\"https\"]}]' target/bundle/Arbalete.app/Contents/Info.plist",
   # System Settings lists, as default browsers, only the apps that also view web pages.
   "plutil -insert CFBundleDocumentTypes -json '[{\"CFBundleTypeName\":\"HTML document\",\"CFBundleTypeRole\":\"Viewer\",\"LSItemContentTypes\":[\"public.html\",\"public.xhtml\"]}]' target/bundle/Arbalete.app/Contents/Info.plist",
+  # The helpers take their own identifiers, like CEF's: sharing the app's, one of them could
+  # receive the links macOS sends to the default browser.
+  "for helper in target/bundle/Arbalete.app/Contents/Frameworks/*Helper*.app; do suffix=$(basename \"$helper\" .app | sed -n 's/.*(\\(.*\\))/.\\1/p' | tr A-Z a-z); plutil -replace CFBundleIdentifier -string \"io.github.amenophis.arbalete.helper$suffix\" \"$helper/Contents/Info.plist\"; done",
   # Ad hoc signatures change on every build, so macOS asks again for each permission. A stable
   # identity, set in .config/mise.local.toml (not committed), keeps permissions across builds.
   # The framework and the helpers, which read and write the data, are signed one by one: --deep
