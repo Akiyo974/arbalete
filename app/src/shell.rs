@@ -30,7 +30,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::thread::{self, LocalKey};
+use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// The UI is served by the app itself under this origin, of its own scheme (app/src/scheme.rs).
@@ -146,7 +146,7 @@ thread_local! {
     static PAGES: RefCell<HashMap<NodeId, Live>> = RefCell::default();
     /// The import assistant, shown above the page; created the first time it is shown, as most
     /// sessions never import.
-    static IMPORT_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
+    static IMPORT_VIEW: RefCell<Option<Panel>> = const { RefCell::new(None) };
     static IMPORT: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
     /// The Little Arbalete windows open: a page without the sidebar, which links from other apps
     /// open in.
@@ -234,25 +234,25 @@ struct Win {
     /// The tab whose page the window shows.
     shown: Cell<Option<NodeId>>,
     /// Shown above the page, to open tabs.
-    overlay_view: RefCell<Option<BrowserView>>,
+    overlay_view: RefCell<Option<Panel>>,
     overlay: RefCell<Option<OverlayController>>,
     /// A second sidebar, shown above the page while the sidebar is hidden.
-    reveal_view: RefCell<Option<BrowserView>>,
+    reveal_view: RefCell<Option<Panel>>,
     reveal: RefCell<Option<OverlayController>>,
     /// The bar above the page, at the card's top while it is shown (View › Show Toolbar).
-    toolbar_view: RefCell<Option<BrowserView>>,
+    toolbar_view: RefCell<Option<Panel>>,
     /// The find bar, at the card's top right corner; created the first time it is shown.
-    find_view: RefCell<Option<BrowserView>>,
+    find_view: RefCell<Option<Panel>>,
     find: RefCell<Option<OverlayController>>,
     /// The text last searched for, which ⌘G searches again.
     find_text: RefCell<String>,
     /// A Space's theme picker, beside the sidebar.
-    theme_view: RefCell<Option<BrowserView>>,
+    theme_view: RefCell<Option<Panel>>,
     theme: RefCell<Option<OverlayController>>,
     /// How far down the window the pointer was as the theme picker opened, which it centers on.
     theme_at: Cell<Option<i32>>,
     /// The site controls' panel, under their button.
-    site_view: RefCell<Option<BrowserView>>,
+    site_view: RefCell<Option<Panel>>,
     site: RefCell<Option<OverlayController>>,
     /// Where the site controls' button was, in the window, when they were last shown: their
     /// panel, and the extension popups opened from it, show under it.
@@ -963,7 +963,7 @@ fn show_downloads() {
         set_sidebar(SidebarMode::Shown);
     }
     let current = win();
-    let view = shown_sidebar(&current);
+    let view = &current.sidebar;
     dispatch(view, r#"new Event("arbalete:show-downloads")"#);
 }
 
@@ -972,10 +972,7 @@ fn show_library_page() {
     if win().sidebar_mode.get() == SidebarMode::Hidden {
         set_sidebar(SidebarMode::Shown);
     }
-    dispatch(
-        shown_sidebar(&win()),
-        r#"new Event("arbalete:open-library")"#,
-    );
+    dispatch(&win().sidebar, r#"new Event("arbalete:open-library")"#);
 }
 
 /// Puts a tab first among the tabs selected last, which the tab switcher lists.
@@ -1084,35 +1081,36 @@ fn download_command(action: DownloadAction, id: u32) {
     }
 }
 
-/// Dispatches a DOM event, given as JavaScript, in one of the UI's views.
-fn dispatch(view: &RefCell<Option<BrowserView>>, event: &str) {
+/// Gives the native interface's surface standing for one of the window's places, like the
+/// sidebar's, an event, given as the JavaScript a web page would dispatch.
+fn dispatch<T>(view: &RefCell<Option<T>>, event: &str) {
     #[cfg(target_os = "macos")]
-    if let Some(surface) = native_surface(view) {
+    if let Some(surface) = native_surface(std::ptr::from_ref(view).cast()) {
         crate::native::event(win().id, surface, event);
-        return;
     }
-    if let Some(view) = view.with_borrow(Clone::clone) {
-        dispatch_in(&view, event);
-    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (view, event);
 }
 
 /// The native interface's surface that stands for a web view, which gets its events. The
 /// revealed sidebar's events also go to the docked one's (shown_sidebar), which the native
 /// sidebar stands for in every mode.
 #[cfg(target_os = "macos")]
-fn native_surface(view: &RefCell<Option<BrowserView>>) -> Option<&'static str> {
+fn native_surface(view: *const ()) -> Option<&'static str> {
     let current = win();
-    let global =
-        |key: &'static LocalKey<RefCell<Option<BrowserView>>>| key.with(std::ptr::from_ref);
+    let place = |cell: &RefCell<Option<Panel>>| std::ptr::from_ref(cell).cast::<()>();
     [
-        (std::ptr::from_ref(&current.sidebar), "sidebar"),
-        (std::ptr::from_ref(&current.overlay_view), "overlay"),
-        (std::ptr::from_ref(&current.find_view), "find"),
-        (std::ptr::from_ref(&current.site_view), "site"),
-        (std::ptr::from_ref(&current.theme_view), "theme"),
-        (std::ptr::from_ref(&current.toolbar_view), "toolbar"),
-        (global(&SETTINGS_VIEW), "settings"),
-        (global(&IMPORT_VIEW), "import"),
+        (std::ptr::from_ref(&current.sidebar).cast(), "sidebar"),
+        (place(&current.overlay_view), "overlay"),
+        (place(&current.find_view), "find"),
+        (place(&current.site_view), "site"),
+        (place(&current.theme_view), "theme"),
+        (place(&current.toolbar_view), "toolbar"),
+        (
+            SETTINGS_VIEW.with(|cell| std::ptr::from_ref(cell).cast()),
+            "settings",
+        ),
+        (IMPORT_VIEW.with(|cell| place(cell)), "import"),
     ]
     .into_iter()
     .find(|(native, _)| std::ptr::eq(view, *native))
@@ -1120,6 +1118,7 @@ fn native_surface(view: &RefCell<Option<BrowserView>>) -> Option<&'static str> {
 }
 
 /// Dispatches an event in a view's page, like `dispatch`.
+#[cfg(not(target_os = "macos"))]
 fn dispatch_in(view: &BrowserView, event: &str) {
     if let Some(frame) = view.browser().and_then(|browser| browser.main_frame()) {
         let code = format!("dispatchEvent({event})");
@@ -1226,11 +1225,8 @@ fn sync_native_surfaces() {
 /// Shows a native surface where the app shows its web counterpart's overlay, which stays out of
 /// sight and lets clicks through to it.
 #[cfg(target_os = "macos")]
-fn mirror(view: &RefCell<Option<BrowserView>>, overlay: &OverlayController) {
-    if let Some(host) = view.with_borrow(|view| view.as_ref()?.browser()?.host()) {
-        crate::mac::hide_window(host.window_handle());
-    }
-    if let Some(surface) = native_surface(view) {
+fn mirror(view: &RefCell<Option<Panel>>, overlay: &OverlayController) {
+    if let Some(surface) = native_surface(std::ptr::from_ref(view).cast()) {
         crate::native::surface(
             win().id,
             surface,
@@ -1425,25 +1421,6 @@ fn set_sidebar(mode: SidebarMode) {
         );
     }
     let floating = |mode| matches!(mode, SidebarMode::Revealed | SidebarMode::Floating);
-    #[cfg(target_os = "macos")]
-    if let Some(view) = reveal_window() {
-        let seconds = f64::from(duration) / 1000.0;
-        let width = f64::from(SIDEBAR_WIDTH);
-        match (before, mode) {
-            (SidebarMode::Hidden, SidebarMode::Revealed) => {
-                let positions = crate::motion::positions(crate::motion::spring, -width, 0.0, 30);
-                crate::mac::slide(view, &positions, seconds);
-            }
-            (SidebarMode::Revealed, SidebarMode::Hidden) => {
-                let positions = crate::motion::positions(crate::motion::ease_out, 0.0, -width, 30);
-                crate::mac::slide(view, &positions, seconds);
-            }
-            _ => {}
-        }
-        if floating(mode) && !floating(before) {
-            crate::mac::float(view, 1.0);
-        }
-    }
     if floating(mode) && !floating(before) {
         reveal.set_bounds(Some(&mode.layout(&size).reveal));
         reveal.set_visible((!cfg!(target_os = "macos")).into());
@@ -1524,10 +1501,6 @@ fn step_slide() {
         reveal.set_bounds(Some(&lerp_rect(&from.reveal, &to.reveal, eased)));
         #[cfg(target_os = "macos")]
         place_native_sidebar();
-        #[cfg(target_os = "macos")]
-        if let Some(view) = reveal_window() {
-            crate::mac::float(view, 1.0 - eased);
-        }
     }
     post_delayed_task(ThreadId::UI, Some(&mut StepSlide::new()), FRAME_MS);
 }
@@ -1565,34 +1538,9 @@ fn settle_sidebar() {
     update_drag_regions();
     #[cfg(target_os = "macos")]
     {
-        if let Some(view) = reveal_window() {
-            crate::mac::slide(view, &[], 0.0);
-            let floating = matches!(mode, SidebarMode::Revealed | SidebarMode::Floating);
-            crate::mac::float(view, if floating { 1.0 } else { 0.0 });
-        }
         if let Some(window) = win().window.with_borrow(Clone::clone) {
             crate::mac::sidebar_shown(window.window_handle(), docked);
         }
-    }
-}
-
-/// The revealed sidebar's window, once its browser is created.
-#[cfg(target_os = "macos")]
-fn reveal_window() -> Option<*mut std::ffi::c_void> {
-    let browser = win()
-        .reveal_view
-        .with_borrow(|view| view.as_ref()?.browser())?;
-    Some(browser.host()?.window_handle())
-}
-
-/// The sidebar the window shows: the docked one, or the one above the page.
-fn shown_sidebar(window: &Win) -> &RefCell<Option<BrowserView>> {
-    if cfg!(target_os = "macos") {
-        return &window.sidebar;
-    }
-    match window.sidebar_mode.get() {
-        SidebarMode::Revealed | SidebarMode::Floating => &window.reveal_view,
-        SidebarMode::Shown | SidebarMode::Hidden => &window.sidebar,
     }
 }
 
@@ -2517,7 +2465,7 @@ fn show_find() {
 /// take the keyboard from the native find bar.
 fn make_find(window: &Window) {
     if win().find.with_borrow(Option::is_none) {
-        let view = browser_view(UiClient::new(), "about:blank", no_width, None);
+        let view = place_view(no_width, 1);
         let controller = window
             .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
             .expect("find");
@@ -2718,31 +2666,11 @@ fn place_theme_picker() {
     }));
 }
 
-/// Where a button of a UI view is, in the window.
+/// Where a button of the interface is, in the window: the native interface gives it so.
 fn button_in_window(button: Button) -> Option<Rect> {
-    // The native interface gives it in the window already.
-    if cfg!(target_os = "macos") {
-        return Some(Rect {
-            x: button.x,
-            y: button.y,
-            width: button.width,
-            height: button.height,
-        });
-    }
-    let source = match button.view {
-        ButtonView::Docked => &win().sidebar,
-        ButtonView::Revealed => &win().reveal_view,
-        ButtonView::Toolbar => &win().toolbar_view,
-    };
-    let source = source.with_borrow(Clone::clone)?;
-    let mut origin = Point {
+    Some(Rect {
         x: button.x,
         y: button.y,
-    };
-    source.convert_point_to_window(Some(&mut origin));
-    Some(Rect {
-        x: origin.x,
-        y: origin.y,
         width: button.width,
         height: button.height,
     })
@@ -3012,7 +2940,7 @@ fn send_sources() {
 /// Makes the import assistant's overlay, once: with the window on macOS, like the find bar's.
 fn make_import(window: &Window) {
     if IMPORT.with_borrow(Option::is_none) {
-        let view = browser_view(UiClient::new(), "about:blank", no_width, None);
+        let view = place_view(no_width, 1);
         let controller = window
             .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
             .expect("import");
@@ -3477,7 +3405,7 @@ fn focus_sidebar() {
     if let Some(window) = win().window.with_borrow(Clone::clone) {
         window.activate();
     }
-    if let Some(sidebar) = shown_sidebar(&win()).with_borrow(Clone::clone) {
+    if let Some(sidebar) = &win().sidebar.with_borrow(Clone::clone) {
         sidebar.request_focus();
     }
 }
@@ -4196,10 +4124,7 @@ fn show_history() {
     if win().sidebar_mode.get() == SidebarMode::Hidden {
         set_sidebar(SidebarMode::Shown);
     }
-    dispatch(
-        shown_sidebar(&win()),
-        r#"new Event("arbalete:show-history")"#,
-    );
+    dispatch(&win().sidebar, r#"new Event("arbalete:show-history")"#);
 }
 
 fn now() -> i64 {
@@ -4503,10 +4428,7 @@ fn run_command(command: Command) {
             if win().sidebar_mode.get() == SidebarMode::Hidden {
                 set_sidebar(SidebarMode::Shown);
             }
-            dispatch(
-                shown_sidebar(&win()),
-                r#"new Event("arbalete:show-extensions")"#,
-            );
+            dispatch(&win().sidebar, r#"new Event("arbalete:show-extensions")"#);
         }
         (Command::ReloadExtensions, _) => {
             extensions::reload(STATE.with_borrow(|state| state.sidebar.displayed().profile));
@@ -4576,7 +4498,7 @@ pub fn scroll(scroll: crate::swipe::Scroll) {
     match win().swipe.with_borrow_mut(|tracker| tracker.track(scroll)) {
         Some(Swipe::Gesture(gesture)) => {
             let current = win();
-            let view = shown_sidebar(&current);
+            let view = &current.sidebar;
             let detail = serde_json::to_string(&gesture).expect("a gesture");
             dispatch(
                 view,
@@ -4757,7 +4679,7 @@ wrap_window_delegate! {
                 .expect("box layout");
             // Any width: the layout stretches it across the card. A zero one would make its size
             // "empty", which CEF ignores, with its height.
-            let toolbar = browser_view_sized(UiClient::new(), "about:blank", || 1, PAGE_TOOLBAR_HEIGHT, None);
+            let toolbar = place_view(|| 1, PAGE_TOOLBAR_HEIGHT);
             toolbar.set_visible(app_settings().show_toolbar.into());
             let mut view = View::from(&toolbar);
             card.add_child_view(Some(&mut view));
@@ -4771,14 +4693,14 @@ wrap_window_delegate! {
             controller.set_visible(0);
             win().card.set(Some(controller));
             // Below the overlay, which is added after it.
-            let reveal = browser_view(UiClient::new(), "about:blank", no_width, None);
+            let reveal = place_view(no_width, 1);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&reveal)), DockingMode::CUSTOM, 1)
                 .expect("reveal");
             controller.set_visible(0);
             win().reveal_view.set(Some(reveal));
             win().reveal.set(Some(controller));
-            let overlay = browser_view(UiClient::new(), "about:blank", no_width, None);
+            let overlay = place_view(no_width, 1);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&overlay)), DockingMode::CUSTOM, 1)
                 .expect("overlay");
@@ -4786,14 +4708,14 @@ wrap_window_delegate! {
             win().overlay_view.set(Some(overlay));
             win().overlay.set(Some(controller));
             // Made with the window, so that its page listens by the first time it shows.
-            let site = browser_view(UiClient::new(), "about:blank", no_width, None);
+            let site = place_view(no_width, 1);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&site)), DockingMode::CUSTOM, 1)
                 .expect("site controls");
             controller.set_visible(0);
             win().site_view.set(Some(site));
             win().site.set(Some(controller));
-            let theme = browser_view(UiClient::new(), "about:blank", no_width, None);
+            let theme = place_view(no_width, 1);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&theme)), DockingMode::CUSTOM, 1)
                 .expect("theme picker");
@@ -4872,11 +4794,7 @@ wrap_window_delegate! {
             }
             CLOSING.set(true);
             let current = win();
-            let mut views: Vec<_> = [&current.sidebar, &current.reveal_view, &current.overlay_view, &current.find_view, &current.toolbar_view, &current.site_view, &current.theme_view]
-                .into_iter()
-                .filter_map(|view| view.with_borrow(Clone::clone))
-                .collect();
-            views.extend(IMPORT_VIEW.with_borrow(Clone::clone));
+            let mut views: Vec<_> = current.sidebar.with_borrow(Clone::clone).into_iter().collect();
             views.extend(PAGES.with_borrow(|pages| pages.values().map(|live| live.view.clone()).collect::<Vec<_>>()));
             let mut closed = 1;
             for view in views {
@@ -5160,6 +5078,27 @@ fn browser_view_sized(
 
 fn no_width() -> i32 {
     0
+}
+
+/// A place in the window that a panel of the native interface shows over, `height` tall when a
+/// layout stacks it: an empty view, without a page of its own.
+fn place_view(width: fn() -> i32, height: i32) -> Panel {
+    panel_create(Some(&mut PlaceDelegate::new(width, height))).expect("a place")
+}
+
+wrap_panel_delegate! {
+    struct PlaceDelegate {
+        width: fn() -> i32,
+        height: i32,
+    }
+
+    impl ViewDelegate {
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            Size { width: (self.width)(), height: self.height }
+        }
+    }
+
+    impl PanelDelegate {}
 }
 
 wrap_browser_view_delegate! {
