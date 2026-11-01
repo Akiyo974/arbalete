@@ -56,8 +56,6 @@ fn main() {
     mac::setup_menu();
     #[cfg(target_os = "macos")]
     mac::watch_events();
-    #[cfg(target_os = "macos")]
-    mac::watch_links();
 
     run_message_loop();
     shutdown();

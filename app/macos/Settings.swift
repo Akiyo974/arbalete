@@ -304,14 +304,16 @@ private struct LinksSettings: View {
 /// which macOS asks the user to confirm.
 private struct DefaultBrowser: View {
     private let isDefault = State(initialValue: DefaultBrowser.check())
+    private let failure = State<String?>(initialValue: nil)
 
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Default browser")
-                Text(isDefault.wrappedValue
-                    ? "Links from other apps open in Arbalete."
-                    : "Links from other apps open in another browser.")
+                Text(failure.wrappedValue
+                    ?? (isDefault.wrappedValue
+                        ? "Links from other apps open in Arbalete."
+                        : "Links from other apps open in another browser."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -331,10 +333,19 @@ private struct DefaultBrowser: View {
 
     private func makeDefault() {
         let app = Bundle.main.bundleURL
-        NSWorkspace.shared.setDefaultApplication(at: app, toOpenURLsWithScheme: "http") { _ in
-            NSWorkspace.shared.setDefaultApplication(at: app, toOpenURLsWithScheme: "https") { _ in
-                DispatchQueue.main.async { isDefault.wrappedValue = DefaultBrowser.check() }
-            }
+        // Other copies of Arbalete share its bundle identifier: registering this one first makes
+        // macOS pick it rather than another copy.
+        LSRegisterURL(app as CFURL, true)
+        NSWorkspace.shared.setDefaultApplication(at: app, toOpenURLsWithScheme: "http") { error in
+            guard error == nil else { return done(error) }
+            NSWorkspace.shared.setDefaultApplication(at: app, toOpenURLsWithScheme: "https", completion: done)
+        }
+    }
+
+    private func done(_ error: Error?) {
+        DispatchQueue.main.async {
+            failure.wrappedValue = error?.localizedDescription
+            isDefault.wrappedValue = DefaultBrowser.check()
         }
     }
 }

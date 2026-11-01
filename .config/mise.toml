@@ -44,6 +44,8 @@ run = [
   # A browser opens web links: macOS offers it as the default browser, which other apps' links
   # then open in (mac::watch_links).
   "plutil -insert CFBundleURLTypes -json '[{\"CFBundleURLName\":\"Web site URL\",\"CFBundleURLSchemes\":[\"http\",\"https\"]}]' target/bundle/Arbalete.app/Contents/Info.plist",
+  # System Settings lists, as default browsers, only the apps that also view web pages.
+  "plutil -insert CFBundleDocumentTypes -json '[{\"CFBundleTypeName\":\"HTML document\",\"CFBundleTypeRole\":\"Viewer\",\"LSItemContentTypes\":[\"public.html\",\"public.xhtml\"]}]' target/bundle/Arbalete.app/Contents/Info.plist",
   # Ad hoc signatures change on every build, so macOS asks again for each permission. A stable
   # identity, set in .config/mise.local.toml (not committed), keeps permissions across builds.
   # The framework and the helpers, which read and write the data, are signed one by one: --deep

@@ -31,6 +31,8 @@ use std::ptr::NonNull;
 /// The "get URL" Apple event's class and identifier ('GURL'), and the key of its url ('----').
 const GET_URL: u32 = u32::from_be_bytes(*b"GURL");
 const DIRECT_OBJECT: u32 = u32::from_be_bytes(*b"----");
+const CORE_EVENT: u32 = u32::from_be_bytes(*b"aevt");
+const OPEN_DOCUMENTS: u32 = u32::from_be_bytes(*b"odoc");
 
 /// The page's corner radius, in points.
 const CARD_RADIUS: f64 = 8.0;
@@ -81,6 +83,13 @@ define_class!(
             self.ivars().handling_send_event.set(Bool::YES);
             let _: () = msg_send![super(self), sendEvent: event];
             self.ivars().handling_send_event.set(was_sending);
+        }
+
+        // AppKit installs its own "open documents" handler as the app finishes launching.
+        #[unsafe(method(finishLaunching))]
+        unsafe fn finish_launching(&self) {
+            let _: () = msg_send![super(self), finishLaunching];
+            watch_links();
         }
 
         // Chromium must leave the run loop to shut down: quitting closes the window first.
@@ -282,6 +291,23 @@ define_class!(
             }
         }
 
+        // Web pages opened from the Finder, the files Arbalete views (CFBundleDocumentTypes).
+        #[unsafe(method(arbaleteOpenDocuments:withReplyEvent:))]
+        fn open_documents(&self, event: &NSAppleEventDescriptor, _reply: &NSAppleEventDescriptor) {
+            let files: Option<Retained<NSAppleEventDescriptor>> =
+                unsafe { msg_send![event, paramDescriptorForKeyword: DIRECT_OBJECT] };
+            let Some(files) = files else { return };
+            for index in 1..=files.numberOfItems() {
+                let url = files
+                    .descriptorAtIndex(index)
+                    .and_then(|file| file.fileURLValue())
+                    .and_then(|url| url.absoluteString());
+                if let Some(url) = url {
+                    crate::shell::open_link(Some(url.to_string()));
+                }
+            }
+        }
+
         #[unsafe(method(arbaleteSettings:))]
         fn settings(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::ShowSettings);
@@ -335,9 +361,10 @@ impl ArbaleteApplication {
 /// Watches clicks and keys as the application takes them from the system: mouse events never
 /// reach sendEvent: above, which Chromium's windows bypass.
 /// Opens the links other apps ask the default browser to open, which macOS sends as "get URL"
-/// Apple events, in Little Arbalete windows. The bundle declares the http and https schemes
-/// (the `app` task in .config/mise.toml).
-pub fn watch_links() {
+/// Apple events, where URL Routing says, and the web pages opened from the Finder ("open
+/// documents" events). The bundle declares the http and https schemes and the HTML files (the
+/// `app` task in .config/mise.toml).
+fn watch_links() {
     let manager = NSAppleEventManager::sharedAppleEventManager();
     let app = ArbaleteApplication::shared_application();
     // SAFETY: the app implements the selector, with the arguments Apple events handlers take.
@@ -348,6 +375,13 @@ pub fn watch_links() {
             andSelector: sel!(arbaleteGetUrl:withReplyEvent:),
             forEventClass: GET_URL,
             andEventID: GET_URL
+        ];
+        let _: () = msg_send![
+            &*manager,
+            setEventHandler: &*app,
+            andSelector: sel!(arbaleteOpenDocuments:withReplyEvent:),
+            forEventClass: CORE_EVENT,
+            andEventID: OPEN_DOCUMENTS
         ];
     }
 }
