@@ -1222,15 +1222,36 @@ pub fn copy(url: &str) {
 pub fn round_card(view: *mut c_void) {
     round(view, CARD_RADIUS);
     corners(view, false);
+    for page in pages(view) {
+        round(page, 0.0);
+    }
 }
 
 /// A split's page's corners, like Arc's: smaller, and only below, under the bar at its top.
 const PANE_RADIUS: f64 = 6.0;
 
-/// Rounds the card a page of a split is in, under its bar: its bottom corners only.
-pub fn round_pane(view: *mut c_void) {
-    round(view, PANE_RADIUS);
-    corners(view, true);
+/// Rounds each page of a split, which share the card's window, view `view`: their bottom
+/// corners, under their bars; the card itself, whose room between them shows the window, is
+/// not.
+pub fn round_split(view: *mut c_void) {
+    round(view, 0.0);
+    for page in pages(view) {
+        round(page, PANE_RADIUS);
+        corners(page, true);
+    }
+}
+
+/// The pages' views in the card's window, view `view`.
+fn pages(view: *mut c_void) -> Vec<*mut c_void> {
+    // SAFETY: CEF gives the card's NSView, which its window keeps alive.
+    let Some(card) = (unsafe { view.cast::<NSView>().as_ref() }) else {
+        return Vec::new();
+    };
+    card.subviews()
+        .iter()
+        .filter(|page| page.class().name().to_str() == Ok("WebContentsViewCocoa"))
+        .map(|page| Retained::as_ptr(&page).cast_mut().cast())
+        .collect()
 }
 
 /// Rounds a page's view's bottom corners only, or all four.
@@ -1371,7 +1392,8 @@ fn round(view: *mut c_void, radius: f64) {
         let edge = NSColor::colorWithWhite_alpha(0.0, 0.25);
         let edge: *const CGColor = unsafe { msg_send![&*edge, CGColor] };
         let _: () = unsafe { msg_send![&*layer, setBorderColor: edge] };
-        let _: () = unsafe { msg_send![&*layer, setBorderWidth: CARD_EDGE] };
+        let edge = if radius > 0.0 { CARD_EDGE } else { 0.0 };
+        let _: () = unsafe { msg_send![&*layer, setBorderWidth: edge] };
     }
 }
 

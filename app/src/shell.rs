@@ -252,9 +252,11 @@ struct Win {
     reveal: RefCell<Option<OverlayController>>,
     /// The bar above the page, at the card's top while it is shown (View › Show Toolbar).
     toolbar_view: RefCell<Option<Panel>>,
-    /// The cards of a split's pages after the first, which the card holds: overlays of their own,
-    /// like the card, rounded and apart, like Arc's.
-    panes: RefCell<Vec<OverlayController>>,
+    /// Holds a split's pages in the card, side by side or one above the other, each in a slot
+    /// of `slots` under room for its bar: views of one window, which resize together, like
+    /// Arc's.
+    split_view: RefCell<Option<Panel>>,
+    slots: RefCell<Vec<Panel>>,
     /// The tabs of the split shown, in order, and how it lays them out: empty while none shows.
     split: RefCell<(Vec<NodeId>, Option<SplitLayout>)>,
     /// The find bar, at the card's top right corner; created the first time it is shown.
@@ -325,7 +327,8 @@ impl Win {
             reveal_view: RefCell::new(None),
             reveal: RefCell::new(None),
             toolbar_view: RefCell::new(None),
-            panes: RefCell::new(Vec::new()),
+            split_view: RefCell::new(None),
+            slots: RefCell::new(Vec::new()),
             split: RefCell::default(),
             find_view: RefCell::new(None),
             find: RefCell::new(None),
@@ -4000,9 +4003,11 @@ fn content_created(profile: ProfileId, browser: Option<&mut Browser>) {
     let Some(tab) = page_tab(browser) else { return };
     mute_page(tab);
     let shown = win().shown.get() == Some(tab);
-    if shown || win().split.borrow().0.contains(&tab) {
-        #[cfg(target_os = "macos")]
-        if let Some(host) = browser.host() {
+    #[cfg(target_os = "macos")]
+    if let Some(host) = browser.host() {
+        if win().split.borrow().0.contains(&tab) {
+            crate::mac::round_split(host.window_handle());
+        } else if shown {
             crate::mac::round_card(host.window_handle());
         }
     }
@@ -4035,26 +4040,36 @@ fn show_split(focused: NodeId, tabs: &[NodeId], views: &[BrowserView], layout: S
     let same = *win().split.borrow() == (tabs.to_vec(), Some(layout.clone()));
     if !same {
         hide_content();
-        let cards = pane_cards();
-        if cards.len() < tabs.len() {
+        let (Some(split), slots) = (
+            win().split_view.with_borrow(Clone::clone),
+            win().slots.borrow().clone(),
+        ) else {
+            return;
+        };
+        if slots.len() < tabs.len() {
             return;
         }
-        for ((&tab, view), card) in tabs.iter().zip(views).zip(&cards) {
+        split.remove_all_child_views();
+        for ((&tab, view), slot) in tabs.iter().zip(views).zip(&slots) {
             take_page(tab);
-            move_page(view, card);
+            move_page(view, slot);
             wake_page(tab, view);
+            split.add_child_view(Some(&mut View::from(slot)));
         }
-        *win().split.borrow_mut() = (tabs.to_vec(), Some(layout));
-        // The pages' bars stand for the bar above the page.
+        split.set_visible(1);
+        // The room between the pages shows the window, like the margins around the card; the
+        // pages' bars stand for the bar above the page.
+        if let Some(panel) = card_panel() {
+            panel.set_background_color(0x0000_0001);
+        }
         if let Some(toolbar) = win().toolbar_view.with_borrow(Clone::clone) {
             toolbar.set_visible(0);
         }
+        *win().split.borrow_mut() = (tabs.to_vec(), Some(layout));
         lay_out_split();
         #[cfg(target_os = "macos")]
-        for view in views {
-            if let Some(host) = view.browser().and_then(|browser| browser.host()) {
-                crate::mac::round_pane(host.window_handle());
-            }
+        if let Some(host) = views[0].browser().and_then(|browser| browser.host()) {
+            crate::mac::round_split(host.window_handle());
         }
     }
     win().shown.set(Some(focused));
@@ -4069,104 +4084,76 @@ fn show_split(focused: NodeId, tabs: &[NodeId], views: &[BrowserView], layout: S
     send_panes();
 }
 
-/// The panels a split's pages go in, in order: the card's, then the other cards'.
-fn pane_cards() -> Vec<Panel> {
-    let panes = win().panes.borrow().clone();
-    card_panel()
-        .into_iter()
-        .chain(
-            panes
-                .iter()
-                .filter_map(|pane| pane.contents_view()?.as_panel()),
-        )
-        .collect()
-}
-
-/// Where a split's pages go in `area`, side by side or one above the other, each its part of
-/// the room but the room between them.
-fn pane_rects(area: &Rect, stacked: bool, factors: &[f64]) -> Vec<Rect> {
-    let count = factors.len() as i32;
-    let length = if stacked { area.height } else { area.width };
-    let room = f64::from(length - SPLIT_GAP * (count - 1).max(0));
-    let mut at = 0;
-    factors
+/// Where the split shown puts its pages, in the window, each under its bar: as the card lays
+/// out its slots.
+fn split_rects() -> Vec<Rect> {
+    let count = win().split.borrow().0.len();
+    let card = win()
+        .card
+        .with_borrow(|card| card.as_ref().map(OverlayController::bounds));
+    let split = win()
+        .split_view
+        .with_borrow(|split| split.as_ref().map(|s| s.bounds()));
+    let (Some(card), Some(split)) = (card, split) else {
+        return Vec::new();
+    };
+    if fills_window() {
+        return Vec::new();
+    }
+    win()
+        .slots
+        .borrow()
         .iter()
-        .enumerate()
-        .map(|(index, factor)| {
-            let size = if index as i32 == count - 1 {
-                length - at
-            } else {
-                (room * factor).round() as i32
-            };
-            let rect = if stacked {
-                Rect {
-                    x: area.x,
-                    y: area.y + at,
-                    width: area.width,
-                    height: size,
-                }
-            } else {
-                Rect {
-                    x: area.x + at,
-                    y: area.y,
-                    width: size,
-                    height: area.height,
-                }
-            };
-            at += size + SPLIT_GAP;
-            rect
+        .take(count)
+        .map(|slot| {
+            let slot = slot.bounds();
+            Rect {
+                x: card.x + split.x + slot.x,
+                y: card.y + split.y + slot.y,
+                width: slot.width,
+                height: slot.height,
+            }
         })
         .collect()
 }
 
-/// Where the split shown puts its pages, in the window: the card's room shared between them.
-fn split_rects() -> Vec<Rect> {
-    let Some(layout) = win().split.borrow().1.clone() else {
-        return Vec::new();
-    };
-    let size = win()
-        .window
-        .with_borrow(|window| window.as_ref().map(|w| w.size()));
-    match size {
-        Some(size) if !fills_window() => {
-            let area = win().sidebar_mode.get().layout(&size).card;
-            pane_rects(&area, layout.stacked, &layout.factors)
-        }
-        _ => Vec::new(),
-    }
-}
-
-/// Puts the split's pages in their cards' places, then the handles between them.
+/// Shares the card between the split's pages by their parts, 10 points apart, then puts the
+/// handles between them and the bars above them.
 fn lay_out_split() {
-    let rects = split_rects();
-    let Some((first, others)) = rects.split_first() else {
+    let (tabs, Some(layout)) = win().split.borrow().clone() else {
         return;
     };
-    // Each page under its bar.
-    let page = |rect: &Rect| Rect {
-        y: rect.y + PANE_BAR_HEIGHT,
-        height: rect.height - PANE_BAR_HEIGHT,
-        ..*rect
+    let Some(split) = win().split_view.with_borrow(Clone::clone) else {
+        return;
     };
-    if let Some(card) = win().card.with_borrow(Clone::clone) {
-        card.set_bounds(Some(&page(first)));
+    if let (Some(card), Some(size)) = (
+        win().card.with_borrow(Clone::clone),
+        win()
+            .window
+            .with_borrow(|window| window.as_ref().map(|w| w.size())),
+    ) {
+        card.set_bounds(Some(&win().sidebar_mode.get().layout(&size).card));
     }
-    let panes = win().panes.borrow().clone();
-    for (index, pane) in panes.iter().enumerate() {
-        match others.get(index) {
-            Some(rect) => {
-                pane.set_bounds(Some(&page(rect)));
-                let shown = i32::from(win().colored.get());
-                if pane.is_visible() != shown {
-                    pane.set_visible(shown);
-                }
-            }
-            None if pane.is_visible() == 1 => pane.set_visible(0),
-            None => {}
-        }
+    let boxed = split
+        .set_to_box_layout(Some(&BoxLayoutSettings {
+            horizontal: (!layout.stacked).into(),
+            between_child_spacing: SPLIT_GAP,
+            cross_axis_alignment: AxisAlignment::STRETCH,
+            ..Default::default()
+        }))
+        .expect("box layout");
+    let slots = win().slots.borrow().clone();
+    for (slot, factor) in slots.iter().zip(&layout.factors).take(tabs.len()) {
+        // Whole thousandths: the layout shares the room by integer weights.
+        let weight = (factor * 1000.0).round() as i32;
+        boxed.set_flex_for_view(Some(&mut View::from(slot)), weight.max(1));
     }
-    for card in pane_cards() {
-        card.layout();
+    if let Some(panel) = card_panel() {
+        panel.layout();
+    }
+    split.layout();
+    for slot in &slots {
+        slot.layout();
     }
     place_split_handles();
     send_panes();
@@ -4387,7 +4374,11 @@ fn shown_on_card(view: &BrowserView) {
     // The browser's window is the card's.
     #[cfg(target_os = "macos")]
     if let Some(host) = view.browser().and_then(|browser| browser.host()) {
-        crate::mac::round_card(host.window_handle());
+        if split_shown().is_some() {
+            crate::mac::round_split(host.window_handle());
+        } else {
+            crate::mac::round_card(host.window_handle());
+        }
         win()
             .card_view
             .set(crate::mac::window_content(host.window_handle()));
@@ -4446,11 +4437,16 @@ fn hide_content() {
                 }
             }
         });
-        for pane in win().panes.borrow().iter() {
-            pane.set_visible(0);
+        if let Some(view) = win().split_view.with_borrow(Clone::clone) {
+            view.set_visible(0);
         }
         if let Some(toolbar) = win().toolbar_view.with_borrow(Clone::clone) {
             toolbar.set_visible(app_settings().show_toolbar.into());
+        }
+        if let (Some(panel), Some((card_color, _, _))) =
+            (card_panel(), win().window_colors.with_borrow(Clone::clone))
+        {
+            panel.set_background_color(card_color);
         }
         place_card();
         send_panes();
@@ -4539,8 +4535,11 @@ fn set_window_colors(card_color: u32, grain: f64, colors: &[u32]) {
         #[cfg(not(target_os = "macos"))]
         window.set_background_color(colors[0]);
     }
-    for card in pane_cards() {
-        card.set_background_color(card_color);
+    // A split's pages show the window between them instead.
+    if let Some(panel) = card_panel()
+        && split_shown().is_none()
+    {
+        panel.set_background_color(card_color);
     }
     win().colored.set(true);
     // Only when it changes: showing an overlay again puts it above the others, like the theme
@@ -5261,15 +5260,27 @@ wrap_window_delegate! {
                 .expect("card");
             controller.set_visible(0);
             win().card.set(Some(controller));
-            // Right above the card, below the panels shown over the page.
-            for _ in 1..MAX_SPLIT_TABS {
-                let pane = panel_create(None).expect("pane");
-                pane.set_to_fill_layout();
-                let controller = window
-                    .add_overlay_view(Some(&mut View::from(&pane)), DockingMode::CUSTOM, 1)
-                    .expect("pane");
-                controller.set_visible(0);
-                win().panes.borrow_mut().push(controller);
+            let split = panel_create(None).expect("split");
+            // The room between the pages shows the window, like the margins around the card.
+            split.set_background_color(0x0000_0001);
+            split.set_visible(0);
+            card.add_child_view(Some(&mut View::from(&split)));
+            win().split_view.set(Some(split));
+            for _ in 0..MAX_SPLIT_TABS {
+                let slot = panel_create(None).expect("slot");
+                let column = slot
+                    .set_to_box_layout(Some(&BoxLayoutSettings {
+                        horizontal: 0,
+                        cross_axis_alignment: AxisAlignment::STRETCH,
+                        default_flex: 1,
+                        ..Default::default()
+                    }))
+                    .expect("box layout");
+                let bar = place_view(|| 1, PANE_BAR_HEIGHT);
+                let mut view = View::from(&bar);
+                slot.add_child_view(Some(&mut view));
+                column.set_flex_for_view(Some(&mut view), 0);
+                win().slots.borrow_mut().push(slot);
             }
             // Below the overlay, which is added after it.
             let reveal = place_view(no_width, 1);
@@ -6546,31 +6557,10 @@ mod tests {
     use super::{
         CARD_MARGIN, DraggableRegion, EDGE_WIDTH, FLOAT_INSET, LIBRARY_WIDTH, MemoryPressure,
         RECENT_TABS, Rect, SIDEBAR_WIDTH, SidebarMode, Size, UiState, favicon_file, lead_part,
-        lerp_rect, margin_regions, origin, pane_rects, remember, site, slide_duration, step,
-        suspend_delays, toggled, ui_path, win,
+        lerp_rect, margin_regions, origin, remember, site, slide_duration, step, suspend_delays,
+        toggled, ui_path, win,
     };
     use arbalete_core::sidebar::NodeId;
-
-    #[test]
-    fn a_split_shares_the_card_between_its_pages_10_points_apart() {
-        let area = Rect {
-            x: 269,
-            y: 9,
-            width: 1002,
-            height: 802,
-        };
-        let rects = pane_rects(&area, false, &[0.5, 0.25, 0.25]);
-        assert_eq!(
-            rects.iter().map(|r| (r.x, r.width)).collect::<Vec<_>>(),
-            [(269, 491), (770, 246), (1026, 245)]
-        );
-        assert!(rects.iter().all(|r| r.y == 9 && r.height == 802));
-        let rects = pane_rects(&area, true, &[0.5, 0.5]);
-        assert_eq!(
-            rects.iter().map(|r| (r.y, r.height)).collect::<Vec<_>>(),
-            [(9, 396), (415, 396)]
-        );
-    }
 
     #[test]
     fn a_split_handle_keeps_the_pages_wide_enough_and_snaps_to_halves() {
