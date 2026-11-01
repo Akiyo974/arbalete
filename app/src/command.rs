@@ -309,6 +309,15 @@ pub enum Command {
     /// Selects the next page of the split shown, or the previous one, wrapping around, like Arc's:
     /// `pane/next`, `pane/previous`.
     SwitchPane(bool),
+    /// Shows a link in Peek, over the window (from the app itself).
+    Peek(String),
+    /// Closes Peek: `peek/close`.
+    ClosePeek,
+    /// Opens Peek's page in a tab of its own, or beside the selected tab in a split:
+    /// `peek/tab`, `peek/split`.
+    KeepPeek {
+        split: bool,
+    },
     /// Lays the pages of the split shown, or a given one, out one above the other, or side by
     /// side again: `pane/flip`, `pane/flip/<split id>`.
     FlipPanes(Option<NodeId>),
@@ -845,6 +854,9 @@ impl Command {
                     "pane/add" => return Some(Self::AddPane(None)),
                     "pane/close" => return Some(Self::ClosePane),
                     "pane/next" => return Some(Self::SwitchPane(true)),
+                    "peek/close" => return Some(Self::ClosePeek),
+                    "peek/tab" => return Some(Self::KeepPeek { split: false }),
+                    "peek/split" => return Some(Self::KeepPeek { split: true }),
                     "pane/previous" => return Some(Self::SwitchPane(false)),
                     "pane/flip" => return Some(Self::FlipPanes(None)),
                     _ => {}
@@ -1310,6 +1322,10 @@ mod tests {
             Some(Command::CloseSplit(_))
         ));
         assert_eq!(Command::parse("pane/close-split/x"), None);
+        assert!(matches!(
+            Command::parse("peek/split"),
+            Some(Command::KeepPeek { split: true })
+        ));
         assert!(matches!(
             Command::parse("pane/next"),
             Some(Command::SwitchPane(true))

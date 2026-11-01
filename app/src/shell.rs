@@ -181,6 +181,8 @@ thread_local! {
     /// The last picture of each tab's page, a JPEG in base64, which covers the page while it
     /// loads again once unloaded.
     static SNAPSHOTS: RefCell<HashMap<NodeId, String>> = RefCell::default();
+    /// The link Peek shows over the window, if it shows one.
+    static PEEK: RefCell<Option<Peek>> = RefCell::default();
     /// The color at the top of each tab's page, as #rrggbb, which tints its bar in a split.
     static TOP_COLORS: RefCell<HashMap<NodeId, String>> = RefCell::default();
     /// The tabs whose unloaded page opens again, covered by its picture once it is made.
@@ -4305,6 +4307,112 @@ fn send_panes() {
     }
 }
 
+/// Peek, like Arc's: a link shown over the window in a card, which its controls close or keep in
+/// a tab or a split.
+struct Peek {
+    controller: OverlayController,
+    view: BrowserView,
+}
+
+/// Peek's card in a window of `size`, like Arc's: 80% of its width, centered, 12 points from its
+/// top and bottom.
+fn peek_frame(size: &Size) -> Rect {
+    let width = size.width * 4 / 5;
+    Rect {
+        x: (size.width - width) / 2,
+        y: 12,
+        width,
+        height: size.height - 24,
+    }
+}
+
+/// Shows `url` in Peek, in the displayed Space's profile, instead of what it showed.
+fn peek(url: &str) {
+    close_peek();
+    let Some(window) = win().window.with_borrow(Clone::clone) else {
+        return;
+    };
+    let frame = peek_frame(&window.size());
+    // Its scrim and controls first: the card's window goes above them.
+    #[cfg(target_os = "macos")]
+    crate::native::peek(win().id, Some(frame.clone()));
+    let profile = displayed_profile();
+    let mut context = profile_context(profile);
+    let view = browser_view(
+        ContentClient::new(profile, true),
+        url,
+        no_width,
+        context.as_mut(),
+    );
+    let controller = window
+        .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
+        .expect("peek");
+    controller.set_bounds(Some(&frame));
+    controller.set_visible(1);
+    view.request_focus();
+    PEEK.set(Some(Peek { controller, view }));
+}
+
+/// Peek follows the window's size.
+fn place_peek() {
+    let size = win()
+        .window
+        .with_borrow(|window| window.as_ref().map(Window::size));
+    let Some(frame) = size.as_ref().map(peek_frame) else {
+        return;
+    };
+    let shown = PEEK.with_borrow(|peek| {
+        peek.as_ref()
+            .map(|peek| peek.controller.set_bounds(Some(&frame)))
+            .is_some()
+    });
+    #[cfg(target_os = "macos")]
+    if shown {
+        crate::native::peek(win().id, Some(frame));
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = shown;
+}
+
+/// Whether Peek shows a link.
+pub fn peek_shown() -> bool {
+    PEEK.with_borrow(Option::is_some)
+}
+
+/// Whether `browser` is Peek's page.
+fn is_peek(browser: &Browser) -> bool {
+    PEEK.with_borrow(|peek| {
+        peek.as_ref()
+            .and_then(|peek| peek.view.browser())
+            .is_some_and(|mut page| browser.is_same(Some(&mut page)) == 1)
+    })
+}
+
+/// Closes Peek, its page with it.
+fn close_peek() {
+    let Some(peek) = PEEK.take() else { return };
+    #[cfg(target_os = "macos")]
+    crate::native::peek(win().id, None);
+    if let Some(host) = peek.view.browser().and_then(|browser| browser.host()) {
+        host.close_browser(1);
+    }
+    peek.controller.destroy();
+}
+
+/// Opens Peek's page in a tab of its own, or beside the selected tab in a split, and closes it.
+fn keep_peek(split: bool) {
+    let url = PEEK.with_borrow(|peek| {
+        let frame = peek.as_ref()?.view.browser()?.main_frame()?;
+        Some(CefString::from(&frame.url()).to_string())
+    });
+    close_peek();
+    match url.filter(|url| !url.is_empty()) {
+        Some(url) if split => open_in_pane(&url),
+        Some(url) => open_tab(&url),
+        None => {}
+    }
+}
+
 /// Selects the page after the one focused in the split shown, or before it, wrapping around.
 fn switch_pane(next: bool) {
     let tabs = win().split.borrow().0.clone();
@@ -4884,6 +4992,9 @@ fn run_command(command: Command) {
         (Command::ClosePane, _) if split_shown().is_some() => close_tab(None),
         (Command::ClosePane, _) => {}
         (Command::SwitchPane(next), _) => switch_pane(next),
+        (Command::Peek(url), _) => peek(&url),
+        (Command::ClosePeek, _) => close_peek(),
+        (Command::KeepPeek { split }, _) => keep_peek(split),
         (Command::FlipPanes(split), _) => flip_panes(split),
         (Command::SeparateAll(split), _) => {
             if update_sidebar(|sidebar| sidebar.separate_all(split)).is_ok() {
@@ -5324,6 +5435,7 @@ wrap_window_delegate! {
             update_drag_regions();
             send_window_width();
             place_theme_picker();
+            place_peek();
             #[cfg(target_os = "macos")]
             sync_native_surfaces();
         }
@@ -5630,6 +5742,12 @@ wrap_life_span_handler! {
     impl LifeSpanHandler {
         fn on_after_created(&self, browser: Option<&mut Browser>) {
             OPEN_BROWSERS.set(OPEN_BROWSERS.get() + 1);
+            #[cfg(target_os = "macos")]
+            if let Some(browser) = browser.as_deref().filter(|browser| is_peek(browser))
+                && let Some(host) = browser.host()
+            {
+                crate::mac::round_peek(host.window_handle());
+            }
             if let Some(browser) = browser {
                 STRAYS.with_borrow_mut(|strays| strays.push(browser.clone()));
             }
@@ -6069,6 +6187,48 @@ wrap_client! {
         fn download_handler(&self) -> Option<DownloadHandler> {
             Some(ContentDownloadHandler::new())
         }
+
+        fn request_handler(&self) -> Option<RequestHandler> {
+            (!self.little).then(ContentRequestHandler::new)
+        }
+    }
+}
+
+wrap_request_handler! {
+    struct ContentRequestHandler {}
+
+    impl RequestHandler {
+        /// Like Arc's, a link from a pinned tab or a favorite to another site shows in Peek,
+        /// the tab staying on its site.
+        fn on_before_browse(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, request: Option<&mut Request>, user_gesture: i32, is_redirect: i32) -> i32 {
+            let (Some(browser), Some(frame), Some(request)) = (browser, frame, request) else { return 0 };
+            if user_gesture == 0 || is_redirect == 1 || frame.is_main() == 0 {
+                return 0;
+            }
+            let Some(tab) = page_tab(browser) else { return 0 };
+            let anchored = STATE.with_borrow(|state| state.sidebar.is_pinned(tab) || state.sidebar.is_favorite(tab));
+            let (url, current) = (CefString::from(&request.url()).to_string(), CefString::from(&frame.url()).to_string());
+            let elsewhere = origin(&current).is_some() && origin(&url).is_some() && origin(&url) != origin(&current);
+            if !(anchored && elsewhere) {
+                return 0;
+            }
+            post(Command::Peek(url));
+            1
+        }
+
+        /// A link clicked with ⇧ shows in Peek, and one clicked with ⌘ opens in a tab, like
+        /// Arc's.
+        fn on_open_urlfrom_tab(&self, _browser: Option<&mut Browser>, _frame: Option<&mut Frame>, target_url: Option<&CefString>, target_disposition: WindowOpenDisposition, user_gesture: i32) -> i32 {
+            let Some(url) = target_url.map(CefString::to_string).filter(|_| user_gesture == 1) else { return 0 };
+            if target_disposition == WindowOpenDisposition::NEW_WINDOW {
+                post(Command::Peek(url));
+            } else if [WindowOpenDisposition::NEW_FOREGROUND_TAB, WindowOpenDisposition::NEW_BACKGROUND_TAB].contains(&target_disposition) {
+                post(Command::Open(url));
+            } else {
+                return 0;
+            }
+            1
+        }
     }
 }
 
@@ -6496,8 +6656,8 @@ wrap_life_span_handler! {
             _popup_id: i32,
             target_url: Option<&CefString>,
             _target_frame_name: Option<&CefString>,
-            _target_disposition: WindowOpenDisposition,
-            _user_gesture: i32,
+            target_disposition: WindowOpenDisposition,
+            user_gesture: i32,
             _popup_features: Option<&PopupFeatures>,
             _window_info: Option<&mut WindowInfo>,
             _client: Option<&mut Option<Client>>,
@@ -6505,8 +6665,12 @@ wrap_life_span_handler! {
             _extra_info: Option<&mut Option<DictionaryValue>>,
             _no_javascript_access: Option<&mut i32>,
         ) -> i32 {
-            if let Some(url) = target_url {
-                open_tab(&url.to_string());
+            let Some(url) = target_url.map(CefString::to_string) else { return 1 };
+            // A link clicked with ⇧, which would open a window, shows in Peek, like Arc's.
+            if target_disposition == WindowOpenDisposition::NEW_WINDOW && user_gesture == 1 {
+                post(Command::Peek(url));
+            } else {
+                open_tab(&url);
             }
             1
         }

@@ -34,6 +34,7 @@ unsafe extern "C" {
     fn arbalete_ui_split(window: u32, stacked: bool, frames: *const f64, count: usize);
     fn arbalete_ui_panes(window: u32, card: *mut std::ffi::c_void, panes: *const c_char);
     fn arbalete_ui_is_default_browser() -> bool;
+    fn arbalete_ui_peek(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
     fn arbalete_ui_place_sidebar(
         window: u32,
         visible: bool,
@@ -155,6 +156,23 @@ pub fn panes(window: u32, card: Option<*mut std::ffi::c_void>, panes: &str) {
     let panes = CString::new(panes).unwrap_or_default();
     // SAFETY: a C string, which the call reads before returning, and the card's live NSView.
     unsafe { arbalete_ui_panes(window, card.unwrap_or(std::ptr::null_mut()), panes.as_ptr()) };
+}
+
+/// Shows Peek's scrim and controls around its card at `frame`, in the window's points from its
+/// top left corner, or takes them away without a frame.
+pub fn peek(window: u32, frame: Option<cef::Rect>) {
+    let frame = frame.unwrap_or_default();
+    // SAFETY: plain values.
+    unsafe {
+        arbalete_ui_peek(
+            window,
+            frame.width > 0,
+            frame.x.into(),
+            frame.y.into(),
+            frame.width.into(),
+            frame.height.into(),
+        )
+    };
 }
 
 /// Makes Arbalete the default browser, once the user confirms.

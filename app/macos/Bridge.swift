@@ -306,6 +306,7 @@ final class NativeWindow {
     let splitHandles: SplitHandles
     let paneBars: PaneBars
     let pageDrop: PageDrop
+    let peek: PeekChrome
     /// The panels above the page, by the name of the web view they stand for, like "overlay".
     var surfaces: [String: Surface] = [:]
     private var observers: [NSObjectProtocol] = []
@@ -372,6 +373,7 @@ final class NativeWindow {
         splitHandles = SplitHandles(in: window, model: app)
         paneBars = PaneBars(model: app)
         pageDrop = PageDrop(in: window, model: app)
+        peek = PeekChrome(in: window, model: app)
     }
 
     /// Closes its panels, the window they belong to closing.
@@ -382,6 +384,7 @@ final class NativeWindow {
         splitHandles.close()
         paneBars.close()
         pageDrop.close()
+        peek.close()
     }
 
     /// Gives one of its views an event, by the name of the web view it stands for.

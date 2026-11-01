@@ -328,6 +328,9 @@ define_class!(
                 });
                 return Bool::new(stacked.is_some());
             }
+            if action == Some(sel!(arbaleteClosePeek:)) {
+                return Bool::new(crate::shell::peek_shown());
+            }
             let panes = [
                 sel!(arbaleteClosePane:),
                 sel!(arbaleteNextPane:),
@@ -352,6 +355,11 @@ define_class!(
         #[unsafe(method(arbaleteClosePane:))]
         fn close_pane(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::ClosePane);
+        }
+
+        #[unsafe(method(arbaleteClosePeek:))]
+        fn close_peek(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::ClosePeek);
         }
 
         #[unsafe(method(arbaleteNextPane:))]
@@ -694,6 +702,7 @@ pub fn setup_menu() {
                     sel!(arbaletePreviousPane:),
                     ns_string!("["),
                 ),
+                escape_item(mtm, ns_string!("Close Peek"), sel!(arbaleteClosePeek:)),
                 item(
                     mtm,
                     ns_string!("Convert to Vertical Split View"),
@@ -1046,6 +1055,14 @@ fn hidden_item(
     item
 }
 
+/// A menu item sending `action` with Escape alone, like Arc's "exit the current context"; enabled
+/// only while there is one, so that pages keep Escape otherwise.
+fn escape_item(mtm: MainThreadMarker, title: &NSString, action: Sel) -> Retained<NSMenuItem> {
+    let item = item(mtm, title, action, ns_string!("\u{1b}"));
+    item.setKeyEquivalentModifierMask(NSEventModifierFlags::empty());
+    item
+}
+
 /// A menu item sending `action` with ⌘⌥ and `key`.
 /// A menu item whose shortcut is ⌃⇧ and `key`, like Arc's Split View items.
 fn control_shift_item(
@@ -1258,6 +1275,15 @@ pub fn round_card(view: *mut c_void) {
 /// A split's page's corners, like Arc's: smaller than the card's, and only below, under the bar
 /// at its top.
 const PANE_RADIUS: f64 = 6.0;
+
+/// Peek's card's corners, like Arc's.
+const PEEK_RADIUS: f64 = 10.0;
+
+/// Rounds Peek's page, view `view`, on all its corners.
+pub fn round_peek(view: *mut c_void) {
+    round(view, PEEK_RADIUS);
+    corners(view, false);
+}
 
 /// Rounds each page of a split, which share the card's window, view `view`: their bottom
 /// corners, under their bars; the card itself, whose room between them shows the window, is
