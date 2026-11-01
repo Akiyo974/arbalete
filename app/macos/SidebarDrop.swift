@@ -186,6 +186,36 @@ struct DropRow<Content: View>: View {
     }
 }
 
+/// The tab list's room below its rows, like Arc's: what a drag carries goes after today's last
+/// tab, which shows the line under it.
+struct TailDrop: DropDelegate {
+    let model: AppModel
+    let page: SpacePage
+    /// The tab list's width, whose edges switch Spaces.
+    let width: CGFloat
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        let x = info.location.x
+        model.edge(x <= edgeBand ? true : x >= width - edgeBand ? false : nil)
+        model.hover(page.today.last.map { .after($0.id) })
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        if let last = page.today.last { model.leave(last.id) }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        // Only what a drag from the sidebar carries.
+        guard model.dragged != nil else { return false }
+        let ids = model.draggedTabs
+        model.marked = []
+        _ = model.endDrag()
+        ids.enumerated().forEach { model.move($1, to: page.roots.today, page.today.count + $0) }
+        return true
+    }
+}
+
 /// Where on a row a drag lands, as in Arc: a band at its top and bottom, a quarter of its height
 /// but at most 8 points, inserts before or after it; its middle drops into a folder, or beside a
 /// tab in a split, on the side of the row the pointer is.

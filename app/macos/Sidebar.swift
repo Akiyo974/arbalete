@@ -227,6 +227,7 @@ struct SpaceSections: View {
     @ObservedObject var model: AppModel
     let page: SpacePage
     let space: Space
+    private let _width = State<CGFloat>(initialValue: 0)
 
     var body: some View {
         VStack(spacing: 0) {
@@ -261,8 +262,12 @@ struct SpaceSections: View {
             }
             .scrollIndicators(.never)
             // Like Arc's, the tab list's empty room moves the window; a double-click there does
-            // not zoom it.
+            // not zoom it. Dropped on, it puts what a drag carries after today's last tab.
             .background(WindowDragArea())
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { _width.wrappedValue = $0 }
+            .onDrop(
+                of: [.plainText],
+                delegate: TailDrop(model: model, page: page, width: _width.wrappedValue))
         }
     }
 }
