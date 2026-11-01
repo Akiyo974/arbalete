@@ -383,6 +383,17 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
   capturing, and the sites kept awake from the site controls, are never suspended; a setting turns suspension
   off, and the sidebar dims the tabs asleep.
 - Acceptance: with 100 tabs open, memory used after unloading compared with all tabs alive, measured and recorded.
+  Done on 2026-11-01, macOS, 100 random English Wikipedia articles, each shown once so that its page is alive;
+  the footprint of every process of the app, measured on its own and summed:
+
+  | State                     | Processes | Total   | Renderers | GPU      | Browser |
+  |---------------------------|-----------|---------|-----------|----------|---------|
+  | Every page alive          | 119       | ≈ 8.1 GB | 6.07 GB   | 1.50 GB  | 364 MB  |
+  | Hidden pages unloaded     | 18        | ≈ 0.9 GB | 407 MB    | 148 MB   | 285 MB  |
+
+  Unloading saves about 89 %. A live page costs about 57 MB in its renderer, and about 13 MB in the GPU process
+  once hidden: Chromium keeps its last frame, the card's size at Retina scale, to show it again at once. Left to
+  gain: the 11 blank web views that only place the native panels cost about 30 MB each, some 330 MB a window.
 
 ### Phase 8 — Link routing
 - Registration as the default browser on each OS.
