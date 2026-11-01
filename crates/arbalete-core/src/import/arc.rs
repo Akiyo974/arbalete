@@ -7,6 +7,7 @@ use super::{Copy, chromium};
 use crate::sidebar::{
     Archived, MAX_THEME_COLORS, Mode, NodeId, ProfileId, Sidebar, SpaceId, Tab, Theme,
 };
+use crate::url_routing::{Destination, Match, Route, UrlRouting};
 use rusqlite::Connection;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -30,6 +31,59 @@ pub fn read_archive(dir: &Path) -> io::Result<Option<String>> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
+}
+
+/// Reads where Arc opens the links of other apps, in its data directory `dir`,
+/// `StorableLinkRouting.json`. `None` when Arc saved none there.
+pub fn read_url_routing(dir: &Path) -> io::Result<Option<String>> {
+    match fs::read_to_string(dir.join("StorableLinkRouting.json")) {
+        Ok(json) => Ok(Some(json)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Arc's routes and default destination, from the content of `StorableLinkRouting.json`: a route
+/// to a Space not imported, `spaces` holding those imported by their Arc id, goes to the Space
+/// shown last; a route without a url condition is left out.
+pub fn url_routing(
+    storable_link_routing: &str,
+    spaces: &HashMap<String, SpaceId>,
+) -> Result<UrlRouting, serde_json::Error> {
+    let json: Value = serde_json::from_str(storable_link_routing)?;
+    let destination = |value: &Value| {
+        if value.get("littleArc").is_some() {
+            return Destination::Little;
+        }
+        value["space"]["_0"]["space"]["_0"]
+            .as_str()
+            .and_then(|arc_id| spaces.get(arc_id))
+            .map_or(Destination::MostRecentSpace, |&space| {
+                Destination::Space(space)
+            })
+    };
+    let routes = json["rules"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|rule| {
+            let condition = &rule["sourceComponents"][0]["componentType"]["urlMatch"];
+            let text = condition["_1"].as_str()?.to_string();
+            let matching = if condition["_0"].get("matches").is_some() {
+                Match::IsEqualTo
+            } else {
+                Match::Contains
+            };
+            Some(Route {
+                matching,
+                text,
+                destination: destination(&rule["destination"]),
+            })
+        });
+    Ok(UrlRouting {
+        routes: routes.collect(),
+        default: destination(&json["defaultDestination"]),
+    })
 }
 
 /// Arc counts time in seconds from 2001-01-01, Apple's reference date: that date in milliseconds
@@ -318,6 +372,46 @@ mod tests {
     use serde_json::json;
 
     const SIDEBAR: &str = include_str!("../../tests/fixtures/arc/StorableSidebar.json");
+
+    #[test]
+    fn reads_arcs_routes_and_default_destination() {
+        let sidebar = Sidebar::default();
+        let home = sidebar.spaces()[0].id;
+        let spaces = HashMap::from([("space-home".to_string(), home)]);
+        let json = json!({
+            "rules": [
+                { "sourceComponents": [{ "componentType": { "urlMatch": { "_0": { "contains": {} }, "_1": "meet.google.com" } } }],
+                  "destination": { "space": { "_0": { "mostRecent": {} } } } },
+                { "sourceComponents": [{ "componentType": { "urlMatch": { "_0": { "matches": {} }, "_1": "test.com" } } }],
+                  "destination": { "littleArc": { "_0": { "mostRecent": {} } } } },
+                { "sourceComponents": [{ "componentType": { "urlMatch": { "_0": { "contains": {} }, "_1": "foo.bar" } } }],
+                  "destination": { "space": { "_0": { "space": { "_0": "space-other" } } } } },
+                { "sourceComponents": [], "destination": { "littleArc": {} } }
+            ],
+            "version": 1,
+            "defaultDestination": { "space": { "_0": { "space": { "_0": "space-home" } } } }
+        });
+        let routing = url_routing(&json.to_string(), &spaces).unwrap();
+        let routes: Vec<_> = routing
+            .routes
+            .iter()
+            .map(|r| (r.matching, r.text.as_str(), r.destination))
+            .collect();
+        assert_eq!(
+            routes,
+            [
+                (
+                    Match::Contains,
+                    "meet.google.com",
+                    Destination::MostRecentSpace
+                ),
+                (Match::IsEqualTo, "test.com", Destination::Little),
+                // A Space not imported.
+                (Match::Contains, "foo.bar", Destination::MostRecentSpace),
+            ]
+        );
+        assert_eq!(routing.default, Destination::Space(home));
+    }
     /// The fixture's two Arc profiles, each into a profile of its own.
     fn fixture() -> Sidebar {
         let mut sidebar = Sidebar::empty();

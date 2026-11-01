@@ -397,12 +397,17 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
   without them, the unloaded state went from about 0.92 GB to 0.66 GB. The one blank page left, for the whole
   app, holds the extensions' DevTools session.
 
-### Phase 8 — Link routing
-- Registration as the default browser on each OS.
-- Receiving external URLs (URL open event on macOS; single instance + command-line arguments elsewhere).
-- Rules: "matches" / "contains", several conditions, per-rule toggle, default destination
-  (most recent Space, optionally of a given profile).
-- Import Arc's link routing rules.
+### Phase 8 — URL Routing
+- Registration as the default browser on each OS. Done on macOS: the app declares the http and https schemes,
+  and the settings' Links tab says whether it opens other apps' links, with a button that asks macOS to.
+- Receiving external URLs (URL open event on macOS; single instance + command-line arguments elsewhere). Done
+  on macOS.
+- Rules, like Arc's: a route sends the links whose url contains a text, or whose host or url is it, to a
+  Space, the Space shown last or a Little Arbalete window; the first route matching wins, and a default
+  destination takes the others. Done, edited in the settings' Links tab; a route to a Space deleted goes to
+  the Space shown last.
+- Import Arc's link routing rules. Done, with the Arc import: its routes join Arbalete's, and its default
+  destination takes over.
 
 ### Phase 9 — Polish
 - Split View, Peek. The sidebar already makes split rows, a tab dropped on the middle of another

@@ -9,6 +9,7 @@ pub mod safari;
 
 use crate::history::Entry;
 use crate::sidebar::{ProfileId, Sidebar, SpaceId};
+use crate::url_routing::UrlRouting;
 use bookmarks::{Bar, Bookmarks};
 use browsers::{Browser, Family};
 use serde::Deserialize;
@@ -48,9 +49,9 @@ type Favicons = HashMap<String, Vec<u8>>;
 
 #[derive(Debug)]
 enum Data {
-    /// Arc's sidebar, if any, the directory of the profile in `User Data`, and Arc's archive,
-    /// if any.
-    Arc(Option<String>, String, Option<String>),
+    /// Arc's sidebar, if any, the directory of the profile in `User Data`, Arc's archive and its
+    /// URL routing, if any.
+    Arc(Option<String>, String, Option<String>, Option<String>),
     Bookmarks(Bookmarks),
 }
 
@@ -87,6 +88,7 @@ pub fn read(browsers: &[Browser], choices: &[Choice]) -> Vec<Source> {
 /// the sidebar no longer has are skipped. Quick: it only changes the sidebar in memory.
 pub fn apply(sidebar: &mut Sidebar, sources: Vec<Source>) -> Imported {
     let mut imported = Imported::default();
+    let mut routes = ArcRoutes::default();
     for source in sources {
         let profile = match source.choice.into {
             None => sidebar.add_profile(&source.name),
@@ -98,7 +100,7 @@ pub fn apply(sidebar: &mut Sidebar, sources: Vec<Source>) -> Imported {
             name: &source.name,
         };
         let added = source.data.and_then(|(data, history, favicons)| {
-            add(sidebar, data, target, source.choice.bar)?;
+            add(sidebar, data, target, source.choice.bar, &mut routes)?;
             Ok((history, show_favicons(sidebar, profile, favicons)))
         });
         match added {
@@ -109,6 +111,9 @@ pub fn apply(sidebar: &mut Sidebar, sources: Vec<Source>) -> Imported {
             Err(error) => imported.errors.push(format!("{}: {error}", source.label)),
         }
         target.space(sidebar);
+    }
+    if let Err(error) = routes.apply(sidebar) {
+        imported.errors.push(format!("Arc's URL routing: {error}"));
     }
     imported
 }
@@ -177,9 +182,15 @@ fn read_profile(family: Family, path: &Path) -> Result<(Data, Vec<Entry>, Favico
             if let Some(json) = &sidebar {
                 favicons = arc::favicons(dir, path, json);
             }
-            // An archive that cannot be read is not worth failing the import for.
+            // An archive or routes that cannot be read are not worth failing the import for.
             let archive = arc::read_archive(dir).ok().flatten();
-            Data::Arc(sidebar, directory.unwrap_or_default().to_string(), archive)
+            let routing = arc::read_url_routing(dir).ok().flatten();
+            Data::Arc(
+                sidebar,
+                directory.unwrap_or_default().to_string(),
+                archive,
+                routing,
+            )
         }
         Family::Chromium => Data::Bookmarks(chromium::read_bookmarks(path).map_err(debug)?),
         Family::Firefox => Data::Bookmarks(firefox::read_bookmarks(path).map_err(debug)?),
@@ -193,16 +204,48 @@ fn read_profile(family: Family, path: &Path) -> Result<(Data, Vec<Entry>, Favico
     Ok((data, history?, favicons))
 }
 
-/// Adds a browser profile's sidebar or bookmarks to `target`.
-fn add(sidebar: &mut Sidebar, data: Data, target: Target, bar: Bar) -> Result<(), String> {
+/// Arc's URL routing, which every Arc profile reads the same, and the Spaces imported from all of
+/// them, by their Arc id, which its routes name.
+#[derive(Default)]
+struct ArcRoutes {
+    json: Option<String>,
+    spaces: HashMap<String, SpaceId>,
+}
+
+impl ArcRoutes {
+    /// Adds Arc's routes to the sidebar's, once every Arc profile is imported; Arc's default
+    /// destination takes over.
+    fn apply(self, sidebar: &mut Sidebar) -> Result<(), String> {
+        let Some(json) = self.json else { return Ok(()) };
+        let imported = arc::url_routing(&json, &self.spaces).map_err(debug)?;
+        let mut routes = sidebar.url_routing().routes.clone();
+        routes.extend(imported.routes);
+        sidebar.set_url_routing(UrlRouting {
+            routes,
+            default: imported.default,
+        });
+        Ok(())
+    }
+}
+
+/// Adds a browser profile's sidebar or bookmarks to `target`; Arc's routes wait in `routes`.
+fn add(
+    sidebar: &mut Sidebar,
+    data: Data,
+    target: Target,
+    bar: Bar,
+    routes: &mut ArcRoutes,
+) -> Result<(), String> {
     match data {
         Data::Arc(None, ..) => Ok(()),
-        Data::Arc(Some(json), directory, archive) => {
+        Data::Arc(Some(json), directory, archive, routing) => {
             let spaces = arc::add(sidebar, &json, &directory, target.profile).map_err(debug)?;
-            match archive {
-                Some(archive) => arc::add_archive(sidebar, &archive, &spaces).map_err(debug),
-                None => Ok(()),
+            if let Some(archive) = archive {
+                arc::add_archive(sidebar, &archive, &spaces).map_err(debug)?;
             }
+            routes.json = routing.or(routes.json.take());
+            routes.spaces.extend(spaces);
+            Ok(())
         }
         Data::Bookmarks(bookmarks) => {
             let space = target.space(sidebar);
