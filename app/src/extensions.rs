@@ -625,6 +625,9 @@ pub const PLAYING: i32 = 2;
 /// The id of the message asking a page for a picture of itself (crate::shell::page_snapshot).
 pub const SNAPSHOT: i32 = 3;
 
+/// The id of the message asking a page for the color at its top (crate::shell::page_top_color).
+pub const TOP_COLOR: i32 = 4;
+
 /// The id of the message asking a page's session for its own target, apart from the
 /// bridge's, which start above it.
 const CONTENT_INFO: i32 = 1;
@@ -1238,6 +1241,10 @@ wrap_dev_tools_message_observer! {
                 && let Some(jpeg) = message["result"]["data"].as_str()
             {
                 crate::shell::page_snapshot(self.page, jpeg);
+            } else if message["id"] == TOP_COLOR
+                && let Some(color) = message["result"]["result"]["value"].as_str()
+            {
+                crate::shell::page_top_color(self.page, color);
             }
             0
         }

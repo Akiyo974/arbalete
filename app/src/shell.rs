@@ -181,6 +181,8 @@ thread_local! {
     /// The last picture of each tab's page, a JPEG in base64, which covers the page while it
     /// loads again once unloaded.
     static SNAPSHOTS: RefCell<HashMap<NodeId, String>> = RefCell::default();
+    /// The color at the top of each tab's page, as #rrggbb, which tints its bar in a split.
+    static TOP_COLORS: RefCell<HashMap<NodeId, String>> = RefCell::default();
     /// The tabs whose unloaded page opens again, covered by its picture once it is made.
     static REVIVED: RefCell<HashSet<NodeId>> = RefCell::default();
     /// The tab whose page is being made, as its view joins the card.
@@ -3774,6 +3776,54 @@ fn cover_revived(browser: Option<&Browser>, loading: bool) {
     }
 }
 
+/// Asks a page for the color at its top, like Arc's bar samples it: the background of what
+/// shows there, or of the page, unless it is transparent.
+fn ask_top_color(browser: Option<&Browser>) {
+    let expression = r#"(() => {
+        const fill = (node) => {
+            const color = node && getComputedStyle(node).backgroundColor;
+            return color && !/^rgba\(.*, 0\)$|^transparent$/.test(color) ? color : null;
+        };
+        for (let node = document.elementFromPoint(innerWidth / 2, 1); node; node = node.parentElement) {
+            const color = fill(node);
+            if (color) return color;
+        }
+        return fill(document.body) ?? fill(document.documentElement);
+    })()"#;
+    let params = serde_json::json!({ "expression": expression, "returnByValue": true });
+    let message = serde_json::json!({ "id": extensions::TOP_COLOR, "method": "Runtime.evaluate", "params": params });
+    if let Some(host) = browser.and_then(Browser::host) {
+        host.send_dev_tools_message(Some(message.to_string().as_bytes()));
+    }
+}
+
+/// Keeps the color at the top of a page, a CSS rgb() or rgba() color, for its tab's bar.
+pub fn page_top_color(page: i32, color: &str) {
+    let tab = PAGES.with_borrow(|pages| {
+        pages
+            .iter()
+            .find_map(|(tab, live)| (live.view.browser()?.identifier() == page).then_some(*tab))
+    });
+    let (Some(tab), Some(hex)) = (tab, css_hex(color)) else {
+        return;
+    };
+    if TOP_COLORS.with_borrow_mut(|colors| colors.insert(tab, hex.clone())) != Some(hex) {
+        pane_changed(tab);
+    }
+}
+
+/// A CSS rgb() or rgba() color as #rrggbb.
+fn css_hex(color: &str) -> Option<String> {
+    let inside = color.split_once('(')?.1.strip_suffix(')')?;
+    let channels: Vec<u8> = inside
+        .split(',')
+        .take(3)
+        .map(|channel| channel.trim().parse::<f64>().ok().map(|c| c.round() as u8))
+        .collect::<Option<_>>()?;
+    let [r, g, b] = channels[..] else { return None };
+    Some(format!("#{r:02x}{g:02x}{b:02x}"))
+}
+
 /// Keeps a page's picture, a JPEG in base64, for its tab.
 pub fn page_snapshot(page: i32, jpeg: &str) {
     let tab = PAGES.with_borrow(|pages| {
@@ -4246,6 +4296,7 @@ fn send_panes() {
                     "back": can(true), "forward": can(false),
                     "loading": browser.as_ref().is_some_and(|browser| browser.is_loading() == 1),
                     "focused": focused == Some(tab),
+                    "color": TOP_COLORS.with_borrow(|colors| colors.get(&tab).cloned()),
                 })
             })
             .collect();
@@ -6341,6 +6392,9 @@ wrap_load_handler! {
             cover_revived(browser.as_deref(), is_loading == 1);
             if let Some(tab) = browser.as_deref().and_then(page_tab) {
                 pane_changed(tab);
+            }
+            if is_loading == 0 {
+                ask_top_color(browser.as_deref());
             }
             if !is_shown(browser) {
                 return;

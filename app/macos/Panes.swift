@@ -20,6 +20,8 @@ struct Pane: Decodable, Equatable {
     var forward: Bool
     var loading: Bool
     var focused: Bool
+    /// The color at the top of the page, as #rrggbb, which tints the bar like Arc's.
+    var color: String?
 }
 
 /// The focused pane's outline, like Arc's: the theme's color, 2 points wide.
@@ -83,7 +85,7 @@ final class PaneBars {
             }
             let pane = panes[index]
             host.rootView = PaneBar(model: model, pane: pane)
-            host.layer?.backgroundColor = NSColor(color(model.cardColor)).cgColor
+            host.layer?.backgroundColor = NSColor(color(pane.color ?? model.cardColor)).cgColor
             // Rounded like the card at its top only: the page goes on below. Its top is where y
             // is least when the bar counts down from it, whatever the card does.
             host.layer?.maskedCorners =
@@ -198,7 +200,9 @@ struct PaneBar: View {
             .overlay(alignment: .bottom) {
                 Rectangle().fill(.primary.opacity(0.05)).frame(height: 1)
             }
-            .environment(\.colorScheme, isDark(model.space?.theme) ? .dark : .light)
+            // Its ink reads on its color: the page's at its top, or the card's.
+            .environment(
+                \.colorScheme, luminance(pane.color ?? model.cardColor) < 0.179 ? .dark : .light)
         }
     }
 
