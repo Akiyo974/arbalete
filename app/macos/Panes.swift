@@ -83,9 +83,10 @@ final class PaneBars {
             let pane = panes[index]
             host.rootView = PaneBar(model: model, pane: pane)
             host.layer?.backgroundColor = NSColor(color(model.cardColor)).cgColor
-            // Rounded like the card at its top only: the page goes on below.
+            // Rounded like the card at its top only: the page goes on below. Its top is where y
+            // is least when the bar counts down from it, whatever the card does.
             host.layer?.maskedCorners =
-                card.isFlipped
+                host.isFlipped
                 ? [.layerMinXMinYCorner, .layerMaxXMinYCorner]
                 : [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
             host.frame = frame(pane.x, pane.y, pane.width, pane.bar)
