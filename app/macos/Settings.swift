@@ -244,6 +244,9 @@ private struct LinksSettings: View {
             let routing = detail.urlRouting
             Form {
                 Section {
+                    DefaultBrowser()
+                }
+                Section {
                     ForEach(routing.routes.indices, id: \.self) { index in
                         RouteRow(
                             route: routing.routes[index], spaces: detail.spaces,
@@ -294,6 +297,45 @@ private struct LinksSettings: View {
             let text = String(data: json, encoding: .utf8)
         else { return }
         settings.app.run("routing/\(percentEncoded(text))")
+    }
+}
+
+/// Whether Arbalete opens the links of other apps, as macOS says, and a button to make it so,
+/// which macOS asks the user to confirm.
+private struct DefaultBrowser: View {
+    private let isDefault = State(initialValue: DefaultBrowser.check())
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Default browser")
+                Text(isDefault.wrappedValue
+                    ? "Links from other apps open in Arbalete."
+                    : "Links from other apps open in another browser.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if !isDefault.wrappedValue {
+                Button("Make Default") { makeDefault() }
+            }
+        }
+    }
+
+    private static func check() -> Bool {
+        guard let url = URL(string: "https://example.com"),
+            let app = NSWorkspace.shared.urlForApplication(toOpen: url)
+        else { return false }
+        return app.standardizedFileURL == Bundle.main.bundleURL.standardizedFileURL
+    }
+
+    private func makeDefault() {
+        let app = Bundle.main.bundleURL
+        NSWorkspace.shared.setDefaultApplication(at: app, toOpenURLsWithScheme: "http") { _ in
+            NSWorkspace.shared.setDefaultApplication(at: app, toOpenURLsWithScheme: "https") { _ in
+                DispatchQueue.main.async { isDefault.wrappedValue = DefaultBrowser.check() }
+            }
+        }
     }
 }
 
