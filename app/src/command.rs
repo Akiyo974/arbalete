@@ -287,6 +287,18 @@ pub enum Command {
     SplitDuplicate(NodeId, NodeId),
     /// Takes a tab out of its split row, as the row after it: `separate/<tab id>`.
     Separate(NodeId),
+    /// Moves the handle after a split's page at an index to a point along the split, in the
+    /// window's points from its left or top edge: `pane/resize/<index>/<point>`.
+    ResizePane(usize, f64),
+    /// Gives the pages on either side of a split's handle at an index equal parts:
+    /// `pane/even/<index>`.
+    EvenPanes(usize),
+    /// Opens the Command Bar for a page to show beside the selected one, in its split: `pane/add`.
+    AddPane,
+    /// Closes the selected tab of a split: `pane/close`.
+    ClosePane,
+    /// Lays the shown split's pages out one above the other, or side by side again: `pane/flip`.
+    FlipPanes,
     /// Creates a profile, with a Space of its own, for the UI to rename: `profile/new`.
     NewProfile,
     /// Renames a profile: `profile/rename/<profile id>/<percent-encoded name>`.
@@ -810,6 +822,20 @@ impl Command {
                 if let Some(id) = path.strip_prefix("separate/") {
                     return serde_json::from_str(id).ok().map(Self::Separate);
                 }
+                if let Some(args) = path.strip_prefix("pane/resize/") {
+                    let (index, point) = args.split_once('/')?;
+                    let point: f64 = point.parse().ok().filter(|p: &f64| p.is_finite())?;
+                    return Some(Self::ResizePane(index.parse().ok()?, point));
+                }
+                match path {
+                    "pane/add" => return Some(Self::AddPane),
+                    "pane/close" => return Some(Self::ClosePane),
+                    "pane/flip" => return Some(Self::FlipPanes),
+                    _ => {}
+                }
+                if let Some(index) = path.strip_prefix("pane/even/") {
+                    return index.parse().ok().map(Self::EvenPanes);
+                }
                 if let Some(args) = path.strip_prefix("move/") {
                     let (id, parent, index) = parse_place(args)?;
                     return Some(Self::Move(id, parent, index));
@@ -1202,6 +1228,14 @@ mod tests {
         };
         assert_eq!(serde_json::to_string(&tab).unwrap(), "4");
         assert_eq!(Command::parse("separate/x"), None);
+        assert_eq!(
+            Command::parse("pane/resize/1/412.5"),
+            Some(Command::ResizePane(1, 412.5))
+        );
+        assert_eq!(Command::parse("pane/resize/1/NaN"), None);
+        assert_eq!(Command::parse("pane/even/2"), Some(Command::EvenPanes(2)));
+        assert_eq!(Command::parse("pane/add"), Some(Command::AddPane));
+        assert_eq!(Command::parse("pane/flip"), Some(Command::FlipPanes));
     }
 
     #[test]

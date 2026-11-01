@@ -31,6 +31,7 @@ unsafe extern "C" {
     fn arbalete_ui_little(id: u32, handle: *mut c_void);
     fn arbalete_ui_settings_focused() -> bool;
     fn arbalete_ui_make_default_browser();
+    fn arbalete_ui_split(window: u32, stacked: bool, frames: *const f64, count: usize);
     fn arbalete_ui_is_default_browser() -> bool;
     fn arbalete_ui_place_sidebar(
         window: u32,
@@ -134,6 +135,17 @@ pub fn little(id: u32, handle: Option<*mut c_void>) {
 pub fn settings(shown: bool) {
     // SAFETY: a plain value.
     unsafe { arbalete_ui_settings(shown) };
+}
+
+/// Puts the handles that resize a split's pages at `frames`, in the window's points from its top
+/// left corner, or takes them away without frames.
+pub fn split_handles(window: u32, stacked: bool, frames: &[cef::Rect]) {
+    let values: Vec<f64> = frames
+        .iter()
+        .flat_map(|f| [f.x, f.y, f.width, f.height].map(f64::from))
+        .collect();
+    // SAFETY: four values per frame, which the call reads before returning.
+    unsafe { arbalete_ui_split(window, stacked, values.as_ptr(), frames.len()) };
 }
 
 /// Makes Arbalete the default browser, once the user confirms.

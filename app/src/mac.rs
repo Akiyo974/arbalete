@@ -316,12 +316,41 @@ define_class!(
         // Like Arc, Set as Default Browser is checked and disabled once Arbalete is the default.
         #[unsafe(method(validateMenuItem:))]
         fn validate_menu_item(&self, item: &NSMenuItem) -> Bool {
-            if item.action() != Some(sel!(arbaleteMakeDefaultBrowser:)) {
+            let action = item.action();
+            // The split items act on the split shown, like Arc's.
+            if action == Some(sel!(arbaleteFlipPanes:)) {
+                let stacked = crate::shell::split_shown();
+                item.setTitle(if stacked == Some(true) {
+                    ns_string!("Convert to Horizontal Split View")
+                } else {
+                    ns_string!("Convert to Vertical Split View")
+                });
+                return Bool::new(stacked.is_some());
+            }
+            if action == Some(sel!(arbaleteClosePane:)) {
+                return Bool::new(crate::shell::split_shown().is_some());
+            }
+            if action != Some(sel!(arbaleteMakeDefaultBrowser:)) {
                 return Bool::YES;
             }
             let default = crate::native::is_default_browser();
             item.setState(if default { NSControlStateValueOn } else { NSControlStateValueOff });
             Bool::new(!default)
+        }
+
+        #[unsafe(method(arbaleteAddPane:))]
+        fn add_pane(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::AddPane);
+        }
+
+        #[unsafe(method(arbaleteClosePane:))]
+        fn close_pane(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::ClosePane);
+        }
+
+        #[unsafe(method(arbaleteFlipPanes:))]
+        fn flip_panes(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::FlipPanes);
         }
 
         #[unsafe(method(arbaleteMakeDefaultBrowser:))]
@@ -624,6 +653,25 @@ pub fn setup_menu() {
             vec![
                 sidebar_item(mtm),
                 toolbar_item(mtm),
+                NSMenuItem::separatorItem(mtm),
+                control_shift_item(
+                    mtm,
+                    ns_string!("Add Split View"),
+                    sel!(arbaleteAddPane:),
+                    ns_string!("="),
+                ),
+                control_shift_item(
+                    mtm,
+                    ns_string!("Close Split View Pane"),
+                    sel!(arbaleteClosePane:),
+                    ns_string!("-"),
+                ),
+                item(
+                    mtm,
+                    ns_string!("Convert to Vertical Split View"),
+                    sel!(arbaleteFlipPanes:),
+                    ns_string!(""),
+                ),
                 NSMenuItem::separatorItem(mtm),
                 item(
                     mtm,
@@ -971,6 +1019,18 @@ fn hidden_item(
 }
 
 /// A menu item sending `action` with ⌘⌥ and `key`.
+/// A menu item whose shortcut is ⌃⇧ and `key`, like Arc's Split View items.
+fn control_shift_item(
+    mtm: MainThreadMarker,
+    title: &NSString,
+    action: Sel,
+    key: &NSString,
+) -> Retained<NSMenuItem> {
+    let item = item(mtm, title, action, key);
+    item.setKeyEquivalentModifierMask(NSEventModifierFlags::Control | NSEventModifierFlags::Shift);
+    item
+}
+
 fn option_item(
     mtm: MainThreadMarker,
     title: &NSString,

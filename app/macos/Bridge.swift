@@ -222,6 +222,7 @@ final class NativeWindow {
     let siteControls: SiteControls
     let themePicker: ThemePickerModel
     let importModel: ImportModel
+    let splitHandles: SplitHandles
     /// The panels above the page, by the name of the web view they stand for, like "overlay".
     var surfaces: [String: Surface] = [:]
 
@@ -271,12 +272,14 @@ final class NativeWindow {
         let importSurface = Surface(in: window, radius: 16) { ImportView(model: importer) }
         importSurface.takesKeyboard = true
         surfaces["import"] = importSurface
+        splitHandles = SplitHandles(in: window, model: app)
     }
 
     /// Closes its panels, the window they belong to closing.
     func close() {
         sidebar.close()
         surfaces.values.forEach { $0.close() }
+        splitHandles.close()
     }
 
     /// Gives one of its views an event, by the name of the web view it stands for.

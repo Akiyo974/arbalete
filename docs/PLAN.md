@@ -410,10 +410,16 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
   destination takes over.
 
 ### Phase 9 — Polish
-- Split View, Peek. The sidebar already makes split rows, a tab dropped on the middle of another
-  (with Option, a copy of it), and separates them again from a button Option shows on each half:
-  until Split View shows both tabs side by side, a split row opens its first tab, and a click on
-  either half shows that tab alone.
+- Split View, like Arc's. Done: a split row holds two to four tabs, made by dropping a tab on the
+  middle of another in the sidebar (with Option, a copy of it) or by View › Add Split View (⌃⇧=),
+  which opens the Command Bar for the page to add. Selecting one of its tabs shows every page of the
+  split, side by side or one above the other (View › Convert to Vertical/Horizontal Split View),
+  each rounded, 10 points apart, the selected one focused; a click in another page selects its tab.
+  The handles between the pages resize them (each keeps 220 points, snapping to halves within 14),
+  and a double click shares the room evenly. View › Close Split View Pane (⌃⇧−) closes the selected
+  tab; a split left with one tab becomes that tab. To do: dropping a tab from the sidebar on the
+  page, and keys for the next or previous page.
+- Peek.
 - Several tabs selected at once, like Arc: ⌘-click adds or removes a tab, ⇧-click selects a range, all
   highlighted. Dragging one of them moves the whole selection, in its order: into the pinned section, into
   the favorites (as far as they have room), into a folder, or to another Space by holding it over that

@@ -277,6 +277,8 @@ struct Win {
     sidebar_mode: Cell<SidebarMode>,
     /// The Command Bar edits the address over the docked sidebar's url bar.
     over_url_bar: Cell<bool>,
+    /// The Command Bar is open for a page to show beside the selected one, in its split.
+    adding_pane: Cell<bool>,
     /// The tabs selected last, the most recent first, which the tab switcher lists.
     recent: RefCell<Vec<NodeId>>,
     /// The tab switcher's tabs and the picked one's index, while ⌃ is held.
@@ -334,6 +336,7 @@ impl Win {
             extension_popup: RefCell::new(None),
             sidebar_mode: Cell::new(SidebarMode::Shown),
             over_url_bar: Cell::new(false),
+            adding_pane: Cell::new(false),
             recent: RefCell::new(Vec::new()),
             switch: RefCell::new(None),
             colored: Cell::new(false),
@@ -1173,6 +1176,9 @@ fn open_overlay(visible: bool, tab: Option<(String, Option<String>)>) {
             &format!(r#"new CustomEvent("arbalete:show", {{ detail: {detail} }})"#),
         );
     }
+    if !visible {
+        win().adding_pane.set(false);
+    }
     overlay.set_visible(visible.into());
     #[cfg(target_os = "macos")]
     round_overlay();
@@ -1598,6 +1604,7 @@ fn place_card() {
         return;
     }
     card.set_bounds(Some(&win().sidebar_mode.get().layout(&size).card));
+    place_split_handles();
     // Once the sidebar sent the window's colors, which first show it.
     if win().colored.get() {
         card.set_visible(1);
@@ -3128,6 +3135,42 @@ fn open_tab(url: &str) {
     show_selected();
 }
 
+/// Opens a tab beside the selected one, in its split, like Arc's Add Split View; or alone when
+/// they cannot share one, like a favorite's or a split already full.
+fn open_in_pane(url: &str) {
+    update_sidebar(|sidebar| {
+        let space = sidebar.displayed().id;
+        let beside = sidebar.displayed().selected;
+        let tab = sidebar.open_tab(space, url).expect("the displayed Space");
+        if let Some(beside) = beside {
+            let _ = sidebar.split(tab, beside);
+        }
+        sidebar.select(space, tab).expect("a new tab");
+    });
+    show_selected();
+}
+
+/// Whether the window shows a split, and then whether one page above the other.
+pub fn split_shown() -> Option<bool> {
+    win().split.borrow().1.as_ref().map(|layout| layout.stacked)
+}
+
+/// Lays the shown split's pages out one above the other, or side by side again.
+fn flip_panes() {
+    let Some(stacked) = split_shown() else { return };
+    let Some(tab) = win().split.borrow().0.first().copied() else {
+        return;
+    };
+    let flipped = STATE.with_borrow_mut(|state| {
+        let split = state.sidebar.row_of(tab);
+        state.sidebar.set_split_stacked(split, !stacked)
+    });
+    if flipped.is_ok() {
+        save_session();
+        show_selected();
+    }
+}
+
 /// Shows a tab, with its Space; a favorite is shown in the displayed Space.
 fn select_tab(id: NodeId) {
     let selected = update_sidebar(|sidebar| {
@@ -3925,31 +3968,18 @@ fn show_split(focused: NodeId, tabs: &[NodeId], views: &[BrowserView], layout: S
         let Some(split) = win().split_view.with_borrow(Clone::clone) else {
             return;
         };
-        let boxed = split
-            .set_to_box_layout(Some(&BoxLayoutSettings {
-                horizontal: (!layout.stacked).into(),
-                between_child_spacing: SPLIT_GAP,
-                cross_axis_alignment: AxisAlignment::STRETCH,
-                ..Default::default()
-            }))
-            .expect("box layout");
         for (&tab, view) in tabs.iter().zip(views) {
             take_page(tab);
             move_page(view, &split);
             wake_page(tab, view);
         }
-        for (view, factor) in views.iter().zip(&layout.factors) {
-            // Whole thousandths: the layout shares the room by integer weights.
-            let weight = (factor * 1000.0).round() as i32;
-            boxed.set_flex_for_view(Some(&mut View::from(view)), weight.max(1));
-        }
         split.set_visible(1);
         // The room between the cards shows the window, like the margins around the card.
         if let Some(panel) = card_panel() {
             panel.set_background_color(0x0000_0001);
-            panel.layout();
         }
         *win().split.borrow_mut() = (tabs.to_vec(), Some(layout));
+        lay_out_split();
         #[cfg(target_os = "macos")]
         for view in views {
             if let Some(host) = view.browser().and_then(|browser| browser.host()) {
@@ -3965,6 +3995,163 @@ fn show_split(focused: NodeId, tabs: &[NodeId], views: &[BrowserView], layout: S
     {
         view.request_focus();
         shown_on_card(view);
+    }
+}
+
+/// Shares the split's room between its pages by their parts, then puts the handles between them.
+fn lay_out_split() {
+    let (tabs, Some(layout)) = win().split.borrow().clone() else {
+        return;
+    };
+    let Some(split) = win().split_view.with_borrow(Clone::clone) else {
+        return;
+    };
+    let boxed = split
+        .set_to_box_layout(Some(&BoxLayoutSettings {
+            horizontal: (!layout.stacked).into(),
+            between_child_spacing: SPLIT_GAP,
+            cross_axis_alignment: AxisAlignment::STRETCH,
+            ..Default::default()
+        }))
+        .expect("box layout");
+    for (tab, factor) in tabs.iter().zip(&layout.factors) {
+        if let Some(view) = PAGES.with_borrow(|pages| Some(pages.get(tab)?.view.clone())) {
+            // Whole thousandths: the layout shares the room by integer weights.
+            let weight = (factor * 1000.0).round() as i32;
+            boxed.set_flex_for_view(Some(&mut View::from(&view)), weight.max(1));
+        }
+    }
+    if let Some(panel) = card_panel() {
+        panel.layout();
+    }
+    split.layout();
+    place_split_handles();
+}
+
+/// The split's pages, in the window's points, along its axis: where each starts and its length.
+fn split_panes() -> Vec<(f64, f64)> {
+    let (tabs, Some(layout)) = win().split.borrow().clone() else {
+        return Vec::new();
+    };
+    let card = win()
+        .card
+        .with_borrow(|card| card.as_ref().map(OverlayController::bounds));
+    let split = win()
+        .split_view
+        .with_borrow(|split| split.as_ref().map(|s| s.bounds()));
+    let (Some(card), Some(split)) = (card, split) else {
+        return Vec::new();
+    };
+    tabs.iter()
+        .filter_map(|tab| PAGES.with_borrow(|pages| Some(pages.get(tab)?.view.bounds())))
+        .map(|page| {
+            if layout.stacked {
+                (f64::from(card.y + split.y + page.y), f64::from(page.height))
+            } else {
+                (f64::from(card.x + split.x + page.x), f64::from(page.width))
+            }
+        })
+        .collect()
+}
+
+/// Puts the handles that resize a split's pages in the room between them, or takes them away
+/// without a split shown.
+fn place_split_handles() {
+    #[cfg(target_os = "macos")]
+    {
+        let stacked = win().split.borrow().1.as_ref().is_some_and(|l| l.stacked);
+        let card = win()
+            .card
+            .with_borrow(|card| card.as_ref().map(OverlayController::bounds));
+        let split = win()
+            .split_view
+            .with_borrow(|split| split.as_ref().map(|s| s.bounds()));
+        let handles: Vec<Rect> = match (card, split) {
+            (Some(card), Some(split)) if !fills_window() => {
+                let panes = split_panes();
+                panes
+                    .iter()
+                    .take(panes.len().saturating_sub(1))
+                    .map(|&(start, length)| {
+                        let at = (start + length) as i32;
+                        if stacked {
+                            Rect {
+                                x: card.x + split.x,
+                                y: at,
+                                width: split.width,
+                                height: SPLIT_GAP,
+                            }
+                        } else {
+                            Rect {
+                                x: at,
+                                y: card.y + split.y,
+                                width: SPLIT_GAP,
+                                height: split.height,
+                            }
+                        }
+                    })
+                    .collect()
+            }
+            _ => Vec::new(),
+        };
+        crate::native::split_handles(win().id, stacked, &handles);
+    }
+}
+
+/// The least a split's page keeps along its axis, as Arc's.
+const MIN_PANE: f64 = 220.0;
+/// How close to equal parts a handle moved snaps to them.
+const PANE_SNAP: f64 = 14.0;
+
+/// Moves the handle after the split's page at `index` to `point`, along the split, in the
+/// window's points: the pages on either side share their room by it, each keeping at least
+/// `MIN_PANE`, and snap to equal parts near them, like Arc's.
+fn resize_panes(index: usize, point: f64) {
+    let panes = split_panes();
+    if let (Some(&lead), Some(&(_, trail))) = (panes.get(index), panes.get(index + 1)) {
+        share_panes(index, lead_part(lead, trail, point));
+    }
+}
+
+/// The part of the room the page at `lead` (where it starts, its length) keeps of what it shares
+/// with the next one, `trail` long, once the handle between them moves to `point`.
+fn lead_part((start, lead): (f64, f64), trail: f64, point: f64) -> f64 {
+    let room = lead + trail;
+    let mut lead = point - f64::from(SPLIT_GAP) / 2.0 - start;
+    if room >= 2.0 * MIN_PANE {
+        lead = lead.clamp(MIN_PANE, room - MIN_PANE);
+    }
+    if (lead - room / 2.0).abs() < PANE_SNAP {
+        lead = room / 2.0;
+    }
+    lead.clamp(1.0, room - 1.0) / room
+}
+
+/// Gives the pages on either side of the handle after the page at `index` equal parts.
+fn even_panes(index: usize) {
+    share_panes(index, 0.5);
+}
+
+/// Gives the page at `index` `part` of the room it shares with the next one, which takes the
+/// rest, and keeps it.
+fn share_panes(index: usize, part: f64) {
+    let (tabs, Some(mut layout)) = win().split.borrow().clone() else {
+        return;
+    };
+    if index + 1 >= layout.factors.len() {
+        return;
+    }
+    let pair = layout.factors[index] + layout.factors[index + 1];
+    layout.factors[index] = pair * part;
+    layout.factors[index + 1] = pair - layout.factors[index];
+    let saved = STATE.with_borrow_mut(|state| {
+        let split = state.sidebar.row_of(tabs[0]);
+        state.sidebar.set_split_factors(split, &layout.factors)
+    });
+    if saved.is_ok() {
+        win().split.borrow_mut().1 = Some(layout);
+        lay_out_split();
+        save_session();
     }
 }
 
@@ -4093,6 +4280,7 @@ fn hide_content() {
         if let Some(view) = win().split_view.with_borrow(Clone::clone) {
             view.set_visible(0);
         }
+        place_split_handles();
         if let (Some(panel), Some((card_color, _, _))) =
             (card_panel(), win().window_colors.with_borrow(Clone::clone))
         {
@@ -4394,9 +4582,23 @@ fn run_command(command: Command) {
         (Command::ShowLibrary, _) => show_library(),
         (Command::WideLibrary(wide), _) => widen_library(wide),
         (Command::Open(url), _) => {
+            let pane = win().adding_pane.get();
             show_overlay(false);
-            open_tab(&url);
+            if pane {
+                open_in_pane(&url);
+            } else {
+                open_tab(&url);
+            }
         }
+        (Command::AddPane, _) => {
+            if selected().is_some() {
+                show_overlay(true);
+                win().adding_pane.set(true);
+            }
+        }
+        (Command::ClosePane, _) if split_shown().is_some() => close_tab(None),
+        (Command::ClosePane, _) => {}
+        (Command::FlipPanes, _) => flip_panes(),
         (Command::Close(None), _) if settings_focused() => close_settings(),
         (Command::Close(None), _) if focused_little().is_some() => {
             if let Some(window) = focused_little().and_then(little_window) {
@@ -4404,6 +4606,8 @@ fn run_command(command: Command) {
             }
         }
         (Command::Close(tab), _) => close_tab(tab),
+        (Command::ResizePane(index, point), _) => resize_panes(index, point),
+        (Command::EvenPanes(index), _) => even_panes(index),
         (Command::Reopen(rank), _) => reopen_tab(rank),
         (Command::Pin(tab), _) => toggle_pin(tab),
         (Command::NewFolder(parent), _) => new_folder(parent),
@@ -6144,11 +6348,22 @@ fn favicon_file(path: &str) -> Option<PathBuf> {
 mod tests {
     use super::{
         CARD_MARGIN, DraggableRegion, EDGE_WIDTH, FLOAT_INSET, LIBRARY_WIDTH, MemoryPressure,
-        RECENT_TABS, Rect, SIDEBAR_WIDTH, SidebarMode, Size, UiState, favicon_file, lerp_rect,
-        margin_regions, origin, remember, site, slide_duration, step, suspend_delays, toggled,
-        ui_path, win,
+        RECENT_TABS, Rect, SIDEBAR_WIDTH, SidebarMode, Size, UiState, favicon_file, lead_part,
+        lerp_rect, margin_regions, origin, remember, site, slide_duration, step, suspend_delays,
+        toggled, ui_path, win,
     };
     use arbalete_core::sidebar::NodeId;
+
+    #[test]
+    fn a_split_handle_keeps_the_pages_wide_enough_and_snaps_to_halves() {
+        // Two pages of 500 points from 100, the handle 10 points wide between them.
+        let part = |point| lead_part((100.0, 500.0), 500.0, point);
+        assert!((part(405.0) - 0.3).abs() < 1e-9);
+        assert_eq!(part(150.0), 0.22);
+        assert_eq!(part(1000.0), 0.78);
+        assert_eq!(part(612.0), 0.5);
+        assert!((part(625.0) - 0.52).abs() < 1e-9);
+    }
 
     #[test]
     fn tells_the_origin_of_a_web_page() {
