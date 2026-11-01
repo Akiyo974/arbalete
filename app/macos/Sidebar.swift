@@ -227,7 +227,9 @@ struct SpaceSections: View {
     @ObservedObject var model: AppModel
     let page: SpacePage
     let space: Space
+    /// The tab list's size, whose room below the rows takes drops.
     private let _width = State<CGFloat>(initialValue: 0)
+    private let _height = State<CGFloat>(initialValue: 0)
 
     var body: some View {
         VStack(spacing: 0) {
@@ -255,19 +257,26 @@ struct SpaceSections: View {
                             model: model, items: page.today, parent: page.roots.today,
                             selected: page.selected)
                     }
+                    // Like Arc's, the room below the rows moves the window and, dropped on, puts
+                    // what a drag carries after today's last tab.
+                    WindowDragArea()
+                        .frame(maxWidth: .infinity, minHeight: 8, maxHeight: .infinity)
+                        .onDrop(
+                            of: [.plainText],
+                            delegate: TailDrop(model: model, page: page, width: _width.wrappedValue))
                 }
-                .padding(.bottom, 8)
+                .frame(minHeight: _height.wrappedValue, alignment: .top)
                 // Rows moving or dropped slide to their places, as quickly as Arc's.
                 .animation(.easeInOut(duration: 0.12), value: (page.pinned + page.today).map(\.id))
             }
             .scrollIndicators(.never)
             // Like Arc's, the tab list's empty room moves the window; a double-click there does
-            // not zoom it. Dropped on, it puts what a drag carries after today's last tab.
+            // not zoom it.
             .background(WindowDragArea())
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { _width.wrappedValue = $0 }
-            .onDrop(
-                of: [.plainText],
-                delegate: TailDrop(model: model, page: page, width: _width.wrappedValue))
+            .onGeometryChange(for: CGSize.self) { $0.size } action: {
+                _width.wrappedValue = $0.width
+                _height.wrappedValue = $0.height
+            }
         }
     }
 }
