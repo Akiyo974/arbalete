@@ -4,9 +4,11 @@
 
 import AppKit
 
-/// A handle's look: a short pill, shown while the pointer is over it.
+/// A handle's look, like Arc's: a short thin pill, shown while the pointer is over it or drags it.
 private let pillLength: CGFloat = 24
 private let pillWidth: CGFloat = 2
+/// How far past the room between the pages a handle takes the pointer, over their edges.
+private let reach: CGFloat = 6
 
 /// Moves the room between two pages of a split, which a double click shares evenly.
 final class SplitHandleView: NSView {
@@ -18,8 +20,8 @@ final class SplitHandleView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        pill.backgroundColor = NSColor.labelColor.withAlphaComponent(0.35).cgColor
-        pill.cornerRadius = 1
+        pill.backgroundColor = NSColor.black.withAlphaComponent(0.4).cgColor
+        pill.cornerRadius = pillWidth / 2
         pill.isHidden = true
         layer?.addSublayer(pill)
     }
@@ -39,18 +41,37 @@ final class SplitHandleView: NSView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
+        // Over the whole handle, whatever size it takes since.
         addTrackingArea(
             NSTrackingArea(
-                rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .cursorUpdate],
+                rect: .zero,
+                options: [
+                    .mouseEnteredAndExited, .mouseMoved, .cursorUpdate, .activeAlways,
+                    .inVisibleRect,
+                ],
                 owner: self))
     }
 
-    override func mouseEntered(with event: NSEvent) { pill.isHidden = false }
-    override func mouseExited(with event: NSEvent) { pill.isHidden = true }
+    private var dragging = false
+    private var cursor: NSCursor { stacked ? .resizeUpDown : .resizeLeftRight }
 
-    override func cursorUpdate(with event: NSEvent) {
-        (stacked ? NSCursor.resizeUpDown : NSCursor.resizeLeftRight).set()
+    override func mouseEntered(with event: NSEvent) {
+        pill.isHidden = false
+        cursor.set()
     }
+
+    override func mouseMoved(with event: NSEvent) { cursor.set() }
+    override func mouseExited(with event: NSEvent) { pill.isHidden = dragging }
+
+    override func mouseUp(with event: NSEvent) {
+        dragging = false
+        let point = convert(event.locationInWindow, from: nil)
+        pill.isHidden = !bounds.contains(point)
+    }
+
+    override func cursorUpdate(with event: NSEvent) { cursor.set() }
+
+    override func resetCursorRects() { addCursorRect(bounds, cursor: cursor) }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
@@ -59,6 +80,7 @@ final class SplitHandleView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        dragging = true
         guard let parent = window?.parent, let content = parent.contentView else { return }
         // In the main window's points from its content's top left corner, like the app's.
         let point = parent.convertPoint(fromScreen: NSEvent.mouseLocation)
@@ -85,10 +107,15 @@ final class SplitHandles {
         while panels.count < frames.count {
             let view = SplitHandleView(frame: .zero)
             view.send = { [weak model] path in model?.run(path) }
-            panels.append(ChildPanel(view: view))
+            let panel = ChildPanel(view: view)
+            // The whole handle takes the pointer: a transparent window lets it through but where
+            // it draws, unless told otherwise.
+            panel.ignoresMouseEvents = false
+            panels.append(panel)
         }
         for (index, panel) in panels.enumerated() {
-            let frame = index < frames.count ? frames[index] : nil
+            let frame = index < frames.count
+                ? frames[index].insetBy(dx: stacked ? 0 : -reach, dy: stacked ? -reach : 0) : nil
             if let view = panel.contentView as? SplitHandleView {
                 view.index = index
                 view.stacked = stacked
