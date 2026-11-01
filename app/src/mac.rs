@@ -1403,10 +1403,11 @@ pub fn shift(view: *mut c_void, x: f64) {
     }
 }
 
-/// Hides what of a card's window, which a view CEF gives is in, lies left of `left`, in its
-/// parent window's points, with the card's rounded corners; or shows it whole without `left`.
-/// The page keeps its size: CEF lays nothing out again.
-pub fn crop_card(view: *mut c_void, left: Option<f64>) {
+/// Puts a card's window, which a view CEF gives is in, at `frame`'s top left corner, in its
+/// parent window's points from its content's top left, and shows only `frame`'s size of it,
+/// with the card's rounded corners (only below with `bottom`); or shows it whole without
+/// `frame`. The page keeps its size, like Arc's while a resize goes on: CEF lays nothing out.
+pub fn frame_card(view: *mut c_void, frame: Option<(f64, f64, f64, f64)>, bottom: bool) {
     // SAFETY: CEF gives the page's NSView, which its window keeps alive.
     let Some(window) = (unsafe { view.cast::<NSView>().as_ref() }).and_then(NSView::window) else {
         return;
@@ -1414,31 +1415,43 @@ pub fn crop_card(view: *mut c_void, left: Option<f64>) {
     let (Some(content), Some(parent)) = (window.contentView(), window.parentWindow()) else {
         return;
     };
+    let (Some(top), Some(class)) = (parent.contentView(), AnyClass::get(c"CALayer")) else {
+        return;
+    };
     content.setWantsLayer(true);
     let layer: Option<Retained<AnyObject>> = unsafe { msg_send![&*content, layer] };
-    let (Some(layer), Some(class)) = (layer, AnyClass::get(c"CALayer")) else {
+    let (Some(layer), Some(transaction)) = (layer, AnyClass::get(c"CATransaction")) else {
         return;
     };
-    let hidden = left.map_or(0.0, |left| {
-        left - (window.frame().origin.x - parent.frame().origin.x)
+    let mask: Option<Retained<AnyObject>> = frame.map(|(x, y, width, height)| {
+        let size = window.frame().size;
+        let origin = parent.frame().origin;
+        window.setFrameOrigin(objc2_foundation::NSPoint::new(
+            origin.x + x,
+            origin.y + top.frame().size.height - y - size.height,
+        ));
+        // Kept from its top left corner, whichever way its view counts.
+        let bounds = content.bounds();
+        let below = if content.isFlipped() {
+            0.0
+        } else {
+            bounds.size.height - height
+        };
+        unsafe {
+            let mask: Retained<AnyObject> = msg_send![class, layer];
+            let frame = NSRect::new(
+                objc2_foundation::NSPoint::new(0.0, below),
+                NSSize::new(width.max(0.0), height.max(0.0)),
+            );
+            let _: () = msg_send![&*mask, setFrame: frame];
+            let _: () =
+                msg_send![&*mask, setCornerRadius: if bottom { PANE_RADIUS } else { CARD_RADIUS }];
+            let black = NSColor::blackColor();
+            let black: *const CGColor = msg_send![&*black, CGColor];
+            let _: () = msg_send![&*mask, setBackgroundColor: black];
+            mask
+        }
     });
-    let bounds = content.bounds();
-    let mask: Option<Retained<AnyObject>> = (hidden > 0.0).then(|| unsafe {
-        let mask: Retained<AnyObject> = msg_send![class, layer];
-        let frame = NSRect::new(
-            objc2_foundation::NSPoint::new(hidden, 0.0),
-            NSSize::new((bounds.size.width - hidden).max(0.0), bounds.size.height),
-        );
-        let _: () = msg_send![&*mask, setFrame: frame];
-        let _: () = msg_send![&*mask, setCornerRadius: CARD_RADIUS];
-        let black = NSColor::blackColor();
-        let black: *const CGColor = msg_send![&*black, CGColor];
-        let _: () = msg_send![&*mask, setBackgroundColor: black];
-        mask
-    });
-    let Some(transaction) = AnyClass::get(c"CATransaction") else {
-        return;
-    };
     unsafe {
         let _: () = msg_send![transaction, begin];
         let _: () = msg_send![transaction, setDisableActions: Bool::YES];
