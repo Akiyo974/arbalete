@@ -328,7 +328,12 @@ define_class!(
                 });
                 return Bool::new(stacked.is_some());
             }
-            if action == Some(sel!(arbaleteClosePane:)) {
+            let panes = [
+                sel!(arbaleteClosePane:),
+                sel!(arbaleteNextPane:),
+                sel!(arbaletePreviousPane:),
+            ];
+            if action.is_some_and(|action| panes.contains(&action)) {
                 return Bool::new(crate::shell::split_shown().is_some());
             }
             if action != Some(sel!(arbaleteMakeDefaultBrowser:)) {
@@ -347,6 +352,16 @@ define_class!(
         #[unsafe(method(arbaleteClosePane:))]
         fn close_pane(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::ClosePane);
+        }
+
+        #[unsafe(method(arbaleteNextPane:))]
+        fn next_pane(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::SwitchPane(true));
+        }
+
+        #[unsafe(method(arbaletePreviousPane:))]
+        fn previous_pane(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::SwitchPane(false));
         }
 
         #[unsafe(method(arbaleteFlipPanes:))]
@@ -666,6 +681,18 @@ pub fn setup_menu() {
                     ns_string!("Close Split View Pane"),
                     sel!(arbaleteClosePane:),
                     ns_string!("-"),
+                ),
+                control_shift_item(
+                    mtm,
+                    ns_string!("Next Split View Pane"),
+                    sel!(arbaleteNextPane:),
+                    ns_string!("]"),
+                ),
+                control_shift_item(
+                    mtm,
+                    ns_string!("Previous Split View Pane"),
+                    sel!(arbaletePreviousPane:),
+                    ns_string!("["),
                 ),
                 item(
                     mtm,

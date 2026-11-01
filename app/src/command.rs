@@ -304,6 +304,9 @@ pub enum Command {
     AddPane(Option<NodeId>),
     /// Closes the selected tab of a split: `pane/close`.
     ClosePane,
+    /// Selects the next page of the split shown, or the previous one, wrapping around, like Arc's:
+    /// `pane/next`, `pane/previous`.
+    SwitchPane(bool),
     /// Lays the pages of the split shown, or a given one, out one above the other, or side by
     /// side again: `pane/flip`, `pane/flip/<split id>`.
     FlipPanes(Option<NodeId>),
@@ -834,6 +837,8 @@ impl Command {
                     "resized" => return Some(Self::Resized),
                     "pane/add" => return Some(Self::AddPane(None)),
                     "pane/close" => return Some(Self::ClosePane),
+                    "pane/next" => return Some(Self::SwitchPane(true)),
+                    "pane/previous" => return Some(Self::SwitchPane(false)),
                     "pane/flip" => return Some(Self::FlipPanes(None)),
                     _ => {}
                 }
@@ -1298,6 +1303,14 @@ mod tests {
             Some(Command::CloseSplit(_))
         ));
         assert_eq!(Command::parse("pane/close-split/x"), None);
+        assert!(matches!(
+            Command::parse("pane/next"),
+            Some(Command::SwitchPane(true))
+        ));
+        assert!(matches!(
+            Command::parse("pane/previous"),
+            Some(Command::SwitchPane(false))
+        ));
     }
 
     #[test]

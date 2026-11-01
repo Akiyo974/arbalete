@@ -4304,6 +4304,16 @@ fn send_panes() {
     }
 }
 
+/// Selects the page after the one focused in the split shown, or before it, wrapping around.
+fn switch_pane(next: bool) {
+    let tabs = win().split.borrow().0.clone();
+    let Some(index) = tabs.iter().position(|&tab| Some(tab) == win().shown.get()) else {
+        return;
+    };
+    let step = if next { 1 } else { tabs.len() - 1 };
+    select_tab(tabs[(index + step) % tabs.len()]);
+}
+
 /// Tells each window showing `tab` in a split how its page now stands.
 fn pane_changed(tab: NodeId) {
     in_each_window(|| {
@@ -4872,6 +4882,7 @@ fn run_command(command: Command) {
         }
         (Command::ClosePane, _) if split_shown().is_some() => close_tab(None),
         (Command::ClosePane, _) => {}
+        (Command::SwitchPane(next), _) => switch_pane(next),
         (Command::FlipPanes(split), _) => flip_panes(split),
         (Command::SeparateAll(split), _) => {
             if update_sidebar(|sidebar| sidebar.separate_all(split)).is_ok() {
