@@ -2402,8 +2402,20 @@ fn send_settings() {
         .iter()
         .map(|after| json!({ "id": after, "name": after.name() }))
         .collect();
-    let detail =
-        json!({ "settings": settings, "engines": engines, "delays": delays, "profiles": profiles });
+    // URL Routing's destinations: every Space, named with its profile.
+    let (spaces, routing) = STATE.with_borrow(|state| {
+        let sidebar = &state.sidebar;
+        let spaces: Vec<_> = sidebar
+            .spaces()
+            .iter()
+            .map(|space| {
+                let profile = sidebar.profiles().iter().find(|p| p.id == space.profile);
+                json!({ "id": space.id, "title": space.title, "emoji": space.emoji, "profile": profile.map(|p| &p.name) })
+            })
+            .collect();
+        (spaces, json!(sidebar.url_routing()))
+    });
+    let detail = json!({ "settings": settings, "engines": engines, "delays": delays, "profiles": profiles, "spaces": spaces, "urlRouting": routing });
     let event = format!(r#"new CustomEvent("arbalete:settings", {{ detail: {detail} }})"#);
     SETTINGS_VIEW.with(|view| dispatch(view, &event));
 }
@@ -4369,6 +4381,10 @@ fn run_command(command: Command) {
         }
         (Command::SetSpaceEmoji(id, emoji), _) => {
             let _ = update_sidebar(|sidebar| sidebar.set_space_emoji(id, &emoji));
+        }
+        (Command::SetUrlRouting(routing), _) => {
+            update_sidebar(|sidebar| sidebar.set_url_routing(routing));
+            send_settings();
         }
         (Command::SetSpaceTheme(id, theme), _) => {
             let _ = update_sidebar(|sidebar| sidebar.set_space_theme(id, theme));

@@ -3,6 +3,7 @@
 use arbalete_core::import::Choice;
 use arbalete_core::search::SearchEngine;
 use arbalete_core::sidebar::{ArchiveAfter, Color, NodeId, ProfileId, SpaceId, Theme};
+use arbalete_core::url_routing::UrlRouting;
 use serde::Deserialize;
 
 /// What a site keeps that its site controls clear (Command::ClearSiteData).
@@ -340,6 +341,8 @@ pub enum Command {
     SetSpaceEmoji(SpaceId, String),
     /// Changes a Space's theme: `space/theme/<space id>/<percent-encoded JSON theme>`.
     SetSpaceTheme(SpaceId, Theme),
+    /// Replaces the URL Routing rules and default: `routing/<percent-encoded JSON>`.
+    SetUrlRouting(UrlRouting),
     /// Hides a Space's tabs in the sidebar, or shows them again: `space/toggle/<space id>`.
     ToggleSpace(SpaceId),
     /// Deletes a Space with its tabs, once confirmed: `space/delete/<space id>`.
@@ -729,6 +732,10 @@ impl Command {
                     let id = serde_json::from_str(id).ok()?;
                     let theme = serde_json::from_str(&percent_decode(theme)?).ok()?;
                     return Some(Self::SetSpaceTheme(id, theme));
+                }
+                if let Some(routing) = path.strip_prefix("routing/") {
+                    let routing = serde_json::from_str(&percent_decode(routing)?).ok()?;
+                    return Some(Self::SetUrlRouting(routing));
                 }
                 if let Some(id) = path.strip_prefix("favorites/hide-hint/") {
                     return serde_json::from_str(id).ok().map(Self::HideFavoritesHint);
@@ -1328,6 +1335,22 @@ mod tests {
         assert_eq!(
             (theme.colors, theme.intensity),
             (vec!["#6daee9".to_string()], 0.8)
+        );
+        let routing = r#"{"routes":[{"matching":"isEqualTo","text":"a.test","destination":{"space":4}}],"default":"little"}"#;
+        let path = format!(
+            "routing/{}",
+            routing
+                .replace('{', "%7B")
+                .replace('}', "%7D")
+                .replace('"', "%22")
+        );
+        let Some(Command::SetUrlRouting(routing)) = Command::parse(&path) else {
+            panic!("not a routing")
+        };
+        assert_eq!(routing.routes[0].text, "a.test");
+        assert_eq!(
+            routing.default,
+            arbalete_core::url_routing::Destination::Little
         );
         let Some(Command::ToggleSpace(id)) = Command::parse("space/toggle/4") else {
             panic!("not a toggle")

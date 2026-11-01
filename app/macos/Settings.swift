@@ -1,6 +1,6 @@
-// The settings window (ui/src/Settings.tsx), which the app opens from Arbalete › Settings…
-// (show_settings in app/src/shell.rs): the app's own settings, each profile's search engine and
-// archiving, and every shortcut. Escape closes it, like its close button.
+// The settings window, which the app opens from Arbalete › Settings… (show_settings in
+// app/src/shell.rs): the app's own settings, each profile's search engine and archiving, where
+// links from other apps open, and every shortcut. Escape closes it, like its close button.
 
 import AppKit
 import SwiftUI
@@ -24,10 +24,60 @@ struct SettingsDetail: Decodable {
         var searchSuggestions: Bool
         var archiveAfter: String
     }
+    struct SpaceChoice: Decodable, Identifiable {
+        var id: Int
+        var title: String
+        var emoji: String?
+        var profile: String?
+    }
     var settings: General
     var engines: [Choice]
     var delays: [Choice]
     var profiles: [ProfileSettings]
+    var spaces: [SpaceChoice]
+    var urlRouting: UrlRouting
+}
+
+/// Where the links other apps open go (crates/arbalete-core/src/url_routing.rs).
+struct UrlRouting: Codable {
+    struct Route: Codable {
+        var matching: String
+        var text: String
+        var destination: Destination
+    }
+    var routes: [Route]
+    var `default`: Destination
+}
+
+/// The Space shown last, a Little Arbalete window or a given Space.
+enum Destination: Codable, Hashable {
+    case mostRecentSpace
+    case little
+    case space(Int)
+
+    private enum Key: String, CodingKey { case space }
+
+    init(from decoder: Decoder) throws {
+        if let name = try? decoder.singleValueContainer().decode(String.self) {
+            self = name == "little" ? .little : .mostRecentSpace
+        } else {
+            self = .space(try decoder.container(keyedBy: Key.self).decode(Int.self, forKey: .space))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        switch self {
+        case .mostRecentSpace:
+            var container = encoder.singleValueContainer()
+            try container.encode("mostRecentSpace")
+        case .little:
+            var container = encoder.singleValueContainer()
+            try container.encode("little")
+        case .space(let id):
+            var container = encoder.container(keyedBy: Key.self)
+            try container.encode(id, forKey: .space)
+        }
+    }
 }
 
 /// The palette of profiles and Spaces (Color in crates/arbalete-core/src/sidebar.rs).
@@ -128,6 +178,7 @@ struct SettingsView: View {
             General(settings: settings).tabItem { Text("General") }
             ProfilesSettings(settings: settings)
                 .tabItem { Text("Profiles") }
+            LinksSettings(settings: settings).tabItem { Text("Links") }
             ShortcutsList().tabItem { Text("Shortcuts") }
         }
         .padding(.top, 28)
@@ -180,6 +231,136 @@ private struct General: View {
 
     private func binding(_ value: Bool, _ key: String) -> Binding<Bool> {
         Binding(get: { value }, set: { settings.app.run("settings/\(key)/\($0)") })
+    }
+}
+
+/// URL Routing, like Arc's: each route sends the links whose url contains a text, or is it, to a
+/// Space, the Space shown last or a Little Arbalete window; the default takes the others.
+private struct LinksSettings: View {
+    @ObservedObject var settings: SettingsModel
+
+    var body: some View {
+        if let detail = settings.detail {
+            let routing = detail.urlRouting
+            Form {
+                Section {
+                    ForEach(routing.routes.indices, id: \.self) { index in
+                        RouteRow(
+                            route: routing.routes[index], spaces: detail.spaces,
+                            change: { route in
+                                var changed = routing
+                                changed.routes[index] = route
+                                save(changed)
+                            },
+                            remove: {
+                                var changed = routing
+                                changed.routes.remove(at: index)
+                                save(changed)
+                            })
+                    }
+                } header: {
+                    HStack {
+                        Text("URL Routing")
+                        Spacer()
+                        Button("New Route") {
+                            var changed = routing
+                            changed.routes.append(
+                                .init(matching: "contains", text: "", destination: .mostRecentSpace))
+                            save(changed)
+                        }
+                    }
+                } footer: {
+                    Text("Choose where links from other apps open.")
+                }
+                Section {
+                    Picker("Default", selection: Binding(
+                        get: { routing.default },
+                        set: { destination in
+                            var changed = routing
+                            changed.default = destination
+                            save(changed)
+                        }
+                    )) {
+                        DestinationChoices(spaces: detail.spaces)
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+    }
+
+    private func save(_ routing: UrlRouting) {
+        guard let json = try? JSONEncoder().encode(routing),
+            let text = String(data: json, encoding: .utf8)
+        else { return }
+        settings.app.run("routing/\(percentEncoded(text))")
+    }
+}
+
+/// A route: how and what it matches in a url, and where those links open.
+private struct RouteRow: View {
+    let route: UrlRouting.Route
+    let spaces: [SettingsDetail.SpaceChoice]
+    let change: (UrlRouting.Route) -> Void
+    let remove: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label("URL", systemImage: "link").foregroundStyle(.secondary)
+                Picker("", selection: binding(\.matching)) {
+                    Text("Contains").tag("contains")
+                    Text("Is equal to").tag("isEqualTo")
+                }
+                .labelsHidden()
+                .fixedSize()
+                TextField("Text", text: binding(\.text), prompt: Text("example.com"))
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                Button(action: remove) {
+                    Image(systemName: "minus.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Remove the route")
+                .accessibilityLabel("Remove the route")
+            }
+            HStack {
+                Label("Open in", systemImage: "arrow.turn.down.right").foregroundStyle(.secondary)
+                Picker("", selection: binding(\.destination)) {
+                    DestinationChoices(spaces: spaces)
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            .padding(.leading, 20)
+        }
+    }
+
+    private func binding<Value>(_ field: WritableKeyPath<UrlRouting.Route, Value>) -> Binding<Value> {
+        Binding(
+            get: { route[keyPath: field] },
+            set: { value in
+                var changed = route
+                changed[keyPath: field] = value
+                change(changed)
+            })
+    }
+}
+
+/// Where a link may open: each Space, with its profile, then the Space shown last and a Little
+/// Arbalete window.
+private struct DestinationChoices: View {
+    let spaces: [SettingsDetail.SpaceChoice]
+
+    var body: some View {
+        ForEach(spaces) { space in
+            let name = [space.emoji, space.title].compactMap { $0 }.joined(separator: " ")
+            Text(space.profile.map { "\(name) (\($0))" } ?? name).tag(Destination.space(space.id))
+        }
+        Divider()
+        Text("Most Recent Space").tag(Destination.mostRecentSpace)
+        Text("Little Arbalete").tag(Destination.little)
     }
 }
 
