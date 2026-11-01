@@ -79,6 +79,11 @@ extension AppModel {
 
     /// The pointer moves over a row: a split shows once it rests on a tab's middle.
     func hover(_ target: DropTarget?) {
+        // A row may still hear of a drag once it has ended.
+        guard dragged != nil else {
+            dropTarget = nil
+            return
+        }
         guard case .split(let tab, let leading) = target else {
             splitWait?.cancel()
             splitWait = nil

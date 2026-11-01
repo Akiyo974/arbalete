@@ -22,8 +22,10 @@ final class AppModel: ObservableObject {
     /// The list of profiles shows above the footer.
     @Published var profilesShown = false
     /// The node a drag in the sidebar carries, whether a tab, and where it would land
-    /// (SidebarDrop.swift).
-    @Published var dragged: Int?
+    /// (SidebarDrop.swift); once the drag ends, nowhere shows where it would land.
+    @Published var dragged: Int? {
+        didSet { if dragged == nil { dropTarget = nil } }
+    }
     var draggedTab = false
     /// The tabs a drag carries, several when they were selected at once.
     var draggedTabs: [Int] = []
