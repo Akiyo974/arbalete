@@ -92,6 +92,7 @@ final class PaneBars {
             host.frame = frame(pane.x, pane.y, pane.width, pane.bar)
             raise(host)
         }
+        cutCorners(of: panes.map { frame($0.x, $0.y, $0.width, $0.height) }, in: card)
         // Around the focused page, once at least two show.
         if panes.count > 1, let focused = panes.first(where: \.focused) {
             outline.layer?.borderColor = NSColor(model.themeColor).cgColor
@@ -102,11 +103,52 @@ final class PaneBars {
         }
     }
 
+    /// Cuts the pages' bottom corners, at `frames`, out of what CEF draws under them: it fills
+    /// each page's room with the page's color, which would show past its rounded corners.
+    private func cutCorners(of frames: [NSRect], in card: NSView) {
+        guard
+            let compositor = card.subviews.first(where: {
+                $0.className == "ViewsCompositorSuperview"
+            }), let layer = compositor.layer
+        else { return }
+        guard !frames.isEmpty else {
+            layer.mask = nil
+            return
+        }
+        let mask = layer.mask as? CAShapeLayer ?? CAShapeLayer()
+        mask.fillRule = .evenOdd
+        let path = CGMutablePath()
+        path.addRect(layer.bounds)
+        // The bottom is where y is least, unless the view counts down from its top.
+        let flipped = compositor.isFlipped
+        for frame in frames.map({ compositor.convert($0, from: card) }) {
+            let y = flipped ? frame.maxY : frame.minY
+            let inward: CGFloat = flipped ? -1 : 1
+            for (x, sideways) in [(frame.minX, CGFloat(1)), (frame.maxX, -1)] {
+                // From the corner, along the bottom, round the arc, and back down the side.
+                path.move(to: CGPoint(x: x, y: y))
+                path.addLine(to: CGPoint(x: x + sideways * paneRadius, y: y))
+                path.addArc(
+                    tangent1End: CGPoint(x: x, y: y),
+                    tangent2End: CGPoint(x: x, y: y + inward * paneRadius), radius: paneRadius)
+                path.addLine(to: CGPoint(x: x, y: y + inward * paneRadius))
+                path.closeSubpath()
+            }
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        mask.frame = layer.bounds
+        mask.path = path
+        layer.mask = mask
+        CATransaction.commit()
+    }
+
     private func ours(_ view: NSView) -> Bool {
         view === outline || bars.contains { $0 === view }
     }
 
     func close() {
+        if let card = bars.first?.superview { cutCorners(of: [], in: card) }
         bars.forEach { $0.removeFromSuperview() }
         outline.removeFromSuperview()
     }
