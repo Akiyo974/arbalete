@@ -155,7 +155,10 @@ final class SidebarHost {
         catchers[0].frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - 40))
         catchers[1].frame = NSRect(x: 76, y: bounds.height - 40, width: max(0, bounds.width - 76), height: 40)
         // Past the window's buttons and the sidebar's toggle, before the navigation buttons.
-        drag.frame = NSRect(x: 108, y: bounds.height - 40, width: max(0, bounds.width - 208), height: 40)
+        // The toolbar's room, centered with the window's buttons.
+        let band = windowButtonsCenter * 2
+        drag.frame = NSRect(
+            x: 108, y: bounds.height - band, width: max(0, bounds.width - 208), height: band)
         panel.invalidateShadow()
     }
 }
@@ -206,18 +209,28 @@ final class Tracking: NSView {
     override func mouseExited(with event: NSEvent) { exited() }
 }
 
-/// Moves the main window when dragged, like a title bar: the sidebar is a window of its own,
-/// and AppKit drags a window only by its own events.
+/// Moves the main window when dragged, like a title bar and Arc's WindowDraggableView: the
+/// sidebar is a window of its own, and AppKit drags a window only by its own events.
 final class WindowDrag: NSView {
+    /// Whether a double-click minimizes or zooms the window, as the system's setting asks.
+    var doubleClicks = true
     /// Where the pointer and the window were as the drag began, on the screen.
     private var start: (pointer: NSPoint, origin: NSPoint)?
 
+    /// Like Arc's, it moves an inactive window from the first click.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func mouseDown(with event: NSEvent) {
         guard let main = window?.parent else { return }
-        if event.clickCount == 2 {
-            main.performZoom(nil)
-        } else {
+        guard event.clickCount == 2 else {
             start = (NSEvent.mouseLocation, main.frame.origin)
+            return
+        }
+        guard doubleClicks else { return }
+        switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+        case "Minimize": main.performMiniaturize(nil)
+        case "None": break
+        default: main.performZoom(nil)
         }
     }
 

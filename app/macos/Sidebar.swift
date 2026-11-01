@@ -249,6 +249,9 @@ struct SpaceSections: View {
                 .animation(.easeInOut(duration: 0.12), value: (page.pinned + page.today).map(\.id))
             }
             .scrollIndicators(.never)
+            // Like Arc's, the tab list's empty room moves the window; a double-click there does
+            // not zoom it.
+            .background(WindowDragArea())
         }
     }
 }
@@ -922,6 +925,18 @@ struct RightClick: NSViewRepresentable {
         override func rightMouseDown(with event: NSEvent) { action() }
         override func mouseDown(with event: NSEvent) { action() }
     }
+}
+
+/// The tab list's empty room, which moves the window like Arc's: a double-click there does not
+/// zoom it.
+struct WindowDragArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> WindowDrag {
+        let view = WindowDrag()
+        view.doubleClicks = false
+        return view
+    }
+
+    func updateNSView(_ view: WindowDrag, context: Context) {}
 }
 
 /// Asks for a new Space's name, then creates it.
