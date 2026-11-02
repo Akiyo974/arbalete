@@ -37,10 +37,11 @@ final class Backdrop {
                     }
                 }
             }
+        // Like Arc's, a theme's colors lie over a light blur, whatever the appearance; without
+        // colors, the blur is the system's appearance's.
         watch = model.$state.sink { [effect] _ in
-            let dark = isDark(model.space?.theme)
-            effect.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-            effect.material = dark ? .dark : .light
+            let colored = !(model.space?.theme.colors.isEmpty ?? true)
+            effect.material = colored || !systemDark() ? .light : .dark
         }
     }
 }
@@ -52,12 +53,28 @@ struct BackdropTint: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
+        let theme = model.space?.theme
+        let colored = !(theme?.colors.isEmpty ?? true)
         ZStack(alignment: .topLeading) {
-            Tint(theme: model.space?.theme, active: model.active)
-            // An empty card, like Arc's: the blur shows through it, a little lighter.
-            if let card = model.emptyCard {
+            Tint(theme: theme, active: model.active)
+                // Like Arc's, a theme does not paint the card's room: an empty card shows the
+                // blur alone.
+                .mask {
+                    ZStack(alignment: .topLeading) {
+                        Rectangle()
+                        if colored, let card = model.emptyCard {
+                            RoundedRectangle(cornerRadius: cardRadius)
+                                .frame(width: card.width, height: card.height)
+                                .offset(x: card.minX, y: card.minY)
+                                .blendMode(.destinationOut)
+                        }
+                    }
+                    .compositingGroup()
+                }
+            // Without colors, an empty card is a little lighter than the window, measured.
+            if !colored, let card = model.emptyCard {
                 RoundedRectangle(cornerRadius: cardRadius)
-                    .fill(Color.white.opacity(isDark(model.space?.theme) ? 0.11 : 0.5))
+                    .fill(Color.white.opacity(isDark(theme) ? 0.11 : 0.5))
                     .frame(width: card.width, height: card.height)
                     .offset(x: card.minX, y: card.minY)
             }

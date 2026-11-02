@@ -593,7 +593,7 @@ struct TabRow: View {
         .padding(.leading, 6)
         .padding(.trailing, 6)
         .font(.system(size: 14))
-        .foregroundStyle(Ink.primary)
+        .foregroundStyle(model.titleInk)
         .frame(height: Measure.rowFill)
         .background(
             RoundedRectangle(cornerRadius: Measure.radius)

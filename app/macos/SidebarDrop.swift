@@ -28,9 +28,19 @@ private let edgeSlop: CGFloat = 3
 let edgeBand: CGFloat = 20
 
 extension AppModel {
-    /// The sidebar's theme color, which marks where a drop lands, like Arc's.
-    /// The displayed Space's leading color, or Arc's indigo without one.
-    var themeColor: Color { color(space?.theme.colors.first ?? "#333ce8") }
+    /// The color that marks where a drop lands and the focused pane, like Arc's: the one standing
+    /// out most on the theme (maxContrastColor), or Arc's indigo without colors.
+    var themeColor: Color {
+        guard let theme = space?.theme, let lead = theme.colors.first else { return color("#333ce8") }
+        return color(ThemePalette(lead).strongest(dark: isDark(theme)))
+    }
+
+    /// The tabs' titles, like Arc's: the theme's title color, or the sidebar's ink without colors.
+    var titleInk: Color {
+        guard let theme = space?.theme, let lead = theme.colors.first else { return Ink.primary }
+        let titles = ThemePalette(lead).titles
+        return color(isDark(theme) ? titles.dark : titles.light)
+    }
 
     /// A click on a tab, like Arc's: with ⌘ it joins the tabs selected at once or leaves them,
     /// with ⇧ the tabs from the one shown to it are; otherwise it is selected alone.

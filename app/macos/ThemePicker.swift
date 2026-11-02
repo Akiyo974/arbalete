@@ -7,12 +7,12 @@
 import AppKit
 import SwiftUI
 
-/// The palette's pages, nine colors each.
+/// The palette's pages, nine colors each, Arc's own: its brand colors, pastels, drab colors and grays.
 let palettes: [[String]] = [
-    ["#f3efe8", "#ec9cbd", "#9a72aa", "#e5525a", "#f47c45", "#f3d14b", "#38d27f", "#62b4d8", "#5a5d84"],
-    ["#fdfbf8", "#fbe8f1", "#ead3ea", "#f6cdd2", "#fae0d3", "#fdf8e5", "#e2fbea", "#ddf1fb", "#c6c7e3"],
-    ["#4a3b58", "#623855", "#844545", "#a6704a", "#d0b46b", "#cfcca8", "#84a985", "#365f4b", "#2e4467"],
-    ["#ffffff", "#e6e6e6", "#cccccc", "#b3b3b3", "#808080", "#666666", "#333333", "#1a1a1a", "#000000"],
+    ["#f2eae4", "#f29bbb", "#a6729d", "#f25e6b", "#ff8558", "#f8d558", "#34e895", "#6bbad9", "#666789"],
+    ["#fdfbfa", "#ffe9f4", "#f1d1ec", "#ffcbd2", "#ffe0d3", "#fff9e5", "#defdeb", "#dcf3fc", "#c5c6e5"],
+    ["#4e3a5a", "#693558", "#8f3f42", "#b16d40", "#d7b35d", "#cdcca4", "#7aa982", "#226149", "#26456b"],
+    ["#ffffff", "#e5e5e5", "#cccccc", "#b2b2b2", "#808080", "#666666", "#333333", "#1a1a1a", "#000000"],
 ]
 
 let maxColors = 3
@@ -41,14 +41,19 @@ func toHsl(_ hex: String) -> Hsl {
     return Hsl(h: h * 60, s: s, l: l)
 }
 
-/// A color from its Display P3 hue, saturation and lightness, as the #rrggbb in sRGB nearest to it.
-func fromHsl(_ hsl: Hsl) -> String {
+/// A color's Display P3 red, green and blue, from its hue, saturation and lightness.
+func p3Channels(_ hsl: Hsl) -> [Double] {
     let a = hsl.s * min(hsl.l, 1 - hsl.l)
-    func channel(_ n: Double) -> Double {
+    return [0.0, 8, 4].map { n in
         let k = (n + hsl.h / 30).truncatingRemainder(dividingBy: 12)
         return hsl.l - a * max(-1, min(k - 3, 9 - k, 1))
     }
-    let p3 = NSColor(displayP3Red: channel(0), green: channel(8), blue: channel(4), alpha: 1)
+}
+
+/// A color from its Display P3 hue, saturation and lightness, as the #rrggbb in sRGB nearest to it.
+func fromHsl(_ hsl: Hsl) -> String {
+    let rgb = p3Channels(hsl)
+    let p3 = NSColor(displayP3Red: rgb[0], green: rgb[1], blue: rgb[2], alpha: 1)
     let srgb = p3.usingColorSpace(.sRGB) ?? p3
     let byte = { (value: CGFloat) in Int((min(1, max(0, value)) * 255).rounded()) }
     return String(
@@ -118,7 +123,7 @@ func harmony(_ color: String, _ count: Int) -> [String] {
 @MainActor
 final class ThemePickerModel: ObservableObject {
     @Published var space = 0
-    @Published var theme = Theme(colors: [], mode: "auto", intensity: 1, noise: 0)
+    @Published var theme = Theme(colors: [], mode: "auto", intensity: 0.8, noise: 0)
     @Published var wheel = Wheel(saturation: 0.8, range: (0.01, 0.97))
     /// Where the dots sit, one for each color. A drag places them where the pointer takes them,
     /// as a color's #rrggbb, rounded, would not: a grayish one barely keeps its hue.
