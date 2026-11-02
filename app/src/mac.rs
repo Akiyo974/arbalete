@@ -1427,18 +1427,20 @@ pub fn uncover_page(view: *mut c_void) {
 /// Makes a window invisible and lets clicks through it, while a sheet it holds, like Chromium's
 /// folder picker, shows. `handle` is the window, or a view in it, as CEF gives it.
 pub fn hide_window(handle: *mut c_void) {
+    if let Some(window) = ns_window(handle) {
+        window.setAlphaValue(0.0);
+        window.setIgnoresMouseEvents(true);
+    }
+}
+
+/// The NSWindow of a handle CEF gives: the window itself, or one of its views.
+fn ns_window(handle: *mut c_void) -> Option<Retained<NSWindow>> {
     // SAFETY: CEF gives a live NSWindow or NSView, which its window keeps alive.
-    let Some(object) = (unsafe { handle.cast::<AnyObject>().as_ref() }) else {
-        return;
-    };
-    let window = if let Some(window) = object.downcast_ref::<NSWindow>() {
+    let object = unsafe { handle.cast::<AnyObject>().as_ref() }?;
+    if let Some(window) = object.downcast_ref::<NSWindow>() {
         Some(objc2::Message::retain(window))
     } else {
         object.downcast_ref::<NSView>().and_then(NSView::window)
-    };
-    if let Some(window) = window {
-        window.setAlphaValue(0.0);
-        window.setIgnoresMouseEvents(true);
     }
 }
 

@@ -434,8 +434,24 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
   opaque. Linux and Windows would need their own native interface, or the web one rendered off screen.
 
 ### Phase 10 — Developer mode
-- A view for working on a site under development, like Arc's developer mode: to be studied (behavior and
-  layout) when the phase starts.
+- Like Arc's developer mode, studied from a screen recording and Arc's binary: a mode for a site under
+  development, turned on per host and remembered.
+- Like Arc's, on by default for `localhost` (and `127.0.0.1`, `[::1]`, `*.localhost`), off for any other
+  host, `*.local` too; a site turns it on or off from the site controls' panel, a "Developer Mode" row
+  under Settings, with "On" or "Off" under it, its icon dimmed while off; each host's choice is kept.
+- A tab in developer mode has a dashed yellow outline in the sidebar (`#f9d000`, measured).
+- Above its page, a bar 40 points high, indigo with faint diagonal stripes (`#363ccc` and `#3338c9`,
+  measured): a lock and the full URL in a monospaced font, then buttons to copy the URL, open the
+  JavaScript console, the network panel and the element picker, the extensions and split view.
+- The console, the network panel and the element picker open the developer tools on that panel, docked
+  like Chrome's and Arc's: Chromium's own DevTools front end in a view of the card, talking to the page
+  through CEF's DevTools protocol (CEF docks DevTools natively only for Chrome-style pages). Its "Dock
+  side" menu docks it at the right, left or bottom, the page showing in the room it leaves, or undocks it
+  into a window of its own. A split's pages keep Chromium's own DevTools window.
+- The reload button gets a menu: reload, clear the cache and reload, clear the cookies and reload.
+- Arc's page captures (a portion of the page, the whole page) are left for later.
+- Done, but for the captures; left for later too: Inspect from the page's menu opening on the element
+  clicked, the bar's picker starting the element picker, and the front end's device mode toolbar.
 
 ### Phase 11 — Incognito
 - ⌘⇧N (and File › New Incognito Window) opens a separate window on an off-the-record request context: cookies,

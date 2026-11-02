@@ -90,6 +90,8 @@ struct Tab: Decodable, Identifiable {
     var muted: Bool?
     /// Its page is frozen or unloaded to save memory.
     var asleep: Bool?
+    /// Its site is in developer mode.
+    var developer: Bool?
 
     /// Its title, or its address without one.
     var label: String { title.isEmpty ? url : title }

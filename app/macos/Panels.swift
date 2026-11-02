@@ -164,8 +164,16 @@ struct PageToolbar: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
+        if let tab = model.activeTab, tab.developer == true {
+            DeveloperBar(model: model, tab: tab)
+        } else {
+            plain
+        }
+    }
+
+    private var plain: some View {
         let tab = model.activeTab
-        ZStack {
+        return ZStack {
             HStack(spacing: 2) {
                 NavButtons(model: model)
                 Spacer()
@@ -204,6 +212,71 @@ struct PageToolbar: View {
     }
 }
 
+/// The bar above a page in developer mode, like Arc's, measured: indigo with faint diagonal
+/// stripes, the lock and the full address in a monospaced font, then buttons to copy it, open the
+/// developer tools, the site controls and Split View; in toolbar mode, the navigation buttons
+/// first.
+struct DeveloperBar: View {
+    @ObservedObject var model: AppModel
+    let tab: Tab
+
+    var body: some View {
+        HStack(spacing: 2) {
+            if model.state?.toolbar == true {
+                NavButtons(model: model)
+            }
+            Image(systemName: tab.url.hasPrefix("https://") ? "lock.fill" : "lock.open.fill")
+                .font(.system(size: 13))
+                .frame(width: 24)
+            Text(tab.url)
+                .font(.system(size: 13, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.leading, 6)
+            Spacer(minLength: 8)
+            tool("link", "Copy URL") { model.run("menu/choose/site/any/copy-link") }
+            separator
+            tool("apple.terminal", "Console") { model.run("page/devtools/console") }
+            tool("network", "Network") { model.run("page/devtools/network") }
+            tool("scope", "Inspect Element") { model.run("page/devtools/elements") }
+            separator
+            ForEach(model.state?.extensions ?? []) { ext in
+                PinnedExtension(model: model, extension: ext, view: "toolbar")
+            }
+            SiteControlsButton(model: model, view: "toolbar")
+            tool("rectangle.split.2x1", "Add Split View") { model.run("pane/add") }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background {
+            Canvas { context, size in
+                context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(color("#363ccc")))
+                // Stripes 12 points wide, every 24, leaning right.
+                var x: CGFloat = -size.height
+                while x < size.width {
+                    var stripe = Path()
+                    stripe.move(to: CGPoint(x: x, y: size.height))
+                    stripe.addLine(to: CGPoint(x: x + size.height, y: 0))
+                    stripe.addLine(to: CGPoint(x: x + size.height + 12, y: 0))
+                    stripe.addLine(to: CGPoint(x: x + 12, y: size.height))
+                    context.fill(stripe, with: .color(color("#3338c9")))
+                    x += 24
+                }
+            }
+        }
+        .environment(\.colorScheme, .dark)
+    }
+
+    private var separator: some View {
+        Rectangle().fill(.white.opacity(0.2)).frame(width: 1, height: 18).padding(.horizontal, 6)
+    }
+
+    private func tool(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
+        IconButton(symbol: symbol, label: label, size: 28, symbolSize: 15, action: action)
+    }
+}
+
 /// The selected tab's site controls, under their button (show_site_controls in
 /// app/src/shell.rs): actions on its link and what the site keeps, the profile's extensions,
 /// whose popup a click opens in place of the panel, the Chrome Web Store to add more, the library
@@ -224,6 +297,8 @@ final class SiteControls: ObservableObject {
         /// The url's host, and whether its tabs are kept awake while tabs are suspended.
         var site: String
         var awake: Bool
+        /// Its site is in developer mode.
+        var developer: Bool
         var suspends: Bool
         var extensions: [SiteExtension]
     }
@@ -303,6 +378,30 @@ struct SiteView: View {
                         Image(systemName: "plus").font(.system(size: 15))
                     }
                 }
+                Text("Settings").font(.system(size: 12, weight: .semibold))
+                // Like Arc's: a row turning the site's developer mode on or off.
+                Button {
+                    let turn = site.developer ? "off" : "on"
+                    app.run("developer/\(turn)/\(percentEncoded(site.site))")
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "hammer.fill")
+                            .font(.system(size: 12))
+                            .frame(width: 26, height: 26)
+                            .background(Circle().fill(.primary.opacity(site.developer ? 0.2 : 0.08)))
+                            .opacity(site.developer ? 1 : 0.5)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Developer Mode").font(.system(size: 12, weight: .semibold))
+                            Text(site.developer ? "On" : "Off")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Turn \(site.developer ? "off" : "on") Developer Mode for this site")
                 if site.suspends {
                     Toggle("Keep this site awake", isOn: Binding(
                         get: { site.awake },

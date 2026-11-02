@@ -97,6 +97,9 @@ pub enum Command {
     /// from the menu, `page/devtools`; from the page's menu, on the element at a point of the
     /// page.
     DevTools(Option<(i32, i32)>),
+    /// Shows the page's developer tools on a panel, from the developer bar:
+    /// `page/devtools/<console, network or elements>`.
+    DevToolsPanel(&'static str),
     /// Shows the find bar above the page, from the menu.
     ShowFind,
     /// Finds text in the page, forward or backward: `find/forward/<percent-encoded text>`,
@@ -355,6 +358,8 @@ pub enum Command {
     SettingsReady,
     /// Keeps a site's pages from being suspended, or no longer: `awake/<on or off>/<host>`.
     KeepAwake(String, bool),
+    /// Turns a site's developer mode on or off: `developer/<on or off>/<host>`.
+    DeveloperMode(String, bool),
     /// Turns a setting on or off: `settings/<warn-before-quit, restore-session or
     /// suspend-tabs>/<true or false>`.
     SetSetting(Setting, bool),
@@ -530,6 +535,9 @@ impl Command {
             "settings/show" => Some(Self::ShowSettings),
             "page/source" => Some(Self::ViewSource),
             "page/devtools" => Some(Self::DevTools(None)),
+            "page/devtools/console" => Some(Self::DevToolsPanel("console")),
+            "page/devtools/network" => Some(Self::DevToolsPanel("network")),
+            "page/devtools/elements" => Some(Self::DevToolsPanel("elements")),
             "settings/ready" => Some(Self::SettingsReady),
             "settings/hide" => Some(Self::HideSettings),
             "import/close" => Some(Self::CloseImport),
@@ -688,6 +696,17 @@ impl Command {
                         _ => return None,
                     };
                     return percent_decode(site).map(|site| Self::KeepAwake(site, on));
+                }
+                if let Some((on, site)) = path
+                    .strip_prefix("developer/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let on = match on {
+                        "on" => true,
+                        "off" => false,
+                        _ => return None,
+                    };
+                    return percent_decode(site).map(|site| Self::DeveloperMode(site, on));
                 }
                 if let Some((setting, on)) = path
                     .strip_prefix("settings/")
@@ -1672,6 +1691,10 @@ mod tests {
             Some(Command::DevTools(None))
         );
         assert_eq!(
+            Command::parse("page/devtools/network"),
+            Some(Command::DevToolsPanel("network"))
+        );
+        assert_eq!(
             Command::parse("settings/ready"),
             Some(Command::SettingsReady)
         );
@@ -1688,6 +1711,11 @@ mod tests {
             Command::parse("settings/suspend-tabs/false"),
             Some(Command::SetSetting(Setting::SuspendTabs, false))
         );
+        assert_eq!(
+            Command::parse("developer/on/localhost%3A3000"),
+            Some(Command::DeveloperMode("localhost:3000".into(), true))
+        );
+        assert_eq!(Command::parse("developer/maybe/localhost"), None);
         assert_eq!(
             Command::parse("awake/on/mail.google.com"),
             Some(Command::KeepAwake("mail.google.com".into(), true))

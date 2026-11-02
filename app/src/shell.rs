@@ -202,6 +202,8 @@ thread_local! {
     static SESSION_FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     /// Each profile's history, opened on its first visit.
     static HISTORIES: RefCell<HashMap<ProfileId, History>> = RefCell::default();
+    /// The pages' developer tools open, by tab.
+    static INSPECTORS: RefCell<HashMap<NodeId, Rc<Inspector>>> = RefCell::default();
     /// The incognito windows' profiles, with the temporary folder that stands for their
     /// directory, removed with the window: their web data stays in memory.
     static INCOGNITO: RefCell<HashMap<ProfileId, PathBuf>> = RefCell::default();
@@ -255,6 +257,9 @@ struct Win {
     /// macOS only rounds the corners of a window of its own. Without a selected tab, its own
     /// color paints an empty Space's panel.
     card: RefCell<Option<OverlayController>>,
+    /// Under the bar above the page, in the card: the tabs' pages, one shown at a time, or a
+    /// split, over the shown page's developer tools.
+    body: RefCell<Option<Panel>>,
     /// The tab whose page the window shows.
     shown: Cell<Option<NodeId>>,
     /// Shown above the page, to open tabs.
@@ -335,6 +340,7 @@ impl Win {
             window: RefCell::new(None),
             sidebar: RefCell::new(None),
             card: RefCell::new(None),
+            body: RefCell::new(None),
             shown: Cell::new(None),
             overlay_view: RefCell::new(None),
             overlay: RefCell::new(None),
@@ -521,17 +527,14 @@ const CASCADE: i32 = 22;
 
 /// Moves the pages of the window `id`, which closes, into another window, hidden.
 fn hand_pages_over(id: u32) {
-    let Some(card) = window_by_id(id).and_then(|win| {
-        win.card
-            .with_borrow(|card| card.as_ref()?.contents_view()?.as_panel())
-    }) else {
+    let Some(card) = window_by_id(id).and_then(|win| win.body.with_borrow(Clone::clone)) else {
         return;
     };
     let other = WINDOWS.with_borrow(|windows| {
-        windows.iter().find(|win| win.id != id).and_then(|win| {
-            win.card
-                .with_borrow(|card| card.as_ref()?.contents_view()?.as_panel())
-        })
+        windows
+            .iter()
+            .find(|win| win.id != id)
+            .and_then(|win| win.body.with_borrow(Clone::clone))
     });
     let Some(other) = other else { return };
     let pages: Vec<_> =
@@ -933,6 +936,7 @@ fn tab_json(id: NodeId, tab: &Tab, profile: ProfileId) -> serde_json::Value {
         "favicon": favicon_url(profile, tab),
         "muted": tab.muted,
         "asleep": ASLEEP.with_borrow(|asleep| asleep.contains(&id)),
+        "developer": developer_mode(&tab.url),
     })
 }
 
@@ -1000,6 +1004,8 @@ fn save_session() {
 
 fn send_state() {
     prune_pages();
+    // The page shown, or its address, may have changed whether its site is in developer mode.
+    in_each_window(sync_page_toolbar);
     // The site controls' panel shows the extensions as they are, while it is open too.
     let open = win()
         .site
@@ -1043,15 +1049,68 @@ fn toggle_toolbar() {
         settings.show_toolbar
     });
     save_settings();
-    if let Some(toolbar) = win().toolbar_view.with_borrow(Clone::clone) {
-        toolbar.set_visible(shown.into());
-    }
-    if let Some(card) = card_panel() {
-        card.layout();
-    }
+    sync_page_toolbar();
     #[cfg(target_os = "macos")]
     crate::mac::toolbar_shown(shown);
     send_state();
+}
+
+/// Whether the bar above the page shows: in toolbar mode, or over a site in developer mode, as
+/// Arc's developer bar.
+fn page_toolbar() -> bool {
+    app_settings().show_toolbar || selected_url().is_some_and(|url| developer_mode(&url))
+}
+
+/// Shows or hides the bar above the page as `page_toolbar` says, but over a split, which shows
+/// its pages' own bars.
+fn sync_page_toolbar() {
+    let Some(toolbar) = win().toolbar_view.with_borrow(Clone::clone) else {
+        return;
+    };
+    let shown = page_toolbar() && split_shown().is_none();
+    if (toolbar.is_visible() == 1) != shown {
+        toolbar.set_visible(shown.into());
+        if let Some(card) = card_frame() {
+            card.layout();
+        }
+    }
+}
+
+/// Whether a page's site is in developer mode, like Arc's: as it was turned, or else for
+/// `localhost` only, not for any other local host.
+fn developer_mode(url: &str) -> bool {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return false;
+    }
+    let site = site(url);
+    SETTINGS
+        .with_borrow(|settings| settings.developer_sites.get(site).copied())
+        .unwrap_or_else(|| localhost(site))
+}
+
+/// Whether a site, a host and maybe a port, is the machine itself by name or address.
+fn localhost(site: &str) -> bool {
+    let host = match site.strip_prefix('[') {
+        Some(rest) => rest.split(']').next().unwrap_or(rest),
+        None => site.split(':').next().unwrap_or(site),
+    };
+    host == "localhost" || host == "127.0.0.1" || host == "::1" || host.ends_with(".localhost")
+}
+
+/// Turns a site's developer mode on or off, kept only where it differs from its default.
+fn set_developer_mode(site: String, on: bool) {
+    SETTINGS.with_borrow_mut(|settings| {
+        if on == localhost(&site) {
+            settings.developer_sites.remove(&site);
+        } else {
+            settings.developer_sites.insert(site, on);
+        }
+    });
+    save_settings();
+    send_state();
+    if let Some(url) = selected_url() {
+        send_site_controls(&url);
+    }
 }
 
 /// Saves the downloads list. A list that cannot be written is not worth stopping a download for.
@@ -1348,7 +1407,7 @@ fn sync_native_surfaces() {
         .with_borrow(|card| card.as_ref().map(|card| (card.is_visible(), card.bounds())));
     if let Some((visible, card)) = card {
         let shown = visible == 1
-            && app_settings().show_toolbar
+            && page_toolbar()
             && split_shown().is_none()
             && win().slide.with_borrow(Option::is_none);
         let bar = Rect {
@@ -1753,7 +1812,7 @@ fn place_card() {
     } else {
         card.set_bounds(Some(&win().sidebar_mode.get().layout(&size).card));
         // The page follows the card's corners at once, not at CEF's next layout.
-        if let Some(panel) = card_panel() {
+        if let Some(panel) = card_frame() {
             panel.layout();
         }
     }
@@ -1828,8 +1887,13 @@ fn card_window() -> Option<*mut std::ffi::c_void> {
     Some(view.browser()?.host()?.window_handle())
 }
 
-/// The panel holding the content views.
+/// The panel holding the content views, under the bar above the page.
 fn card_panel() -> Option<Panel> {
+    win().body.with_borrow(Clone::clone)
+}
+
+/// The card's own panel: the bar above the page, then `card_panel`.
+fn card_frame() -> Option<Panel> {
     win()
         .card
         .with_borrow(|card| card.as_ref()?.contents_view()?.as_panel())
@@ -2014,6 +2078,416 @@ fn show_dev_tools(host: &BrowserHost, at: Option<(i32, i32)>) {
         at.as_ref(),
     );
 }
+
+/// A page's developer tools, like Chrome's and Arc's: Chromium's own DevTools front end in a
+/// view of the card, under the page, which it talks to through CEF's DevTools protocol. Docked,
+/// the front end fills the card and the page shows in the room it leaves, at its right, left or
+/// bottom; undocked, it moves to a window of its own.
+struct Inspector {
+    frontend: BrowserView,
+    /// Where the front end wants the page, in the card's body, while docked.
+    room: RefCell<Option<Rect>>,
+    docked: Cell<bool>,
+    window: RefCell<Option<Window>>,
+    /// Keeps the page's protocol messages coming to the front end.
+    _observer: Option<Registration>,
+}
+
+/// The front end's page, told it may dock.
+const INSPECTOR_URL: &str = "devtools://devtools/bundled/devtools_app.html?can_dock=true";
+
+/// The front end's own host, which Chromium gives it, stands in for Chrome's: what it would ask
+/// Chrome comes to the app as marked console messages, and the app sends it the page's protocol
+/// messages through `DevToolsAPI`.
+const INSPECTOR_HOST: &str = r#"(() => {
+  const tell = (kind, data) => console.debug("\u0001arbalete-inspector:" + kind + ":" + data);
+  const take = (host) => {
+    if (!host || host.arbalete) return host;
+    host.arbalete = true;
+    host.sendMessageToBackend = (message) => tell("send", message);
+    host.setIsDocked = (docked, done) => { tell("dock", docked ? "1" : "0"); if (done) setTimeout(done, 0); };
+    host.setInspectedPageBounds = (bounds) => tell("room", JSON.stringify(bounds));
+    host.closeWindow = () => tell("close", "");
+    host.bringToFront = () => {};
+    return host;
+  };
+  let host = take(window.InspectorFrontendHost);
+  try {
+    Object.defineProperty(window, "InspectorFrontendHost", {
+      configurable: true, get: () => host, set: (value) => { host = take(value); },
+    });
+  } catch (_) {}
+})();"#;
+
+/// Opens the shown page's developer tools, docked, on `panel` if given, or shows that panel; or
+/// closes them.
+fn toggle_inspector(panel: Option<&'static str>) {
+    let Some(tab) = win().shown.get() else { return };
+    if let Some(inspector) = INSPECTORS.with_borrow(|inspectors| inspectors.get(&tab).cloned()) {
+        match panel {
+            Some(panel) => {
+                run_in_inspector(&inspector, &format!("DevToolsAPI.showPanel({panel:?})"))
+            }
+            None => close_inspector(tab),
+        }
+        return;
+    }
+    let (Some(body), Some(host)) = (
+        card_panel(),
+        content().and_then(|view| view.browser()?.host()),
+    ) else {
+        return;
+    };
+    let url = match panel {
+        Some(panel) => format!("{INSPECTOR_URL}&panel={panel}"),
+        None => INSPECTOR_URL.to_string(),
+    };
+    let frontend = browser_view(InspectorClient::new(tab), &url, no_width, None);
+    let mut view = View::from(&frontend);
+    body.add_child_view(Some(&mut view));
+    body.reorder_child_view(Some(&mut view), 0);
+    let observer = host.add_dev_tools_message_observer(Some(&mut InspectorObserver::new(tab)));
+    INSPECTORS.with_borrow_mut(|inspectors| {
+        inspectors.insert(
+            tab,
+            Rc::new(Inspector {
+                frontend,
+                room: RefCell::new(None),
+                docked: Cell::new(true),
+                window: RefCell::new(None),
+                _observer: observer,
+            }),
+        )
+    });
+    sync_inspectors();
+}
+
+/// Closes a page's developer tools, the page taking the card back.
+fn close_inspector(tab: NodeId) {
+    let Some(inspector) = INSPECTORS.with_borrow_mut(|inspectors| inspectors.remove(&tab)) else {
+        return;
+    };
+    inspector.frontend.set_visible(0);
+    // Taken out of the card, it closes: asked to close, it would close its page too.
+    post_task(
+        ThreadId::UI,
+        Some(&mut RemovePage::new(inspector.frontend.clone())),
+    );
+    if let Some(window) = inspector.window.take() {
+        window.close();
+    }
+    lay_out_bodies();
+}
+
+/// Lays every window's card body out again, as the room the developer tools leave changed.
+fn lay_out_bodies() {
+    in_each_window(|| {
+        if let Some(body) = card_panel() {
+            body.layout();
+        }
+    });
+}
+
+/// Runs a script in a page's developer tools' front end.
+fn run_in_inspector(inspector: &Inspector, script: &str) {
+    if let Some(frame) = inspector
+        .frontend
+        .browser()
+        .and_then(|browser| browser.main_frame())
+    {
+        frame.execute_java_script(Some(&CefString::from(script)), None, 0);
+    }
+}
+
+/// Where a page whose developer tools are docked goes in the card's body.
+fn inspected_room(tab: NodeId) -> Option<Rect> {
+    let inspector = INSPECTORS.with_borrow(|inspectors| inspectors.get(&tab).cloned())?;
+    inspector
+        .docked
+        .get()
+        .then(|| inspector.room.borrow().clone())
+        .flatten()
+}
+
+/// Shows the shown page's docked developer tools in this window's card, under the page, and hides
+/// the others it holds: like a page, they show in one window at a time.
+fn sync_inspectors() {
+    let Some(body) = card_panel() else { return };
+    let shown = win().shown.get().filter(|_| split_shown().is_none());
+    let inspectors: Vec<_> = INSPECTORS.with_borrow(|inspectors| {
+        inspectors
+            .iter()
+            .map(|(tab, inspector)| (*tab, inspector.clone()))
+            .collect()
+    });
+    for (tab, inspector) in inspectors {
+        if !inspector.docked.get() {
+            continue;
+        }
+        let view = &inspector.frontend;
+        if shown == Some(tab) {
+            move_page(view, &body);
+            body.reorder_child_view(Some(&mut View::from(view)), 0);
+            view.set_visible(1);
+        } else if view
+            .parent_view()
+            .is_some_and(|parent| parent.is_same(Some(&mut View::from(&body))) == 1)
+        {
+            view.set_visible(0);
+        }
+    }
+    body.layout();
+}
+
+wrap_task! {
+    struct InspectorTask {
+        tab: NodeId,
+        kind: String,
+        data: String,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            inspector_asked(self.tab, &self.kind, &self.data);
+        }
+    }
+}
+
+/// Does what a page's developer tools' front end asked its host: send the page a protocol
+/// message, leave it some room, dock or undock, or close.
+fn inspector_asked(tab: NodeId, kind: &str, data: &str) {
+    let Some(inspector) = INSPECTORS.with_borrow(|inspectors| inspectors.get(&tab).cloned()) else {
+        return;
+    };
+    match kind {
+        "send" => {
+            let host = PAGES.with_borrow(|pages| pages.get(&tab)?.view.browser()?.host());
+            if let Some(host) = host {
+                host.send_dev_tools_message(Some(data.as_bytes()));
+            }
+        }
+        "room" => {
+            #[derive(serde::Deserialize)]
+            struct Room {
+                x: f64,
+                y: f64,
+                width: f64,
+                height: f64,
+            }
+            if let Ok(room) = serde_json::from_str::<Room>(data) {
+                inspector.room.set(Some(Rect {
+                    x: room.x.round() as i32,
+                    y: room.y.round() as i32,
+                    width: room.width.round() as i32,
+                    height: room.height.round() as i32,
+                }));
+                lay_out_bodies();
+            }
+        }
+        "dock" => {
+            let docked = data == "1";
+            if docked == inspector.docked.get() {
+                return;
+            }
+            inspector.docked.set(docked);
+            if docked {
+                // Out of its window before the window closes, which would destroy it.
+                if let Some(window) = inspector.window.take() {
+                    window.remove_child_view(Some(&mut View::from(&inspector.frontend)));
+                    if let Some(body) = card_panel() {
+                        body.add_child_view(Some(&mut View::from(&inspector.frontend)));
+                    }
+                    window.close();
+                }
+                sync_inspectors();
+            } else {
+                window_create_top_level(Some(&mut InspectorWindowDelegate::new(tab)));
+                lay_out_bodies();
+            }
+        }
+        "close" => close_inspector(tab),
+        _ => {}
+    }
+}
+
+// The front end of a page's developer tools.
+wrap_client! {
+    struct InspectorClient {
+        tab: NodeId,
+    }
+
+    impl Client {
+        fn display_handler(&self) -> Option<DisplayHandler> {
+            Some(InspectorDisplay::new(self.tab))
+        }
+
+        fn load_handler(&self) -> Option<LoadHandler> {
+            Some(InspectorLoad::new())
+        }
+
+        fn life_span_handler(&self) -> Option<LifeSpanHandler> {
+            Some(InspectorLifeSpan::new())
+        }
+    }
+}
+
+wrap_life_span_handler! {
+    struct InspectorLifeSpan {}
+
+    impl LifeSpanHandler {
+        /// The front end's own windows, like its device mode's, which Chrome hosts apart, open
+        /// nowhere: never as tabs.
+        fn on_before_popup(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            _popup_id: i32,
+            _target_url: Option<&CefString>,
+            _target_frame_name: Option<&CefString>,
+            _target_disposition: WindowOpenDisposition,
+            _user_gesture: i32,
+            _popup_features: Option<&PopupFeatures>,
+            _window_info: Option<&mut WindowInfo>,
+            _client: Option<&mut Option<Client>>,
+            _settings: Option<&mut BrowserSettings>,
+            _extra_info: Option<&mut Option<DictionaryValue>>,
+            _no_javascript_access: Option<&mut i32>,
+        ) -> i32 {
+            1
+        }
+
+        fn on_after_created(&self, _browser: Option<&mut Browser>) {
+            OPEN_BROWSERS.set(OPEN_BROWSERS.get() + 1);
+        }
+
+        fn on_before_close(&self, _browser: Option<&mut Browser>) {
+            browser_closed();
+        }
+    }
+}
+
+wrap_display_handler! {
+    struct InspectorDisplay {
+        tab: NodeId,
+    }
+
+    impl DisplayHandler {
+        /// What the front end asks its host comes as marked console messages.
+        fn on_console_message(
+            &self,
+            _browser: Option<&mut Browser>,
+            _level: LogSeverity,
+            message: Option<&CefString>,
+            _source: Option<&CefString>,
+            _line: i32,
+        ) -> i32 {
+            let message = message.map(CefString::to_string).unwrap_or_default();
+            let Some(asked) = message.strip_prefix("\u{1}arbalete-inspector:") else {
+                return 0;
+            };
+            let (kind, data) = asked.split_once(':').unwrap_or((asked, ""));
+            post_task(
+                ThreadId::UI,
+                Some(&mut InspectorTask::new(self.tab, kind.to_string(), data.to_string())),
+            );
+            1
+        }
+    }
+}
+
+wrap_load_handler! {
+    struct InspectorLoad {}
+
+    impl LoadHandler {
+        /// The host stands in before the front end's scripts run.
+        fn on_load_start(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, _transition_type: TransitionType) {
+            if let Some(frame) = frame.filter(|frame| frame.is_main() == 1) {
+                frame.execute_java_script(Some(&CefString::from(INSPECTOR_HOST)), None, 0);
+            }
+        }
+    }
+}
+
+// Brings a page's protocol messages to its developer tools' front end.
+wrap_dev_tools_message_observer! {
+    struct InspectorObserver {
+        tab: NodeId,
+    }
+
+    impl DevToolsMessageObserver {
+        fn on_dev_tools_message(&self, _browser: Option<&mut Browser>, message: Option<&[u8]>) -> i32 {
+            let Some(message) = message.and_then(|message| std::str::from_utf8(message).ok()) else {
+                return 0;
+            };
+            let inspector = INSPECTORS.with_borrow(|inspectors| inspectors.get(&self.tab).cloned());
+            if let Some(inspector) = inspector {
+                let message = serde_json::to_string(message).expect("a string");
+                run_in_inspector(&inspector, &format!("DevToolsAPI.dispatchMessage({message})"));
+            }
+            1
+        }
+    }
+}
+
+// A page's developer tools undocked, in a window of their own.
+wrap_window_delegate! {
+    struct InspectorWindowDelegate {
+        tab: NodeId,
+    }
+
+    impl ViewDelegate {
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            INSPECTOR_SIZE
+        }
+    }
+
+    impl PanelDelegate {}
+
+    impl WindowDelegate {
+        fn on_window_created(&self, window: Option<&mut Window>) {
+            let window = window.expect("window").clone();
+            let Some(inspector) = INSPECTORS.with_borrow(|inspectors| inspectors.get(&self.tab).cloned()) else {
+                return;
+            };
+            window.set_title(Some(&CefString::from("Developer Tools")));
+            window.set_to_fill_layout();
+            let view = &inspector.frontend;
+            if let Some(parent) = view.parent_view().and_then(|parent| parent.as_panel()) {
+                parent.remove_child_view(Some(&mut View::from(view)));
+            }
+            window.add_child_view(Some(&mut View::from(view)));
+            view.set_visible(1);
+            inspector.window.set(Some(window.clone()));
+            window.center_window(Some(&INSPECTOR_SIZE));
+            window.show();
+        }
+
+        /// Its close button closes the developer tools.
+        fn can_close(&self, _window: Option<&mut Window>) -> i32 {
+            let undocked = INSPECTORS.with_borrow(|inspectors| {
+                inspectors.get(&self.tab).is_some_and(|inspector| !inspector.docked.get())
+            });
+            if undocked {
+                post_task(ThreadId::UI, Some(&mut InspectorTask::new(self.tab, "close".into(), String::new())));
+            }
+            1
+        }
+
+        fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 1 }
+        fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 1 }
+        fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 1 }
+
+        fn window_runtime_style(&self) -> RuntimeStyle {
+            RuntimeStyle::ALLOY
+        }
+    }
+}
+
+/// An undocked developer tools window's size, as it opens.
+const INSPECTOR_SIZE: Size = Size {
+    width: 900,
+    height: 700,
+};
 
 /// A Little Arbalete window: its page, in the profile it was opened in, and what its bar shows of
 /// the page.
@@ -2929,7 +3403,7 @@ fn send_site_controls(url: &str) {
         .collect();
     let settings = app_settings();
     let awake = settings.awake_sites.iter().any(|awake| awake == site(url));
-    let detail = json!({ "url": url, "site": site(url), "awake": awake, "suspends": settings.suspend_tabs, "extensions": extensions });
+    let detail = json!({ "url": url, "site": site(url), "awake": awake, "developer": developer_mode(url), "suspends": settings.suspend_tabs, "extensions": extensions });
     dispatch(
         &win().site_view,
         &format!(r#"new CustomEvent("arbalete:show", {{ detail: {detail} }})"#),
@@ -4186,6 +4660,7 @@ fn show_content(tab: NodeId, view: &BrowserView) {
     }
     win().shown.set(Some(tab));
     wake_page(tab, view);
+    sync_inspectors();
     if let Some(panel) = card_panel() {
         panel.layout();
     }
@@ -4231,6 +4706,7 @@ fn show_split(focused: NodeId, tabs: &[NodeId], views: &[BrowserView], layout: S
         }
     }
     win().shown.set(Some(focused));
+    sync_inspectors();
     if let Some(view) = tabs
         .iter()
         .position(|&tab| tab == focused)
@@ -4754,7 +5230,7 @@ fn hide_content() {
             view.set_visible(0);
         }
         if let Some(toolbar) = win().toolbar_view.with_borrow(Clone::clone) {
-            toolbar.set_visible(app_settings().show_toolbar.into());
+            toolbar.set_visible(page_toolbar().into());
         }
         if let (Some(panel), Some((card_color, _, _))) =
             (card_panel(), win().window_colors.with_borrow(Clone::clone))
@@ -4776,6 +5252,7 @@ fn hide_content() {
             }
         });
     }
+    sync_inspectors();
     send_empty_card();
 }
 
@@ -4804,6 +5281,7 @@ fn prune_pages() {
 /// Closes a tab's page, if it has one: the tab opens again at its url. Its view then leaves the
 /// card (PageLifeSpan's do_close).
 fn close_page(tab: NodeId) {
+    close_inspector(tab);
     let Some(live) = PAGES.with_borrow_mut(|pages| pages.remove(&tab)) else {
         return;
     };
@@ -5276,6 +5754,7 @@ fn run_command(command: Command) {
         (Command::SettingsReady, _) => send_settings(),
         (Command::SetSetting(setting, on), _) => set_setting(setting, on),
         (Command::KeepAwake(site, on), _) => keep_awake(site, on),
+        (Command::DeveloperMode(site, on), _) => set_developer_mode(site, on),
         (
             Command::CreateSpace {
                 title,
@@ -5334,10 +5813,16 @@ fn run_command(command: Command) {
             }
         }
         (Command::DevTools(at), Some(browser)) => {
-            if let Some(host) = browser.host() {
-                show_dev_tools(&host, at);
+            // A split's pages keep Chromium's own window for them.
+            if split_shown().is_some() {
+                if let Some(host) = browser.host() {
+                    show_dev_tools(&host, at);
+                }
+            } else {
+                toggle_inspector(at.map(|_| "elements"));
             }
         }
+        (Command::DevToolsPanel(panel), Some(_)) => toggle_inspector(Some(panel)),
         (Command::Stop, Some(browser)) => browser.stop_load(),
         (Command::ClearSiteData(data), Some(browser)) => clear_site_data(&browser, data),
         (Command::Zoom(zoom), Some(browser)) => {
@@ -5627,11 +6112,19 @@ wrap_window_delegate! {
             // Any width: the layout stretches it across the card. A zero one would make its size
             // "empty", which CEF ignores, with its height.
             let toolbar = place_view(|| 1, PAGE_TOOLBAR_HEIGHT);
-            toolbar.set_visible(app_settings().show_toolbar.into());
+            toolbar.set_visible(page_toolbar().into());
             let mut view = View::from(&toolbar);
             card.add_child_view(Some(&mut view));
             layout.set_flex_for_view(Some(&mut view), 0);
             win().toolbar_view.set(Some(toolbar));
+            // The card shows its body, which paints an empty Space's panel.
+            card.set_background_color(0x0000_0001);
+            // Its views fill it, the page shown or a split, over its developer tools, which
+            // leave it the room they ask for (Inspector).
+            let body = panel_create(None).expect("body");
+            body.set_to_fill_layout();
+            card.add_child_view(Some(&mut View::from(&body)));
+            win().body.set(Some(body.clone()));
             #[cfg(target_os = "macos")]
             crate::mac::toolbar_shown(app_settings().show_toolbar);
             let controller = window
@@ -5643,7 +6136,7 @@ wrap_window_delegate! {
             // The room between the pages shows the window, like the margins around the card.
             split.set_background_color(0x0000_0001);
             split.set_visible(0);
-            card.add_child_view(Some(&mut View::from(&split)));
+            body.add_child_view(Some(&mut View::from(&split)));
             win().split_view.set(Some(split));
             for _ in 0..MAX_SPLIT_TABS {
                 let index = win().slots.borrow().len();
@@ -6109,6 +6602,20 @@ wrap_browser_view_delegate! {
         fn preferred_size(&self, _view: Option<&mut View>) -> Size {
             Size { width: (self.width)(), height: self.height }
         }
+
+        /// A page whose developer tools are docked keeps to the room they leave it.
+        fn on_layout_changed(&self, view: Option<&mut View>, new_bounds: Option<&Rect>) {
+            let (Some(view), Some(bounds)) = (view, new_bounds) else { return };
+            let Some(page) = view.as_browser_view() else { return };
+            let Some(tab) = page.browser().and_then(|browser| page_tab(&browser)) else { return };
+            let same = |room: &Rect| {
+                (room.x, room.y, room.width, room.height)
+                    == (bounds.x, bounds.y, bounds.width, bounds.height)
+            };
+            if let Some(room) = inspected_room(tab).filter(|room| !same(room)) {
+                view.set_bounds(Some(&room));
+            }
+        }
     }
 
     impl BrowserViewDelegate {
@@ -6240,7 +6747,7 @@ pub fn menu_at(x: f64, y: f64) -> bool {
     if let Some(toolbar) = win()
         .toolbar_view
         .with_borrow(Clone::clone)
-        .filter(|_| app_settings().show_toolbar)
+        .filter(|_| page_toolbar())
     {
         // It lies in the card, an overlay of its own: its bounds are the card's.
         let card = win()
@@ -7376,6 +7883,25 @@ mod tests {
     }
 
     #[test]
+    fn puts_localhost_alone_in_developer_mode_by_default() {
+        for url in [
+            "http://localhost:3000/",
+            "http://127.0.0.1/",
+            "http://[::1]:8080/a",
+            "https://app.localhost/",
+        ] {
+            assert!(super::developer_mode(url), "{url}");
+        }
+        for url in [
+            "https://app.runora.local/",
+            "https://example.com/",
+            "about:blank",
+        ] {
+            assert!(!super::developer_mode(url), "{url}");
+        }
+    }
+
+    #[test]
     fn sends_the_displayed_space_and_every_space() {
         let mut state = UiState::default();
         let home = state.sidebar.spaces()[0].id;
@@ -7414,7 +7940,7 @@ mod tests {
             { "id": home, "title": "Home", "emoji": null, "theme": theme("#6e56cf"), "profile": profile, "pinned": [] },
             { "id": work, "title": "Work", "emoji": "💼", "theme": theme("#3e7bfa"), "profile": profile, "pinned": [
                 { "id": folder, "title": "Docs", "folder": true },
-                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false, "asleep": false },
+                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false, "asleep": false, "developer": false },
             ] },
         ]);
         assert_eq!(json["spaces"], spaces);

@@ -2,7 +2,7 @@
 //! settings, like its search engine, are kept with it in the sidebar.
 
 use serde::{Deserialize, Serialize};
-use std::{fs, io, path::Path};
+use std::{collections::BTreeMap, fs, io, path::Path};
 
 /// The settings' file name in the data directory.
 pub const FILE_NAME: &str = "settings.json";
@@ -24,6 +24,9 @@ pub struct Settings {
     pub awake_sites: Vec<String>,
     /// The sidebar's width, in points, which dragging its edge changes.
     pub sidebar_width: i32,
+    /// The sites turned in or out of developer mode, by host (and port), unlike their default
+    /// (developer_mode in app/src/shell.rs).
+    pub developer_sites: BTreeMap<String, bool>,
 }
 
 impl Default for Settings {
@@ -35,6 +38,7 @@ impl Default for Settings {
             suspend_tabs: true,
             awake_sites: Vec::new(),
             sidebar_width: 260,
+            developer_sites: BTreeMap::new(),
         }
     }
 }
@@ -72,6 +76,7 @@ mod tests {
             suspend_tabs: false,
             awake_sites: vec!["mail.google.com".into()],
             sidebar_width: 320,
+            developer_sites: BTreeMap::from([("example.com".into(), true)]),
         };
         save(&settings, &path).unwrap();
         assert_eq!(load(&path), settings);

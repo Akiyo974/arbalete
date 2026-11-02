@@ -96,6 +96,31 @@ struct NavButtons: View {
         IconButton(symbol: "arrow.clockwise", label: "Reload", symbolSize: toolbarSymbol) {
             model.run("reload")
         }
+        // Like Arc's, a site in developer mode offers to reload it afresh.
+        if model.activeTab?.developer == true {
+            Menu {
+                Button("Reload the Page") { model.run("reload") }
+                Button("Clear Cache and Refresh") { model.run("menu/choose/site/any/clear-cache") }
+                Button("Clear Cookies and Refresh") {
+                    model.run("menu/choose/site/any/clear-cookies")
+                }
+            } label: {
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Reload Options")
+        }
+    }
+}
+
+/// A tab whose site is in developer mode, like Arc's: a dashed yellow outline, measured.
+struct DeveloperOutline: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: Measure.radius)
+            .strokeBorder(color("#f9d000"), style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
+            .allowsHitTesting(false)
     }
 }
 
@@ -699,6 +724,12 @@ struct ItemRows: View {
                 switch item {
                 case .tab(let tab):
                     TabRow(model: model, tab: tab, active: tab.id == selected, pinned: pinned)
+                        .overlay {
+                            if tab.developer == true {
+                                DeveloperOutline()
+                                    .frame(height: Measure.rowFill)
+                            }
+                        }
                         .overlay {
                             if case .split(tab.id, let leading) = model.dropTarget {
                                 SplitHalf(leading: leading)
