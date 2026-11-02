@@ -31,6 +31,8 @@ final class AppModel: ObservableObject {
     var draggedTabs: [Int] = []
     /// The tabs selected at once with ⌘ or ⇧, besides the one shown, like Arc's; none otherwise.
     @Published var marked: [Int] = []
+    /// Whether the app is in front, which shows the window's blur (Backdrop).
+    @Published var active = NSApp.isActive
     /// The Space switch a drag resting at the sidebar's edge waits for, and where it rested.
     var edgeWait: DispatchWorkItem?
     var edgeAt: NSPoint?

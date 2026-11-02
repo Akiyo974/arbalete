@@ -11,13 +11,15 @@ import SwiftUI
 final class Backdrop {
     private let effect: NSVisualEffectView
     private var watch: AnyCancellable?
+    private var activity: [NSObjectProtocol] = []
 
     init(content: NSView, model: AppModel) {
         effect = NSVisualEffectView(frame: content.frame)
         // Like Arc's: a dark or light blur as the theme's appearance is, behind the window.
         effect.blendingMode = .behindWindow
-        // Like Arc's, the blur falls flat while another window is in front.
-        effect.state = .followsWindowActiveState
+        // Like Arc's, the blur falls flat while another app is in front: by the app's own state,
+        // which its panels taking the keyboard do not muddle.
+        effect.state = NSApp.isActive ? .active : .inactive
         effect.isEmphasized = true
         effect.autoresizingMask = [.width, .height]
         let tint = NSHostingView(rootView: BackdropTint(model: model))
@@ -25,6 +27,16 @@ final class Backdrop {
         tint.autoresizingMask = [.width, .height]
         effect.addSubview(tint)
         content.superview?.addSubview(effect, positioned: .below, relativeTo: content)
+        activity = [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification]
+            .map {
+                NotificationCenter.default.addObserver(forName: $0, object: nil, queue: .main) {
+                    [effect] _ in
+                    MainActor.assumeIsolated {
+                        effect.state = NSApp.isActive ? .active : .inactive
+                        model.active = NSApp.isActive
+                    }
+                }
+            }
         watch = model.$state.sink { [effect] _ in
             let dark = isDark(model.space?.theme)
             effect.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
@@ -37,7 +49,7 @@ struct BackdropTint: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        Tint(theme: model.space?.theme).ignoresSafeArea()
+        Tint(theme: model.space?.theme, active: model.active).ignoresSafeArea()
     }
 }
 

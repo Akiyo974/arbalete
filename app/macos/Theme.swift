@@ -47,7 +47,8 @@ func color(_ hex: String) -> Color {
 /// the bottom edge, from faint to half opaque as the theme is more intense.
 struct Tint: View {
     let theme: Theme?
-    @Environment(\.controlActiveState) private var active
+    /// Whether the app is in front, which shows the blur.
+    var active = true
 
     var body: some View {
         ZStack {
@@ -55,7 +56,7 @@ struct Tint: View {
             colors
             // In the background, the blur falls flat: without colors, Arc's window shows a deep
             // violet there, measured, rather than the blur's gray.
-            if active == .inactive, isDark(theme), theme?.colors.isEmpty ?? true {
+            if !active, isDark(theme), theme?.colors.isEmpty ?? true {
                 color("#100918")
             }
         }
