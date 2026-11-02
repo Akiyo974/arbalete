@@ -66,25 +66,21 @@ struct BackdropTint: View {
         ZStack(alignment: .topLeading) {
             Tint(theme: theme, active: model.active)
             if let card = model.card {
-                // Like Arc's, a faint shade around the card, outside it only.
-                ZStack(alignment: .topLeading) {
-                    RoundedRectangle(cornerRadius: cardRadius)
-                        .fill(Color.black.opacity(0.12))
-                        .frame(width: card.width + 2, height: card.height + 2)
-                        .offset(x: card.minX - 1, y: card.minY - 1)
-                        .blur(radius: 2)
-                    RoundedRectangle(cornerRadius: cardRadius)
-                        .frame(width: card.width, height: card.height)
-                        .offset(x: card.minX, y: card.minY)
-                        .blendMode(.destinationOut)
-                }
-                .compositingGroup()
-                // An empty card is a little lighter than the window, measured on Arc's.
-                if model.cardEmpty {
-                    RoundedRectangle(cornerRadius: cardRadius)
-                        .fill(Color.white.opacity(emptyWash(colored: colored, dark: isDark(theme), active: model.active)))
-                        .frame(width: card.width, height: card.height)
-                        .offset(x: card.minX, y: card.minY)
+                // Like Arc's, a faint shade around the card, outside it only, and an empty card a
+                // little lighter than the window, measured on Arc's.
+                let wash = model.cardEmpty
+                    ? emptyWash(colored: colored, dark: isDark(theme), active: model.active) : 0
+                Canvas { context, _ in
+                    let shape = Path(roundedRect: card, cornerRadius: cardRadius)
+                    var shade = context
+                    shade.addFilter(.blur(radius: 2))
+                    shade.fill(
+                        Path(roundedRect: card.insetBy(dx: -1, dy: -1), cornerRadius: cardRadius),
+                        with: .color(.black.opacity(0.12)))
+                    context.blendMode = .clear
+                    context.fill(shape, with: .color(.black))
+                    context.blendMode = .normal
+                    context.fill(shape, with: .color(.white.opacity(wash)))
                 }
             }
         }
