@@ -1692,6 +1692,7 @@ fn place_card() {
         card.set_visible(1);
     }
     place_split_handles();
+    send_empty_card();
 }
 
 /// Moves the card `offset` points right of where it rests beside the docked sidebar, which pages
@@ -4586,6 +4587,7 @@ fn wake_page(tab: NodeId, view: &BrowserView) {
 
 /// The shown page, `view`, takes the card's corners, and the toolbar its state.
 fn shown_on_card(view: &BrowserView) {
+    send_empty_card();
     // The browser's window is the card's.
     #[cfg(target_os = "macos")]
     if let Some(host) = view.browser().and_then(|browser| browser.host()) {
@@ -4678,6 +4680,7 @@ fn hide_content() {
             }
         });
     }
+    send_empty_card();
 }
 
 /// Closes the pages of the tabs closed, archived or moved to another profile's Space, whose web
@@ -4767,15 +4770,26 @@ fn set_window_colors(card_color: u32, grain: f64, colors: &[u32]) {
     }
 }
 
-/// The color an empty card shows, from the card's color: on macOS, like Arc's, the window's
-/// blur shows through it, a little lighter, more so in a light theme.
+/// The color an empty card shows, from the card's color: on macOS, none, as the native
+/// interface washes the window's blur under it, like Arc's (send_empty_card).
 fn empty_card(card_color: u32) -> u32 {
     if cfg!(target_os = "macos") {
-        let channels = [16, 8, 0].map(|shift| (card_color >> shift) & 0xff);
-        let light = channels.iter().sum::<u32>() > 3 * 0x80;
-        if light { 0x80ff_ffff } else { 0x14ff_ffff }
+        0x0000_0001
     } else {
         card_color
+    }
+}
+
+/// Tells the native interface where the card is while it shows no page, which washes the window's
+/// blur there, or that it shows one.
+fn send_empty_card() {
+    #[cfg(target_os = "macos")]
+    {
+        let empty = win().shown.get().is_none() && !fills_window();
+        let card = win()
+            .card
+            .with_borrow(|card| card.as_ref().map(OverlayController::bounds));
+        crate::native::empty_card(win().id, card.filter(|_| empty));
     }
 }
 

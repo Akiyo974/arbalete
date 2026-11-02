@@ -45,11 +45,24 @@ final class Backdrop {
     }
 }
 
+/// The card's corners (CARD_RADIUS in app/src/mac.rs).
+private let cardRadius: CGFloat = 6
+
 struct BackdropTint: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        Tint(theme: model.space?.theme, active: model.active).ignoresSafeArea()
+        ZStack(alignment: .topLeading) {
+            Tint(theme: model.space?.theme, active: model.active)
+            // An empty card, like Arc's: the blur shows through it, a little lighter.
+            if let card = model.emptyCard {
+                RoundedRectangle(cornerRadius: cardRadius)
+                    .fill(Color.white.opacity(isDark(model.space?.theme) ? 0.1 : 0.5))
+                    .frame(width: card.width, height: card.height)
+                    .offset(x: card.minX, y: card.minY)
+            }
+        }
+        .ignoresSafeArea()
     }
 }
 

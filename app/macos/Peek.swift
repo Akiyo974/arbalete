@@ -93,6 +93,16 @@ private struct PeekControls: View {
     }
 }
 
+@_cdecl("arbalete_ui_empty_card")
+public func placeEmptyCard(
+    _ id: UInt32, _ shown: Bool, _ x: Double, _ y: Double, _ width: Double, _ height: Double
+) {
+    MainActor.assumeIsolated {
+        let card = shown ? NSRect(x: x, y: y, width: width, height: height) : nil
+        if nativeWindows[id]?.model.emptyCard != card { nativeWindows[id]?.model.emptyCard = card }
+    }
+}
+
 @_cdecl("arbalete_ui_peek")
 public func placePeek(
     _ id: UInt32, _ shown: Bool, _ x: Double, _ y: Double, _ width: Double, _ height: Double
