@@ -12,6 +12,8 @@ struct AppState: Decodable {
     var profiles: [Profile]
     /// The bar above the page holds the navigation buttons and the address.
     var toolbar: Bool
+    /// The window is an incognito one, showing only its Space.
+    var incognito: Bool?
     /// The displayed Space's profile's pinned extensions, whose buttons show by the address.
     var extensions: [Extension]
     /// The tabs closed since launch, the last closed first.

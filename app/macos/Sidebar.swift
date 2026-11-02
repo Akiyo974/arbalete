@@ -23,7 +23,9 @@ struct SidebarView: View {
                     if !(model.state?.toolbar ?? false) {
                         AddressRow(model: model)
                     }
-                    if let page = model.page, model.space != nil {
+                    if model.state?.incognito == true, let page = model.page {
+                        IncognitoSections(model: model, page: page)
+                    } else if let page = model.page, model.space != nil {
                         // Like Arc's, the profile's favorites stay while the Spaces slide below.
                         Favorites(model: model, page: page)
                         SpacePager(model: model)
@@ -32,7 +34,16 @@ struct SidebarView: View {
                     }
                 }
                 RecentDownloads(model: model)
-                Footer(model: model)
+                if model.state?.incognito == true {
+                    // Like Arc's, only a button for a new tab.
+                    HStack {
+                        Spacer()
+                        IconButton(symbol: "plus", label: "New Tab") { model.run("overlay/show") }
+                    }
+                    .frame(height: 40)
+                } else {
+                    Footer(model: model)
+                }
             }
             .padding(.horizontal, Measure.inset)
             .foregroundStyle(.primary)
@@ -282,6 +293,34 @@ struct SpaceSections: View {
                 _height.wrappedValue = $0.height
             }
         }
+    }
+}
+
+/// An incognito window's tabs, like Arc's: under their heading, New Tab and today's tabs only.
+struct IncognitoSections: View {
+    @ObservedObject var model: AppModel
+    let page: SpacePage
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 1) {
+                HStack {
+                    Text("Incognito Tabs").font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                }
+                .padding(.horizontal, 6)
+                .frame(height: 32)
+                .foregroundStyle(.secondary)
+                NewTabRow(model: model)
+                ItemRows(
+                    model: model, items: page.today, parent: page.roots.today,
+                    selected: page.selected)
+                WindowDragArea()
+                    .frame(maxWidth: .infinity, minHeight: 8, maxHeight: .infinity)
+            }
+        }
+        .scrollIndicators(.never)
+        .background(WindowDragArea())
     }
 }
 

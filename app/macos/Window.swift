@@ -66,9 +66,14 @@ struct BackdropTint: View {
         ZStack(alignment: .topLeading) {
             // Like Arc's, a swipe between Spaces fades the window into the coming one's colors.
             let (coming, share) = model.swipeNeighbor()
-            Tint(theme: theme, active: model.active).opacity(1 - share)
-            if share > 0 {
-                Tint(theme: coming, active: model.active).opacity(share)
+            // Like Arc's, an incognito window is near black, measured, and opaque.
+            if model.state?.incognito == true {
+                color("#0e0f13")
+            } else {
+                Tint(theme: theme, active: model.active).opacity(1 - share)
+                if share > 0 {
+                    Tint(theme: coming, active: model.active).opacity(share)
+                }
             }
             if let card = model.card {
                 // Like Arc's, a faint shade around the card, outside it only, and an empty card a

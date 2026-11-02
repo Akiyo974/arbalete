@@ -43,6 +43,10 @@ pub struct Profile {
     /// How long its "Today" tabs stay unshown before they are archived.
     #[serde(default)]
     pub archive_after: ArchiveAfter,
+    /// An incognito window's, with its one Space: listed nowhere, never saved, and gone with
+    /// the window (`Sidebar::open_incognito`).
+    #[serde(skip)]
+    pub incognito: bool,
 }
 
 /// A setting on by default, for profiles saved before it existed.
@@ -424,13 +428,118 @@ impl Sidebar {
         self.url_routing = routing;
     }
 
+    /// The profiles, but the incognito windows'.
     pub fn profiles(&self) -> &[Profile] {
-        &self.profiles
+        &self.profiles[..self.listed_profiles()]
     }
 
-    /// Spaces in sidebar order.
+    /// Spaces in sidebar order, but the incognito windows'.
     pub fn spaces(&self) -> &[Space] {
-        &self.spaces
+        &self.spaces[..self.listed_spaces()]
+    }
+
+    /// How many profiles are listed: the incognito ones come after them.
+    fn listed_profiles(&self) -> usize {
+        self.profiles
+            .iter()
+            .position(|p| p.incognito)
+            .unwrap_or(self.profiles.len())
+    }
+
+    /// How many Spaces are listed: the incognito ones come after them.
+    fn listed_spaces(&self) -> usize {
+        self.spaces
+            .iter()
+            .position(|s| self.is_incognito(s.id))
+            .unwrap_or(self.spaces.len())
+    }
+
+    /// Whether a Space is an incognito window's.
+    pub fn is_incognito(&self, space: SpaceId) -> bool {
+        self.space(space)
+            .ok()
+            .and_then(|s| self.profiles.iter().find(|p| p.id == s.profile))
+            .is_some_and(|p| p.incognito)
+    }
+
+    /// Whether a window showing the Space `shown` may show the tab or Space `space`: an
+    /// incognito window only its own, another none of the incognito windows'.
+    pub fn reaches(&self, shown: SpaceId, space: SpaceId) -> bool {
+        space == shown || !(self.is_incognito(shown) || self.is_incognito(space))
+    }
+
+    /// Opens an incognito window's profile and Space, after the others: the profile's web data
+    /// is the app's to keep off the record.
+    pub fn open_incognito(&mut self) -> SpaceId {
+        let profile = ProfileId(self.next_id());
+        let favorites = self.insert(None, NodeKind::Container);
+        self.profiles.push(Profile {
+            id: profile,
+            name: "Incognito".to_string(),
+            color: Color::Gray,
+            favorites,
+            favorites_hint_hidden: true,
+            search_engine: SearchEngine::default(),
+            search_suggestions: false,
+            pinned_extensions: Vec::new(),
+            archive_after: ArchiveAfter::Never,
+            incognito: true,
+        });
+        let space = SpaceId(self.next_id());
+        let pinned = self.insert(None, NodeKind::Container);
+        let today = self.insert(None, NodeKind::Container);
+        self.spaces.push(Space {
+            id: space,
+            title: "Incognito".to_string(),
+            emoji: None,
+            theme: Theme {
+                colors: vec!["#2b2b2e".to_string()],
+                mode: Mode::Dark,
+                intensity: 0.8,
+                noise: 0.0,
+            },
+            profile,
+            pinned,
+            today,
+            selected: None,
+            collapsed: false,
+        });
+        space
+    }
+
+    /// Forgets an incognito window's Space and profile, with their tabs, as the window closes.
+    pub fn close_incognito(&mut self, space: SpaceId) -> Result<(), Error> {
+        if !self.is_incognito(space) {
+            return Err(Error::UnknownSpace);
+        }
+        let index = self.spaces.iter().position(|s| s.id == space);
+        let space = self.spaces.remove(index.expect("a known Space"));
+        let profile = self.profiles.iter().position(|p| p.id == space.profile);
+        let profile = self.profiles.remove(profile.expect("a known profile"));
+        if self.displayed == Some(space.id) {
+            self.displayed = None;
+        }
+        let mut pending = vec![space.pinned, space.today, profile.favorites];
+        while let Some(id) = pending.pop() {
+            if let Some(node) = self.nodes.remove(&id) {
+                self.splits.remove(&id);
+                pending.extend(node.children);
+            }
+        }
+        Ok(())
+    }
+
+    /// The sidebar to save: without the incognito windows' profiles, Spaces and tabs.
+    pub fn saved(&self) -> Sidebar {
+        let mut saved = self.clone();
+        let incognito: Vec<_> = saved.spaces[saved.listed_spaces()..]
+            .iter()
+            .map(|s| s.id)
+            .collect();
+        for space in incognito {
+            saved.close_incognito(space).expect("an incognito Space");
+        }
+        saved
     }
 
     /// The Space the sidebar shows: the first one until another is displayed.
@@ -501,16 +610,34 @@ impl Sidebar {
         view
     }
 
+    /// The profile a Space is attached to.
+    pub fn profile_of_space(&self, space: SpaceId) -> Option<ProfileId> {
+        self.space(space).ok().map(|s| s.profile)
+    }
+
+    /// What a window showing `space` shows: it, without a selected tab.
+    pub fn view_showing(&self, space: SpaceId) -> View {
+        let mut view = self.view();
+        view.displayed = Some(space);
+        for (id, tab) in &mut view.selected {
+            if *id == space {
+                *tab = None;
+            }
+        }
+        view
+    }
+
     /// The Space at `number` in sidebar order, counted from 1.
     pub fn space_at(&self, number: usize) -> Option<SpaceId> {
-        self.spaces.get(number.checked_sub(1)?).map(|s| s.id)
+        self.spaces().get(number.checked_sub(1)?).map(|s| s.id)
     }
 
     /// The Space after the displayed one in sidebar order, or before it; none past the first or
     /// the last, as a swipe stops there.
     pub fn next_space(&self, forward: bool) -> Option<SpaceId> {
+        // An incognito window shows only its Space.
         let index = self
-            .spaces
+            .spaces()
             .iter()
             .position(|s| s.id == self.displayed().id)?;
         let next = if forward {
@@ -518,7 +645,7 @@ impl Sidebar {
         } else {
             index.checked_sub(1)?
         };
-        self.spaces.get(next).map(|s| s.id)
+        self.spaces().get(next).map(|s| s.id)
     }
 
     /// The Space whose pinned or "Today" tabs hold a node; favorites belong to no Space.
@@ -553,17 +680,23 @@ impl Sidebar {
     pub fn add_profile(&mut self, name: &str) -> ProfileId {
         let id = ProfileId(self.next_id());
         let favorites = self.insert(None, NodeKind::Container);
-        self.profiles.push(Profile {
-            id,
-            name: name.to_string(),
-            color: Color::default(),
-            favorites,
-            favorites_hint_hidden: false,
-            search_engine: SearchEngine::default(),
-            search_suggestions: true,
-            pinned_extensions: Vec::new(),
-            archive_after: ArchiveAfter::default(),
-        });
+        // The listed profiles come first.
+        let listed = self.listed_profiles();
+        self.profiles.insert(
+            listed,
+            Profile {
+                id,
+                name: name.to_string(),
+                color: Color::default(),
+                favorites,
+                favorites_hint_hidden: false,
+                search_engine: SearchEngine::default(),
+                search_suggestions: true,
+                pinned_extensions: Vec::new(),
+                archive_after: ArchiveAfter::default(),
+                incognito: false,
+            },
+        );
         id
     }
 
@@ -623,17 +756,22 @@ impl Sidebar {
         let id = SpaceId(self.next_id());
         let pinned = self.insert(None, NodeKind::Container);
         let today = self.insert(None, NodeKind::Container);
-        self.spaces.push(Space {
-            id,
-            title: title.to_string(),
-            emoji: None,
-            theme: Theme::default(),
-            profile,
-            pinned,
-            today,
-            selected: None,
-            collapsed: false,
-        });
+        // The listed Spaces come first.
+        let listed = self.listed_spaces();
+        self.spaces.insert(
+            listed,
+            Space {
+                id,
+                title: title.to_string(),
+                emoji: None,
+                theme: Theme::default(),
+                profile,
+                pinned,
+                today,
+                selected: None,
+                collapsed: false,
+            },
+        );
         Ok(id)
     }
 
@@ -693,8 +831,11 @@ impl Sidebar {
             .iter()
             .position(|s| s.id == id)
             .ok_or(Error::UnknownSpace)?;
+        if self.is_incognito(id) {
+            return Err(Error::UnknownSpace);
+        }
         let space = self.spaces.remove(from);
-        self.spaces.insert(index.min(self.spaces.len()), space);
+        self.spaces.insert(index.min(self.listed_spaces()), space);
         Ok(())
     }
 
@@ -706,15 +847,19 @@ impl Sidebar {
             .iter()
             .position(|s| s.id == id)
             .ok_or(Error::UnknownSpace)?;
-        if self.spaces.len() == 1 {
+        if self.is_incognito(id) {
+            return Err(Error::UnknownSpace);
+        }
+        if self.listed_spaces() == 1 {
             return Err(Error::LastSpace);
         }
         if self.displayed().id == id {
-            let neighbor = self
-                .spaces
-                .get(index + 1)
-                .unwrap_or(&self.spaces[index - 1]);
-            self.displayed = Some(neighbor.id);
+            let next = if index + 1 < self.listed_spaces() {
+                index + 1
+            } else {
+                index - 1
+            };
+            self.displayed = Some(self.spaces[next].id);
         }
         let space = self.spaces.remove(index);
         self.url_routing.forget_space(id);
@@ -1131,6 +1276,11 @@ impl Sidebar {
     /// node moved to its own Space.
     pub fn move_to_space(&mut self, id: NodeId, space: SpaceId) -> Result<(), Error> {
         let (pinned, today) = self.space(space).map(|s| (s.pinned, s.today))?;
+        // Nothing goes in or out of an incognito window.
+        let from = self.space_of(id);
+        if self.is_incognito(space) || from.is_some_and(|from| self.is_incognito(from)) {
+            return Err(Error::UnknownSpace);
+        }
         let (row, to) = if self.folder_mut(id).is_ok() {
             (id, pinned)
         } else {
@@ -3222,5 +3372,50 @@ mod tests {
         sidebar.split(b, a).unwrap();
         let json = serde_json::to_string(&sidebar).unwrap();
         assert_eq!(serde_json::from_str::<Sidebar>(&json).unwrap(), sidebar);
+    }
+
+    #[test]
+    fn keeps_an_incognito_space_unlisted_unsaved_and_apart() {
+        let mut sidebar = Sidebar::default();
+        let home = sidebar.spaces()[0].id;
+        let tab = sidebar.open_tab(home, "https://a.test").unwrap();
+        let incognito = sidebar.open_incognito();
+        let secret = sidebar.open_tab(incognito, "https://secret.test").unwrap();
+        assert!(sidebar.is_incognito(incognito));
+        assert_eq!(sidebar.spaces().len(), 1);
+        assert_eq!(sidebar.profiles().len(), 1);
+        // A Space created later is listed before it.
+        let work = sidebar
+            .create_space("Work", sidebar.profiles()[0].id)
+            .unwrap();
+        assert_eq!(
+            sidebar.spaces().iter().map(|s| s.id).collect::<Vec<_>>(),
+            [home, work]
+        );
+        // Shown in its window, it has no neighbor and takes nothing in or out.
+        sidebar.display(incognito).unwrap();
+        assert_eq!(sidebar.next_space(false), None);
+        assert_eq!(sidebar.space_at(1), Some(home));
+        assert!(sidebar.move_to_space(tab, incognito).is_err());
+        assert!(sidebar.move_to_space(secret, home).is_err());
+        assert!(sidebar.delete_space(incognito).is_err());
+        assert!(sidebar.reaches(incognito, incognito));
+        assert!(!sidebar.reaches(incognito, home));
+        assert!(!sidebar.reaches(home, incognito));
+        assert!(sidebar.reaches(home, work));
+        // Never saved.
+        let saved = sidebar.saved();
+        assert!(
+            saved
+                .tabs()
+                .all(|(_, tab)| tab.url != "https://secret.test")
+        );
+        assert_eq!(saved.spaces().len(), 2);
+        assert!(saved.space(incognito).is_err());
+        // Gone with its window.
+        sidebar.close_incognito(incognito).unwrap();
+        assert!(sidebar.node(secret).is_none());
+        assert_eq!(sidebar.displayed().id, home);
+        assert_eq!(sidebar, saved);
     }
 }

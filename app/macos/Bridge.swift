@@ -185,6 +185,8 @@ final class AppModel: ObservableObject {
     /// A swipe pages between the Spaces, like Arc's: past a third of the sidebar, it shows the
     /// next or the previous one; before the first, the library.
     private func swiped(_ phase: String, _ dx: Double) {
+        // An incognito window has no other Space to swipe to.
+        guard state?.incognito != true else { return }
         switch phase {
         case "begin":
             swipe = 0

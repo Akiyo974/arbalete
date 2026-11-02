@@ -444,6 +444,10 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
 - A minimal sidebar like Arc's: the address field, an "Incognito" label, "New Tab" and today's tabs only (no
   Favorites, pinned tabs, Spaces or profiles); a dark theme that sets it apart.
 - Extensions disabled unless allowed in incognito; downloads still saved.
+- Done: an incognito window holds a Space and a profile of its own, listed nowhere and never saved, whose
+  web data stays in memory and whose pages show dark; it keeps no history and no closed tabs, and goes with
+  its window. Its tabs and the other windows' never reach each other, and other apps' links never open in
+  it. Extensions are off there; allowing one in incognito is left for later.
 
 ### Phase 12 — Arc feature audit
 - Use Arc as a user, systematically, to find the features this plan misses: every menu and submenu, keyboard

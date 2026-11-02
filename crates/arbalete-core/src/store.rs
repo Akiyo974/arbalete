@@ -35,7 +35,7 @@ pub enum LoadError {
 pub fn save(sidebar: &Sidebar, windows: &[View], path: &Path) -> io::Result<()> {
     let saved = Saved {
         version: VERSION,
-        sidebar: sidebar.clone(),
+        sidebar: sidebar.saved(),
         windows: windows.to_vec(),
     };
     let json = serde_json::to_vec_pretty(&saved).map_err(io::Error::other)?;

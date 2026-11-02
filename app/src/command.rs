@@ -198,6 +198,8 @@ pub enum Command {
     NewLittle(Option<String>),
     /// Opens another window, on the same Space, without a tab: `window/new`.
     NewWindow,
+    /// Opens an incognito window, whose browsing leaves nothing behind: `window/incognito`.
+    NewIncognitoWindow,
     /// Acts in a Little Arbalete window, from its bar: `little/<window id>/ready`,
     /// `little/<window id>/navigate/<percent-encoded url>` or `little/<window id>/open`.
     Little(u32, LittleAction),
@@ -506,6 +508,7 @@ impl Command {
             "toolbar/toggle" => Some(Self::ToggleToolbar),
             "little/new" => Some(Self::NewLittle(None)),
             "window/new" => Some(Self::NewWindow),
+            "window/incognito" => Some(Self::NewIncognitoWindow),
             "sidebar/reveal" => Some(Self::RevealSidebar),
             "sidebar/conceal" => Some(Self::ConcealSidebar),
             "library/show" => Some(Self::ShowLibrary),
@@ -1632,6 +1635,10 @@ mod tests {
     #[test]
     fn parses_little_window_commands() {
         assert_eq!(Command::parse("window/new"), Some(Command::NewWindow));
+        assert_eq!(
+            Command::parse("window/incognito"),
+            Some(Command::NewIncognitoWindow)
+        );
         assert_eq!(Command::parse("little/new"), Some(Command::NewLittle(None)));
         assert_eq!(
             Command::parse("little/new/https%3A%2F%2Fexample.com%2F"),

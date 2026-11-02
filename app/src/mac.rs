@@ -273,6 +273,11 @@ define_class!(
             crate::shell::run(Command::NewWindow);
         }
 
+        #[unsafe(method(arbaleteNewIncognito:))]
+        fn new_incognito(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::NewIncognitoWindow);
+        }
+
         #[unsafe(method(arbaleteNewLittle:))]
         fn new_little(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::NewLittle(None));
@@ -609,6 +614,13 @@ pub fn setup_menu() {
                     ns_string!("New Window"),
                     sel!(arbaleteNewWindow:),
                     ns_string!("n"),
+                ),
+                // An uppercase key equivalent adds ⇧.
+                item(
+                    mtm,
+                    ns_string!("New Incognito Window"),
+                    sel!(arbaleteNewIncognito:),
+                    ns_string!("N"),
                 ),
                 option_item(
                     mtm,

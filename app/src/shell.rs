@@ -202,6 +202,9 @@ thread_local! {
     static SESSION_FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     /// Each profile's history, opened on its first visit.
     static HISTORIES: RefCell<HashMap<ProfileId, History>> = RefCell::default();
+    /// The incognito windows' profiles, with the temporary folder that stands for their
+    /// directory, removed with the window: their web data stays in memory.
+    static INCOGNITO: RefCell<HashMap<ProfileId, PathBuf>> = RefCell::default();
     /// Browsers not closed yet: the app quits when the last one closes.
     static OPEN_BROWSERS: Cell<usize> = const { Cell::new(0) };
     /// The window was asked to close, by quitting or its close button.
@@ -237,6 +240,8 @@ struct Win {
     view: RefCell<Option<WindowView>>,
     /// The window it opened from, which it opens offset from.
     cascade: Cell<Option<Rect>>,
+    /// An incognito window's Space, the only one it shows, gone with it.
+    incognito: Cell<Option<SpaceId>>,
     /// Opened from another window, it shows the Command Bar once in front, like Arc's.
     fresh: Cell<bool>,
     /// The content view of its card's window, once it has shown a page, which a picture of the
@@ -324,6 +329,7 @@ impl Win {
             id,
             view: RefCell::new(None),
             cascade: Cell::new(None),
+            incognito: Cell::new(None),
             fresh: Cell::new(false),
             card_view: Cell::new(None),
             window: RefCell::new(None),
@@ -429,12 +435,61 @@ fn new_window() {
     );
 }
 
+/// Opens an incognito window, like Arc's: on a Space of its own, in a profile of its own whose
+/// web data stays in memory, on the Command Bar.
+fn new_incognito_window() {
+    let space = update_sidebar(Sidebar::open_incognito);
+    let (profile, view) = STATE.with_borrow(|state| {
+        let profile = state.sidebar.profile_of_space(space).expect("its Space");
+        (profile, state.sidebar.view_showing(space))
+    });
+    let dir = std::env::temp_dir().join(format!(
+        "arbalete-incognito-{}-{}",
+        std::process::id(),
+        serde_json::to_string(&profile).expect("an id")
+    ));
+    INCOGNITO.with_borrow_mut(|incognito| incognito.insert(profile, dir));
+    open_window_in(view, true, Some(space));
+}
+
+/// Closes an incognito window's pages and forgets its Space, its profile and their web data, as
+/// the window `id` closes; any other window keeps its own.
+fn close_incognito(id: u32) {
+    let Some(space) = window_by_id(id).and_then(|win| win.incognito.get()) else {
+        return;
+    };
+    let (profile, tabs) = STATE.with_borrow(|state| {
+        let sidebar = &state.sidebar;
+        let profile = sidebar.profile_of_space(space).expect("its Space");
+        let tabs: Vec<_> = sidebar
+            .tabs()
+            .filter(|(tab, _)| sidebar.space_of(*tab) == Some(space))
+            .map(|(tab, _)| tab)
+            .collect();
+        (profile, tabs)
+    });
+    for tab in tabs {
+        close_page(tab);
+    }
+    let _ = update_sidebar(|sidebar| sidebar.close_incognito(space));
+    CONTEXTS.with_borrow_mut(|contexts| contexts.remove(&profile));
+    if let Some(dir) = INCOGNITO.with_borrow_mut(|incognito| incognito.remove(&profile)) {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
 /// Opens another window, offset from the focused one, showing `view` of the sidebar; `fresh`, on
 /// the Command Bar.
 fn open_window(view: WindowView, fresh: bool) {
+    open_window_in(view, fresh, None);
+}
+
+/// Opens a window as `open_window` does, an incognito one on its Space `incognito`.
+fn open_window_in(view: WindowView, fresh: bool, incognito: Option<SpaceId>) {
     let id = NEXT_WINDOW.get();
     NEXT_WINDOW.set(id + 1);
     let window = Win::new(id);
+    window.incognito.set(incognito);
     window.view.set(Some(view));
     window.cascade.set(
         win()
@@ -689,8 +744,14 @@ impl UiState {
     /// neighbors', which the UI lays out side by side to swipe between them. The other pages are
     /// left out, as they would weigh on every update.
     fn to_json(&self) -> serde_json::Value {
-        let spaces = self.sidebar.spaces();
         let displayed = self.sidebar.displayed().id;
+        // An incognito window shows only its Space.
+        let incognito = self.sidebar.is_incognito(displayed);
+        let spaces = if incognito {
+            std::slice::from_ref(self.sidebar.displayed())
+        } else {
+            self.sidebar.spaces()
+        };
         let index = spaces
             .iter()
             .position(|s| s.id == displayed)
@@ -698,6 +759,7 @@ impl UiState {
         json!({
             "page": self.page,
             "toolbar": app_settings().show_toolbar,
+            "incognito": incognito,
             "space": displayed,
             "spaces": spaces.iter().map(|s| json!({
                 "id": s.id,
@@ -916,7 +978,7 @@ fn other_windows() -> Vec<WindowView> {
     WINDOWS.with_borrow(|windows| {
         windows
             .iter()
-            .filter(|win| win.id != focused)
+            .filter(|win| win.id != focused && win.incognito.get().is_none())
             .filter_map(|win| win.view.with_borrow(Clone::clone))
             .collect()
     })
@@ -1352,8 +1414,17 @@ fn search_overlay(text: &str) {
         let tabs: Vec<_> = if wanted.is_empty() {
             Vec::new()
         } else {
+            let shown = sidebar.displayed().id;
             sidebar
                 .tabs()
+                // A favorite belongs to no Space: an incognito window has none.
+                .filter(|(id, _)| {
+                    sidebar
+                        .space_of(*id)
+                        .map_or(!sidebar.is_incognito(shown), |space| {
+                            sidebar.reaches(shown, space)
+                        })
+                })
                 .filter(|(_, tab)| {
                     tab.label().to_lowercase().contains(&wanted)
                         || tab.url.to_lowercase().contains(&wanted)
@@ -1965,6 +2036,19 @@ pub fn open_link(url: Option<String>) {
     let Some(url) = url else {
         return open_little(None);
     };
+    // Another app's links never open in an incognito window: in another window, or else alone.
+    if win().incognito.get().is_some() {
+        let other = WINDOWS.with_borrow(|windows| {
+            windows
+                .iter()
+                .find(|win| win.incognito.get().is_none())
+                .map(|win| win.id)
+        });
+        match other {
+            Some(other) => focus(other),
+            None => return open_little(Some(url)),
+        }
+    }
     match STATE.with_borrow(|state| state.sidebar.url_routing().destination(&url)) {
         Destination::Little => open_little(Some(url)),
         Destination::MostRecentSpace => open_in_window(None, &url),
@@ -3260,7 +3344,12 @@ fn flip_panes(split: Option<NodeId>) {
 /// Shows a tab, with its Space; a favorite is shown in the displayed Space.
 fn select_tab(id: NodeId) {
     let selected = update_sidebar(|sidebar| {
-        let space = sidebar.space_of(id).unwrap_or(sidebar.displayed().id);
+        let shown = sidebar.displayed().id;
+        let space = sidebar.space_of(id).unwrap_or(shown);
+        // An incognito window and the others never show each other's tabs.
+        if !sidebar.reaches(shown, space) {
+            return Err(arbalete_core::sidebar::Error::UnknownNode);
+        }
         sidebar
             .select(space, id)
             .and_then(|()| sidebar.display(space))
@@ -3280,6 +3369,10 @@ fn select_found(find: impl FnOnce(&Sidebar) -> Option<NodeId>) {
 /// Shows a Space in the sidebar and its selected tab; like a selection, an unknown Space from the
 /// UI is ignored.
 fn show_space(id: SpaceId) {
+    let shown = STATE.with_borrow(|state| state.sidebar.displayed().id);
+    if !STATE.with_borrow(|state| state.sidebar.reaches(shown, id)) {
+        return;
+    }
     if update_sidebar(|sidebar| sidebar.display(id)).is_ok() {
         show_selected();
     }
@@ -3338,7 +3431,10 @@ fn remove_tab(tab: NodeId) -> Option<NodeId> {
     let next = STATE.with_borrow_mut(|state| {
         let profile = state.sidebar.profile_of(tab).expect("an open tab");
         let closed = state.sidebar.tab_mut(tab).expect("an open tab").clone();
-        state.closed.push((closed, profile, SystemTime::now()));
+        // An incognito window's tabs cannot be reopened.
+        if !INCOGNITO.with_borrow(|incognito| incognito.contains_key(&profile)) {
+            state.closed.push((closed, profile, SystemTime::now()));
+        }
         state.sidebar.next_after_close(tab)
     });
     update_sidebar(|sidebar| sidebar.remove(tab)).expect("an open tab");
@@ -4818,9 +4914,15 @@ fn send_window_width() {
 /// use it (ProfileContextHandler).
 fn create_profile_context(profile: ProfileId) {
     CONTEXTS.with_borrow_mut(|contexts| contexts.insert(profile, None));
+    // Without a directory, an incognito window's web data stays in memory.
+    let incognito = INCOGNITO.with_borrow(|incognito| incognito.contains_key(&profile));
     let dir = profile_dir(profile);
     let settings = RequestContextSettings {
-        cache_path: CefString::from(dir.to_str().expect("a UTF-8 path")),
+        cache_path: CefString::from(if incognito {
+            ""
+        } else {
+            dir.to_str().expect("a UTF-8 path")
+        }),
         ..Default::default()
     };
     request_context_create_context(
@@ -4830,6 +4932,9 @@ fn create_profile_context(profile: ProfileId) {
 }
 
 fn profile_dir(profile: ProfileId) -> PathBuf {
+    if let Some(dir) = INCOGNITO.with_borrow(|incognito| incognito.get(&profile).cloned()) {
+        return dir;
+    }
     let id = serde_json::to_string(&profile).expect("an id");
     let dir = DATA_DIR.get().expect("set when the context is initialized");
     dir.join(format!("Profile {id}"))
@@ -4848,6 +4953,10 @@ fn update_history<E: std::fmt::Display>(
 
 /// Runs `f` on a profile's history, opened the first time, unless it cannot be opened.
 fn with_history<R>(profile: ProfileId, f: impl FnOnce(&mut History) -> R) -> Option<R> {
+    // An incognito window keeps no history.
+    if INCOGNITO.with_borrow(|incognito| incognito.contains_key(&profile)) {
+        return None;
+    }
     HISTORIES.with_borrow_mut(|histories| {
         let history = match histories.entry(profile) {
             Entry::Occupied(entry) => entry.into_mut(),
@@ -4917,6 +5026,10 @@ wrap_request_context_handler! {
         /// selected tab if it waited for them.
         fn on_request_context_initialized(&self, context: Option<&mut RequestContext>) {
             let Some(context) = context else { return };
+            // Like Arc's, an incognito window's pages show dark.
+            if INCOGNITO.with_borrow(|incognito| incognito.contains_key(&self.profile)) {
+                context.set_chrome_color_scheme(ColorVariant::DARK, 0);
+            }
             CONTEXTS.with_borrow_mut(|contexts| contexts.insert(self.profile, Some(context.clone())));
             extensions::profile_ready(self.profile, &profile_dir(self.profile));
             in_each_window(show_selected);
@@ -5152,6 +5265,7 @@ fn run_command(command: Command) {
         (Command::ToggleToolbar, _) => toggle_toolbar(),
         (Command::NewLittle(url), _) => open_link(url),
         (Command::NewWindow, _) => new_window(),
+        (Command::NewIncognitoWindow, _) => new_incognito_window(),
         (Command::Little(id, action), _) => little_action(id, action),
         (Command::OpenLittleInSpace, _) => {
             if let Some(id) = focused_little() {
@@ -5633,6 +5747,10 @@ wrap_window_delegate! {
                 focus(next);
                 show_selected();
             } else if let Some(host) = bridge_host() {
+                // Quitting: the incognito windows' folders go too.
+                for (_, dir) in INCOGNITO.take() {
+                    let _ = std::fs::remove_dir_all(dir);
+                }
                 // The bridge closes last, which quits (browser_closed): closed with the pages, it
                 // could quit while the windows still close their overlays, and the app crashed.
                 host.close_browser(1);
@@ -5649,6 +5767,7 @@ wrap_window_delegate! {
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
             focus(self.id);
             if !CLOSING.get() && WINDOWS.with_borrow(Vec::len) > 1 {
+                close_incognito(self.id);
                 hand_pages_over(self.id);
                 return 1;
             }
