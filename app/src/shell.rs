@@ -4661,7 +4661,7 @@ fn hide_content() {
         if let (Some(panel), Some((card_color, _, _))) =
             (card_panel(), win().window_colors.with_borrow(Clone::clone))
         {
-            panel.set_background_color(card_color);
+            panel.set_background_color(empty_card(card_color));
         }
         place_card();
         send_panes();
@@ -4754,7 +4754,7 @@ fn set_window_colors(card_color: u32, grain: f64, colors: &[u32]) {
     if let Some(panel) = card_panel()
         && split_shown().is_none()
     {
-        panel.set_background_color(card_color);
+        panel.set_background_color(empty_card(card_color));
     }
     win().colored.set(true);
     // Only when it changes: showing an overlay again puts it above the others, like the theme
@@ -4764,6 +4764,18 @@ fn set_window_colors(card_color: u32, grain: f64, colors: &[u32]) {
         if card.is_visible() != visible {
             card.set_visible(visible);
         }
+    }
+}
+
+/// The color an empty card shows, from the card's color: on macOS, like Arc's, the window's
+/// blur shows through it, a little lighter, more so in a light theme.
+fn empty_card(card_color: u32) -> u32 {
+    if cfg!(target_os = "macos") {
+        let channels = [16, 8, 0].map(|shift| (card_color >> shift) & 0xff);
+        let light = channels.iter().sum::<u32>() > 3 * 0x80;
+        if light { 0x80ff_ffff } else { 0x14ff_ffff }
+    } else {
+        card_color
     }
 }
 
