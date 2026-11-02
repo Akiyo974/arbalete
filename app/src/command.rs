@@ -388,7 +388,7 @@ pub enum Command {
     /// Moves a Space to an index in sidebar order, as the app counts them once the Space has
     /// left: `space/move/<space id>/<index>`.
     MoveSpace(SpaceId, usize),
-    /// Attaches a Space to another profile, from its menu.
+    /// Attaches a Space to another profile: `space/profile/<space id>/<profile id>`.
     SetSpaceProfile(SpaceId, ProfileId),
     /// Attaches a Space to a new profile for the UI to rename, from its menu.
     NewSpaceProfile(SpaceId),
@@ -791,6 +791,15 @@ impl Command {
                 }
                 if let Some(id) = path.strip_prefix("space/delete/") {
                     return serde_json::from_str(id).ok().map(Self::DeleteSpace);
+                }
+                if let Some((id, profile)) = path
+                    .strip_prefix("space/profile/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let id = serde_json::from_str(id).ok()?;
+                    return serde_json::from_str(profile)
+                        .ok()
+                        .map(|profile| Self::SetSpaceProfile(id, profile));
                 }
                 if let Some((id, index)) = path
                     .strip_prefix("space/move/")
@@ -1499,6 +1508,18 @@ mod tests {
         assert_eq!(Command::parse("space/move/4/x"), None);
         assert_eq!(Command::parse("space/move/x/2"), None);
         assert_eq!(Command::parse("space/move/4"), None);
+        let Some(Command::SetSpaceProfile(id, profile)) = Command::parse("space/profile/4/2")
+        else {
+            panic!("a Space's profile")
+        };
+        assert_eq!(
+            (
+                serde_json::to_string(&id).unwrap(),
+                serde_json::to_string(&profile).unwrap()
+            ),
+            ("4".to_string(), "2".to_string())
+        );
+        assert_eq!(Command::parse("space/profile/4/x"), None);
         assert_eq!(Command::parse("space/toggle/x"), None);
         assert_eq!(Command::parse("space/delete/x"), None);
         let Some(Command::ShowThemePicker(id)) = Command::parse("theme/show/4") else {

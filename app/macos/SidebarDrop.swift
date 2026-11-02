@@ -29,10 +29,18 @@ let edgeBand: CGFloat = 20
 
 extension AppModel {
     /// The color that marks where a drop lands and the focused pane, like Arc's: the one standing
-    /// out most on the theme (maxContrastColor), or Arc's indigo without colors.
+    /// out most on the theme (maxContrastColor); without colors, Arc's lavender in a dark window,
+    /// measured, and its indigo in a light one.
     var themeColor: Color {
-        guard let theme = space?.theme, let lead = theme.colors.first else { return color("#333ce8") }
+        guard let theme = space?.theme, let lead = theme.colors.first else {
+            return color(systemDark() ? "#e2e1f3" : "#333ce8")
+        }
         return color(ThemePalette(lead).strongest(dark: isDark(theme)))
+    }
+
+    /// The color of a Space's main buttons, like Arc's: its theme's, or its blue without colors.
+    var accent: Color {
+        (space?.theme.colors.isEmpty ?? true) ? color("#333ce8") : themeColor
     }
 
     /// The tabs' titles, like Arc's: the theme's title color, or the sidebar's ink without colors.
@@ -331,33 +339,21 @@ struct DropChip: View {
     }
 }
 
-/// A tab that a tab resting on its middle would join in a split, as in Arc: two cards side by
-/// side, the tab's and an empty one, tinted, on the side the dropped tab would take.
-struct SplitPreview: View {
-    let tab: Tab
+/// Over a tab that a tab resting on its middle would join in a split, as in Arc: the row stays,
+/// and a light chip shows on the half the dropped tab would take, where the split row puts it.
+struct SplitHalf: View {
     let leading: Bool
-    let tint: Color
 
     var body: some View {
-        HStack(spacing: 6) {
-            if leading { empty }
-            HStack(spacing: 6) {
-                Favicon(url: tab.favicon, size: 14)
-                Text(tab.label).lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(RoundedRectangle(cornerRadius: 12).fill(.primary.opacity(0.1)))
-            if !leading { empty }
+        HStack(spacing: 4) {
+            if !leading { Color.clear }
+            RoundedRectangle(cornerRadius: 10).fill(Ink.splitDrop).frame(height: 28)
+            if leading { Color.clear }
         }
-        .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 8))
+        .padding(3)
         .frame(height: Measure.rowFill)
         .padding(.vertical, (Measure.row - Measure.rowFill) / 2)
-    }
-
-    private var empty: some View {
-        RoundedRectangle(cornerRadius: 12).fill(tint.opacity(0.5)).frame(maxWidth: .infinity)
+        .allowsHitTesting(false)
     }
 }
 

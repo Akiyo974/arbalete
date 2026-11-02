@@ -14,6 +14,12 @@ final class AppModel: ObservableObject {
     @Published var state: AppState?
     /// The folder or the tab whose name is being edited.
     @Published var renaming: Int?
+    /// The Space whose name or icon ("name" or "emoji") is edited in its header.
+    @Published var editingSpace: SpaceEdit?
+    /// The new Space whose form the sidebar shows (SpaceDraft.swift).
+    @Published var draftSpace: Int?
+    /// The Spaces there were when one was asked for, until it shows.
+    var awaitingDraft: Set<Int>?
     @Published var downloads: [Download] = []
     @Published var archive: [ArchivedTab] = []
     @Published var history: [Visit] = []
@@ -53,6 +59,10 @@ final class AppModel: ObservableObject {
     var splitWait: DispatchWorkItem?
     /// How far a two-finger swipe has moved the displayed Space's page, in points.
     @Published var swipe: CGFloat = 0
+    /// The width of a Space's page in the sidebar, which a swipe slides by.
+    var pageWidth: CGFloat = 0
+    /// The Space a finished swipe slid to, until the app shows it.
+    private var swipedTo: Int?
     @Published var section = LibrarySection.spaces
     @Published var query = "" {
         didSet { if section == .history { searchHistory() } }
@@ -117,8 +127,20 @@ final class AppModel: ObservableObject {
                 NSLog("arbalete: cannot read the state: \(error)")
             }
             paintWindow()
+            followDraft()
+            // The page slid to is now the displayed one, in the middle.
+            if let swipedTo, state?.space == swipedTo {
+                self.swipedTo = nil
+                var still = Transaction()
+                still.disablesAnimations = true
+                withTransaction(still) { swipe = 0 }
+            }
         case "arbalete:rename":
             renaming = try? JSONDecoder().decode(Int.self, from: detail)
+        case "arbalete:new-space":
+            newSpace(moving: try? JSONDecoder().decode(Int.self, from: detail))
+        case "arbalete:edit-space":
+            editingSpace = try? JSONDecoder().decode(SpaceEdit.self, from: detail)
         case "arbalete:downloads":
             downloads = (try? JSONDecoder().decode([Download].self, from: detail)) ?? downloads
         case "arbalete:archive":
@@ -169,15 +191,75 @@ final class AppModel: ObservableObject {
         case "move":
             swipe += dx
         default:
-            let threshold: CGFloat = 80
-            if let state, let index = state.spaces.firstIndex(where: { $0.id == state.space }) {
-                if swipe > threshold {
-                    if index == 0 { openLibrary(nil) } else { run("space/previous") }
-                } else if swipe < -threshold, index < state.spaces.count - 1 {
-                    run("space/next")
+            let threshold = swipeThreshold
+            guard let state, let index = state.spaces.firstIndex(where: { $0.id == state.space })
+            else { return }
+            let (previous, next) = (index > 0, index < state.spaces.count - 1)
+            if (swipe > threshold && previous) || (swipe < -threshold && next) {
+                // Like Arc's, the page carries on to its neighbor, which the app then shows.
+                let forward = swipe < 0
+                swipedTo = state.spaces[index + (forward ? 1 : -1)].id
+                withAnimation(.easeOut(duration: 0.25)) {
+                    swipe = forward ? -pageWidth : pageWidth
+                } completion: {
+                    self.run(forward ? "space/next" : "space/previous")
+                    // Should the app not show it, the page comes back.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        guard self.swipedTo != nil else { return }
+                        self.swipedTo = nil
+                        withAnimation(.spring(duration: 0.3)) { self.swipe = 0 }
+                    }
                 }
+            } else {
+                if swipe > threshold, index == 0 { openLibrary(nil) }
+                // Like Arc's, past the last Space, the swipe creates one.
+                if swipe < -threshold, !next { newSpace() }
+                withAnimation(.spring(duration: 0.3)) { swipe = 0 }
             }
-            withAnimation(.spring(duration: 0.3)) { swipe = 0 }
+        }
+    }
+
+    /// How far a swipe goes before it pages, or opens the library or a new Space.
+    var swipeThreshold: CGFloat { 80 }
+
+    /// Whether a swipe goes past the first Space, rightward, or the last one, leftward.
+    private var swipePastEdge: Bool {
+        guard let state, let index = state.spaces.firstIndex(where: { $0.id == state.space })
+        else { return false }
+        return (swipe > 0 && index == 0) || (swipe < 0 && index == state.spaces.count - 1)
+    }
+
+    /// How far the pages slide: with the fingers, or a fifth of that past the first or the last
+    /// Space, where they resist like Arc's.
+    var pagerShift: CGFloat { swipePastEdge ? swipe / 5 : swipe }
+
+    /// How far a swipe past the last Space has gone toward creating one, from 0 to 1.
+    var creatingShare: CGFloat {
+        swipe < 0 && swipePastEdge ? min(1, -swipe / swipeThreshold) : 0
+    }
+
+    /// The theme of the Space a swipe brings in, and how far it has come, from 0 to 1.
+    func swipeNeighbor() -> (Theme?, Double) {
+        guard swipe != 0, pageWidth > 0, let state,
+            let index = state.spaces.firstIndex(where: { $0.id == state.space })
+        else { return (nil, 0) }
+        let at = index + (swipe < 0 ? 1 : -1)
+        guard state.spaces.indices.contains(at) else { return (nil, 0) }
+        return (state.spaces[at].theme, min(1, abs(swipe) / pageWidth))
+    }
+
+    /// The pages of the displayed Space's previous neighbor, itself and its next neighbor, if
+    /// the app sent them.
+    /// Each is known by its Space, so that the page slid to stays in place once displayed; a
+    /// missing one by its side.
+    func neighbors() -> [(id: Int, shown: (SpacePage, Space)?)] {
+        guard let state, let index = state.spaces.firstIndex(where: { $0.id == state.space })
+        else { return [] }
+        return (-1...1).map { step in
+            let at = index + step
+            guard state.spaces.indices.contains(at) else { return (Int.min + 1 + step, nil) }
+            let space = state.spaces[at]
+            return (space.id, state.pages.first { $0.space == space.id }.map { ($0, space) })
         }
     }
 

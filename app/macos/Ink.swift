@@ -29,6 +29,8 @@ enum Ink {
     static let marked = Color.ink((0x000000, 0.10), (0xFAFBFF, 0.10))
     /// A tab of a split, or of a row inside another.
     static let child = Color.ink((0x000000, 0.07), (0xFFFFFF, 0.07))
+    /// Where a tab resting on another's middle would go in their split.
+    static let splitDrop = Color.ink((0xFFFFFF, 0.85), (0xFFFFFF, 0.45))
     static let separator = Color.ink((0x000000, 0.15), (0xFFFFFF, 0.15))
     /// Secondary icons and labels.
     static let secondary = Color.ink((0x000000, 0.30), (0xFFFFFF, 0.45))

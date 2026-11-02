@@ -124,7 +124,7 @@ struct Tint: View {
         }
     }
 
-    @ViewBuilder private static func colors(_ colors: [String]) -> some View {
+    @ViewBuilder static func colors(_ colors: [String]) -> some View {
         if colors.count == 1 {
             color(colors[0])
         } else {

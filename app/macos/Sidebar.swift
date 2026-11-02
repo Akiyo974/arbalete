@@ -16,15 +16,20 @@ struct SidebarView: View {
         } else {
             VStack(spacing: 0) {
                 SidebarToolbar(model: model)
-                if !(model.state?.toolbar ?? false) {
-                    AddressRow(model: model)
-                }
-                if let page = model.page, let space = model.space {
-                    SpaceSections(model: model, page: page, space: space)
-                        .offset(x: model.swipe)
-                        .opacity(1 - min(0.6, abs(model.swipe) / 300))
+                if let space = model.space, model.draftSpace == space.id {
+                    // Like Arc's, a new Space's form takes the address's and the tabs' room.
+                    SpaceDraft(model: model, space: space)
                 } else {
-                    Spacer()
+                    if !(model.state?.toolbar ?? false) {
+                        AddressRow(model: model)
+                    }
+                    if let page = model.page, model.space != nil {
+                        // Like Arc's, the profile's favorites stay while the Spaces slide below.
+                        Favorites(model: model, page: page)
+                        SpacePager(model: model)
+                    } else {
+                        Spacer()
+                    }
                 }
                 RecentDownloads(model: model)
                 Footer(model: model)
@@ -69,11 +74,11 @@ struct NavButtons: View {
 
     var body: some View {
         let page = model.state?.page
-        IconButton(symbol: "chevron.left", label: "Back", symbolSize: toolbarSymbol) {
+        IconButton(symbol: "arrow.left", label: "Back", symbolSize: toolbarSymbol) {
             model.run("back")
         }
             .disabled(!(page?.canGoBack ?? false))
-        IconButton(symbol: "chevron.right", label: "Forward", symbolSize: toolbarSymbol) {
+        IconButton(symbol: "arrow.right", label: "Forward", symbolSize: toolbarSymbol) {
             model.run("forward")
         }
             .disabled(!(page?.canGoForward ?? false))
@@ -233,7 +238,6 @@ struct SpaceSections: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Favorites(model: model, page: page)
             ScrollView {
                 VStack(alignment: .leading, spacing: 1) {
                     SpaceHeader(model: model, page: page, space: space)
@@ -278,6 +282,65 @@ struct SpaceSections: View {
                 _height.wrappedValue = $0.height
             }
         }
+    }
+}
+
+/// The displayed Space's tabs between its neighbors', like Arc's: a swipe slides them along, the
+/// neighbor coming in beside it, and past a threshold carries on to it.
+struct SpacePager: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            HStack(spacing: 0) {
+                ForEach(model.neighbors(), id: \.id) { neighbor in
+                    Group {
+                        if let (page, space) = neighbor.shown {
+                            SpaceSections(model: model, page: page, space: space)
+                        } else {
+                            Color.clear
+                        }
+                    }
+                    .frame(width: width)
+                }
+            }
+            .offset(x: model.pagerShift - width)
+            .onAppear { model.pageWidth = width }
+            .onChange(of: width) { _, now in model.pageWidth = now }
+        }
+        .clipped()
+        // Past the last Space, a "+" comes in from the edge, its ring filling as the swipe goes.
+        .overlay(alignment: .trailing) {
+            let share = model.creatingShare
+            if share > 0 {
+                CreateDial(share: share, tint: model.accent)
+                    .offset(x: 48 * (1 - min(1, share * 2)))
+                    .padding(.trailing, 8)
+            }
+        }
+    }
+}
+
+/// The "+" a swipe past the last Space fills, like Arc's: a ring around it, then whole, tinted.
+struct CreateDial: View {
+    let share: CGFloat
+    let tint: Color
+
+    var body: some View {
+        let full = share >= 1
+        ZStack {
+            Circle().fill(full ? tint : Color.white.opacity(0.9))
+            Circle().trim(from: 0, to: share)
+                .stroke(tint, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .padding(1.5)
+            Image(systemName: "plus").font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(full ? Color.white : tint)
+        }
+        .frame(width: 30, height: 30)
+        .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+        .animation(.easeOut(duration: 0.15), value: full)
     }
 }
 
@@ -380,17 +443,19 @@ struct FavoritesHint: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            Image(systemName: "star").font(.system(size: 15))
-            Text("Drag tabs here to keep them close").font(.system(size: 12, weight: .semibold))
+            Image(systemName: "star.circle.fill").font(.system(size: 16))
+            Text("Drag tabs here to keep them close").font(.system(size: 13, weight: .semibold))
             Text("Favorites stay one click away in every Space of this profile")
-                .font(.system(size: 11))
+                .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
         .padding(12)
         .frame(maxWidth: .infinity)
+        // Dashed, like Arc's.
         .background(
-            RoundedRectangle(cornerRadius: 10).strokeBorder(.primary.opacity(0.15)))
+            RoundedRectangle(cornerRadius: Measure.radius)
+                .strokeBorder(.primary.opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
         .overlay(alignment: .topTrailing) {
             IconButton(symbol: "xmark", label: "Hide this hint", size: 20) {
                 model.run("favorites/hide-hint/\(space)")
@@ -417,22 +482,32 @@ struct SpaceHeader: View {
             Button {
                 model.run("space/toggle/\(page.space)")
             } label: {
-                HStack(spacing: 8) {
-                    Group {
-                        if hovered {
-                            Image(systemName: "chevron.right")
-                                .rotationEffect(.degrees(page.collapsed ? 0 : 90))
-                                .font(.system(size: 10, weight: .semibold))
-                        } else if let emoji = space.emoji {
-                            Text(emoji).font(.system(size: 13))
-                        } else {
-                            Circle().fill(.primary).frame(width: 6, height: 6)
+                // Like Arc's: the emoji where the tabs' icons stand, and none without one.
+                HStack(spacing: 6) {
+                    if editing == "emoji" {
+                        SpaceField(model: model, space: page.space, field: "emoji", value: "")
+                            .font(.system(size: 16))
+                            .frame(width: 24)
+                    } else if let emoji = space.emoji {
+                        Group {
+                            if hovered {
+                                Image(systemName: "chevron.right")
+                                    .rotationEffect(.degrees(page.collapsed ? 0 : 90))
+                                    .font(.system(size: 10, weight: .semibold))
+                            } else {
+                                Text(emoji).font(.system(size: 16))
+                            }
                         }
+                        .frame(width: 24)
                     }
-                    .frame(width: 16)
-                    Text(space.title)
-                        .font(.system(size: 12, weight: .semibold))
-                        .lineLimit(1)
+                    if editing == "name" {
+                        SpaceField(model: model, space: page.space, field: "name", value: space.title)
+                            .font(.system(size: 13, weight: .semibold))
+                    } else {
+                        Text(space.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                    }
                     Spacer()
                 }
                 .contentShape(Rectangle())
@@ -444,11 +519,69 @@ struct SpaceHeader: View {
                 }
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 6)
         .frame(height: 32)
         .foregroundStyle(.secondary)
         .onHover { hovered = $0 }
         .rightClick { model.run("menu/space/\(page.space)") }
+    }
+}
+
+extension SpaceHeader {
+    /// What of the Space is edited in its header, if anything.
+    private var editing: String? {
+        model.editingSpace?.space == page.space ? model.editingSpace?.field : nil
+    }
+}
+
+/// A Space's name or icon to edit, from its menu.
+struct SpaceEdit: Decodable, Equatable {
+    var space: Int
+    var field: String
+}
+
+/// Edits a Space's name in place, or its icon: the character palette opens, and the first emoji
+/// picked or typed is the icon; an empty one removes it.
+struct SpaceField: View {
+    @ObservedObject var model: AppModel
+    let space: Int
+    let field: String
+    let value: String
+    private let _text = State<String>(initialValue: "")
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("", text: _text.projectedValue)
+            .textFieldStyle(.plain)
+            .focused($focused)
+            .onAppear {
+                _text.wrappedValue = value
+                focused = true
+                if field == "emoji" {
+                    DispatchQueue.main.async { NSApp.orderFrontCharacterPalette(nil) }
+                }
+            }
+            .onChange(of: _text.wrappedValue) { _, now in
+                if field == "emoji", let first = now.first { done(String(first)) }
+            }
+            .onSubmit { done(_text.wrappedValue) }
+            .onExitCommand { model.editingSpace = nil }
+            .onChange(of: focused) { _, now in
+                // Clicked away: a name is kept, an icon not picked is left as it was.
+                guard !now, model.editingSpace != nil else { return }
+                if field == "name" { done(_text.wrappedValue) } else { model.editingSpace = nil }
+            }
+    }
+
+    private func done(_ text: String) {
+        guard model.editingSpace != nil else { return }
+        model.editingSpace = nil
+        let value = text.trimmingCharacters(in: .whitespaces)
+        if field == "emoji" {
+            model.run("space/emoji/\(space)/\(percentEncoded(value))")
+        } else if !value.isEmpty, value != self.value {
+            model.run("space/rename/\(space)/\(percentEncoded(value))")
+        }
     }
 }
 
@@ -526,11 +659,12 @@ struct ItemRows: View {
             DropRow(model: model, item: item, place: { model.move($0, to: parent, index + $1) }) {
                 switch item {
                 case .tab(let tab):
-                    if case .split(tab.id, let leading) = model.dropTarget {
-                        SplitPreview(tab: tab, leading: leading, tint: model.themeColor)
-                    } else {
-                        TabRow(model: model, tab: tab, active: tab.id == selected, pinned: pinned)
-                    }
+                    TabRow(model: model, tab: tab, active: tab.id == selected, pinned: pinned)
+                        .overlay {
+                            if case .split(tab.id, let leading) = model.dropTarget {
+                                SplitHalf(leading: leading)
+                            }
+                        }
                 case .folder(let id, let title, let expanded, _):
                     FolderRow(model: model, id: id, title: title, expanded: expanded)
                 case .split(let id, let tabs):
@@ -842,11 +976,16 @@ struct Favicon: View {
 struct Footer: View {
     @ObservedObject var model: AppModel
 
+    /// Like Arc's, a new Space's form leaves only the Spaces' icons.
+    private var drafting: Bool { model.draftSpace != nil }
+
     var body: some View {
         HStack(spacing: 0) {
             IconButton(symbol: "books.vertical", label: "Library") {
                 model.openLibrary(nil)
             }
+            .opacity(drafting ? 0 : 1)
+            .disabled(drafting)
             Spacer()
             HStack(spacing: 2) {
                 ForEach(model.state?.spaces ?? []) { space in
@@ -855,7 +994,7 @@ struct Footer: View {
             }
             Spacer()
             Menu {
-                Button("New Space…") { newSpace(model) }
+                Button("New Space…") { model.newSpace() }
                 Button("New Folder") { model.run("folder/new") }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
                 Divider()
@@ -871,6 +1010,8 @@ struct Footer: View {
             .fixedSize()
             .frame(width: 28, height: 28)
             .help("New")
+            .opacity(drafting ? 0 : 1)
+            .disabled(drafting)
             .popover(isPresented: $model.profilesShown, arrowEdge: .top) {
                 ProfilesView(model: model)
             }
@@ -973,22 +1114,6 @@ struct WindowDragArea: NSViewRepresentable {
     }
 
     func updateNSView(_ view: WindowDrag, context: Context) {}
-}
-
-/// Asks for a new Space's name, then creates it.
-@MainActor func newSpace(_ model: AppModel) {
-    let alert = NSAlert()
-    alert.messageText = "New Space"
-    alert.addButton(withTitle: "Create")
-    alert.addButton(withTitle: "Cancel")
-    let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
-    field.placeholderString = "Name"
-    alert.accessoryView = field
-    alert.window.initialFirstResponder = field
-    guard alert.runModal() == .alertFirstButtonReturn else { return }
-    let title = field.stringValue.trimmingCharacters(in: .whitespaces)
-    guard !title.isEmpty else { return }
-    model.run("space/create/purple//\(percentEncoded(title))")
 }
 
 /// A value as a command's path holds it.

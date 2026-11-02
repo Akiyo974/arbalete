@@ -64,7 +64,12 @@ struct BackdropTint: View {
         let theme = model.space?.theme
         let colored = !(theme?.colors.isEmpty ?? true)
         ZStack(alignment: .topLeading) {
-            Tint(theme: theme, active: model.active)
+            // Like Arc's, a swipe between Spaces fades the window into the coming one's colors.
+            let (coming, share) = model.swipeNeighbor()
+            Tint(theme: theme, active: model.active).opacity(1 - share)
+            if share > 0 {
+                Tint(theme: coming, active: model.active).opacity(share)
+            }
             if let card = model.card {
                 // Like Arc's, a faint shade around the card, outside it only, and an empty card a
                 // little lighter than the window, measured on Arc's.

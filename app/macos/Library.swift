@@ -24,7 +24,7 @@ enum LibrarySection: String, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
-        case .spaces: "square.split.3x1"
+        case .spaces: "rectangle.on.rectangle"
         case .closed: "clock.arrow.circlepath"
         case .archive: "archivebox"
         case .history: "clock"
@@ -132,50 +132,69 @@ struct LibraryView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            VStack(spacing: 4) {
-                Spacer().frame(height: 40)
+            // Like Arc's, measured: the sections in a column of their own, a little lighter than
+            // the window, centered, each a large icon over its name; the one shown tinted.
+            VStack(spacing: 21) {
+                Spacer(minLength: 40)
                 ForEach(LibrarySection.allCases) { section in
+                    let shown = model.section == section
                     Button {
                         model.pick(section)
                     } label: {
-                        VStack(spacing: 3) {
-                            Image(systemName: section.symbol).font(.system(size: 18))
-                            Text(section.label).font(.system(size: 9)).multilineTextAlignment(.center)
+                        VStack(spacing: 8) {
+                            Image(systemName: section.symbol).font(.system(size: 22))
+                                .foregroundStyle(shown ? model.accent : Ink.secondary)
+                                .frame(height: 26)
+                            Text(section.label).font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(shown ? Ink.primary : Ink.secondary)
+                                .multilineTextAlignment(.center)
                         }
-                        .frame(width: 64, height: 54)
+                        .frame(width: 100, height: 82)
                         .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(.primary.opacity(model.section == section ? 0.14 : 0)))
+                            RoundedRectangle(cornerRadius: 10).fill(shown ? Ink.item : .clear))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
-                Spacer()
-                IconButton(symbol: "arrow.left", label: "Back to the Space") { model.closeLibrary() }
-                    .padding(.bottom, 10)
+                Spacer(minLength: 0)
+                HStack {
+                    IconButton(symbol: "arrow.left", label: "Back to the Space") { model.closeLibrary() }
+                    Spacer()
+                }
+                .padding(.bottom, 10)
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 6)
+            .frame(width: 113)
+            .background(Color.ink((0x000000, 0.03), (0xFFFFFF, 0.035)))
+            .overlay(alignment: .trailing) {
+                Rectangle().fill(Color.ink((0x000000, 0.08), (0xFFFFFF, 0.06))).frame(width: 1)
+            }
             VStack(alignment: .leading, spacing: 8) {
                 Spacer().frame(height: 36)
                 if !model.section.wide {
                     TextField("Search \(model.section.label)…", text: model.queryBinding)
                         .textFieldStyle(.roundedBorder)
                 }
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 2) {
-                        switch model.section {
-                        case .spaces: ManageSpacesView(model: model)
-                        case .closed: ClosedTabs(model: model)
-                        case .archive: ArchivedTabs(model: model)
-                        case .history: HistoryList(model: model)
-                        case .media: MediaGrid(model: model)
-                        case .downloads: DownloadsList(model: model)
-                        case .extensions: ExtensionsList(model: model)
+                if model.section == .spaces {
+                    ManageSpacesView(model: model)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 2) {
+                            switch model.section {
+                            case .spaces: EmptyView()
+                            case .closed: ClosedTabs(model: model)
+                            case .archive: ArchivedTabs(model: model)
+                            case .history: HistoryList(model: model)
+                            case .media: MediaGrid(model: model)
+                            case .downloads: DownloadsList(model: model)
+                            case .extensions: ExtensionsList(model: model)
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            .padding(.leading, model.section == .spaces ? 0 : 10)
             .padding(.trailing, 10)
         }
     }
@@ -366,63 +385,133 @@ struct DownloadRow: View {
     }
 }
 
-/// One card per Space, in sidebar order: its color, name and profile; a click shows the Space,
-/// its menu has the rest. The "+" after them creates a Space.
+/// The Spaces side by side, like Arc's: a column each, in sidebar order, in its theme's colors,
+/// with its name, its tabs, a brush for its theme, a handle to move it and its menu; a click
+/// shows it. The "+" after them creates a Space.
 struct ManageSpacesView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 10)], spacing: 10) {
-            ForEach(model.state?.spaces ?? []) { space in
-                SpaceCard(model: model, space: space)
+        ScrollView(.horizontal) {
+            HStack(spacing: 24) {
+                ForEach(Array((model.state?.spaces ?? []).enumerated()), id: \.element.id) {
+                    index, space in
+                    SpaceColumn(model: model, space: space, index: index)
+                }
+                Button {
+                    model.newSpace()
+                } label: {
+                    Image(systemName: "plus").font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(color("#333ce8")))
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help("New Space")
+                .padding(.horizontal, 12)
             }
-            Button {
-                newSpace(model)
-            } label: {
-                Image(systemName: "plus").font(.system(size: 20))
-                    .frame(maxWidth: .infinity, minHeight: 120)
-                    .background(RoundedRectangle(cornerRadius: 12).strokeBorder(.primary.opacity(0.2), style: StrokeStyle(dash: [4])))
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("New Space")
+            .padding(.horizontal, 22)
+            .padding(.bottom, 16)
         }
+        .scrollIndicators(.never)
     }
 }
 
-struct SpaceCard: View {
+/// A Space's column among the Spaces, as Arc's, measured: 240 points wide; a Space with colors
+/// shows them at three quarters over a light gray, its titles dark, one without colors nothing
+/// under its titles; the name 33 points down, the tabs in 40-point rows from 70 points down,
+/// under the line that clears today's tabs of the displayed Space.
+struct SpaceColumn: View {
     @ObservedObject var model: AppModel
     let space: Space
+    let index: Int
+
+    private var colored: Bool { !space.theme.colors.isEmpty }
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 9) }
 
     var body: some View {
-        let profile = model.state?.profiles.first { $0.id == space.profile }
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(space.emoji ?? "•").font(.system(size: 16))
+        let page = model.state?.pages.first { $0.space == space.id }
+        let tabs = page.map { ($0.pinned + $0.today).flatMap(\.tabs) } ?? []
+        let ink: Color = colored ? .black.opacity(0.4) : Ink.primary
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 9) {
+                if let emoji = space.emoji { Text(emoji).font(.system(size: 16)) }
                 Text(space.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                 Spacer()
-                IconButton(symbol: "ellipsis", label: "Space options", size: 22) {
+                IconButton(symbol: "paintbrush.pointed.fill", label: "Edit Theme Color", size: 24) {
+                    model.run("theme/show/\(space.id)")
+                }
+                .opacity(0.75)
+            }
+            .padding(.leading, 17)
+            .padding(.trailing, 14)
+            .frame(height: 24)
+            .padding(.top, 21)
+            if !tabs.isEmpty {
+                HStack(spacing: 6) {
+                    Rectangle().fill(ink.opacity(0.15)).frame(height: 1)
+                    if space.id == model.state?.space {
+                        Button("↓ Clear") { model.run("today/clear") }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Ink.secondary)
+                    }
+                }
+                .padding(.horizontal, 17)
+                .frame(height: 10)
+                .padding(.top, 10)
+                .padding(.bottom, 5)
+            }
+            ForEach(tabs) { tab in
+                HStack(spacing: 10) {
+                    Favicon(url: tab.favicon, size: 16)
+                    Text(tab.label).font(.system(size: 14)).lineLimit(1)
+                }
+                .padding(.horizontal, 17)
+                .frame(height: 40)
+            }
+            Spacer(minLength: 0)
+            HStack {
+                Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                    .font(.system(size: 12, weight: .medium))
+                    .frame(width: 24, height: 24)
+                    .help("Drag to Move")
+                Spacer()
+                IconButton(symbol: "ellipsis", label: "Space options", size: 24) {
                     model.run("menu/space/\(space.id)")
                 }
             }
-            Button(profile?.name ?? "Profile") { model.run("menu/space-profile/\(space.id)") }
-                .buttonStyle(.plain)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
+            .padding(.horizontal, 10)
+            .padding(.bottom, 10)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(space.theme.colors.first.map(color) ?? Color.gray)
-                .opacity(0.35))
-        .contentShape(Rectangle())
+        .foregroundStyle(ink)
+        .frame(width: 240)
+        .frame(maxHeight: .infinity)
+        .background {
+            if colored {
+                ZStack {
+                    Color(white: 0.765)
+                    Tint.colors(space.theme.colors).opacity(0.75)
+                }
+                .clipShape(shape)
+            }
+        }
+        .contentShape(shape)
         .onTapGesture {
             model.run("space/\(space.id)")
             model.closeLibrary()
         }
         .rightClick { model.run("menu/space/\(space.id)") }
+        // Dragged onto another, it takes that one's place.
+        .draggable("space:\(space.id)")
+        .dropDestination(for: String.self) { ids, _ in
+            guard let id = ids.first?.split(separator: ":").last.flatMap({ Int($0) }),
+                ids.first?.hasPrefix("space:") == true, id != space.id
+            else { return false }
+            model.run("space/move/\(id)/\(index)")
+            return true
+        }
     }
 }
 
