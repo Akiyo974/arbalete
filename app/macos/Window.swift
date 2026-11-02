@@ -239,20 +239,20 @@ final class Tracking: NSView {
 }
 
 /// Moves the main window when dragged, like a title bar and Arc's WindowDraggableView: the
-/// sidebar is a window of its own, and AppKit drags a window only by its own events.
+/// sidebar is a window of its own, which asks the main one to move.
 final class WindowDrag: NSView {
     /// Whether a double-click minimizes or zooms the window, as the system's setting asks.
     var doubleClicks = true
-    /// Where the pointer and the window were as the drag began, on the screen.
-    private var start: (pointer: NSPoint, origin: NSPoint)?
 
     /// Like Arc's, it moves an inactive window from the first click.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
         guard let main = window?.parent else { return }
+        // The system moves the window, as by its titlebar: with its tiling, and its child
+        // windows, like the page's, along.
         guard event.clickCount == 2 else {
-            start = (NSEvent.mouseLocation, main.frame.origin)
+            main.performDrag(with: event)
             return
         }
         guard doubleClicks else { return }
@@ -261,18 +261,5 @@ final class WindowDrag: NSView {
         case "None": break
         default: main.performZoom(nil)
         }
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        guard let start, let main = window?.parent else { return }
-        let pointer = NSEvent.mouseLocation
-        main.setFrameOrigin(
-            NSPoint(
-                x: start.origin.x + pointer.x - start.pointer.x,
-                y: start.origin.y + pointer.y - start.pointer.y))
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        start = nil
     }
 }
