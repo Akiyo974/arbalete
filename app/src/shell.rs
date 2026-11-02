@@ -5101,19 +5101,27 @@ fn run_command(command: Command) {
             }
         }
         (Command::Move(id, parent, index), _) => {
-            let _ = update_sidebar(|sidebar| sidebar.move_node(id, parent, index));
+            if update_sidebar(|sidebar| sidebar.move_node(id, parent, index)).is_ok() {
+                show_selected();
+            }
         }
         (Command::Split(tab, target, before), _) => {
-            let _ = update_sidebar(|sidebar| sidebar.split_beside(tab, target, before));
+            if update_sidebar(|sidebar| sidebar.split_beside(tab, target, before)).is_ok() {
+                show_selected();
+            }
         }
         (Command::Duplicate(tab, parent, index), _) => {
             let _ = update_sidebar(|sidebar| sidebar.duplicate(tab, parent, index));
         }
         (Command::SplitDuplicate(tab, target, before), _) => {
-            let _ = update_sidebar(|sidebar| sidebar.split_duplicate(tab, target, before));
+            if update_sidebar(|sidebar| sidebar.split_duplicate(tab, target, before)).is_ok() {
+                show_selected();
+            }
         }
         (Command::Separate(tab), _) => {
-            let _ = update_sidebar(|sidebar| sidebar.separate(tab));
+            if update_sidebar(|sidebar| sidebar.separate(tab)).is_ok() {
+                show_selected();
+            }
         }
         (Command::NewProfile, _) => new_profile(),
         // Like a folder, an unknown profile or a blank name from the UI is ignored.
@@ -6707,7 +6715,8 @@ wrap_life_span_handler! {
     }
 }
 
-// A click in a page of a split selects its tab, like Arc's Split View.
+// A click in a page of a split selects its tab, like Arc's Split View. The focus the app gives a
+// page does not: it comes late, and the pages of a split would take turns being selected.
 wrap_focus_handler! {
     struct PageFocus {}
 
@@ -6716,6 +6725,10 @@ wrap_focus_handler! {
             let Some(tab) = browser.and_then(|browser| page_tab(browser)) else {
                 return;
             };
+            #[cfg(target_os = "macos")]
+            if !crate::mac::mouse_down() {
+                return;
+            }
             if win().shown.get() != Some(tab) && win().split.borrow().0.contains(&tab) {
                 select_tab(tab);
             }

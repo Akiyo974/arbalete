@@ -1256,6 +1256,11 @@ pub fn pointer_y() -> Option<i32> {
         .then_some((height - point.y) as i32)
 }
 
+/// Whether a mouse button is down, as while a click gives a page the focus.
+pub fn mouse_down() -> bool {
+    NSEvent::pressedMouseButtons() != 0
+}
+
 /// Puts a link on the clipboard.
 pub fn copy(url: &str) {
     let pasteboard = NSPasteboard::generalPasteboard();
