@@ -57,7 +57,7 @@ struct BackdropTint: View {
             // An empty card, like Arc's: the blur shows through it, a little lighter.
             if let card = model.emptyCard {
                 RoundedRectangle(cornerRadius: cardRadius)
-                    .fill(Color.white.opacity(isDark(model.space?.theme) ? 0.1 : 0.5))
+                    .fill(Color.white.opacity(isDark(model.space?.theme) ? 0.11 : 0.5))
                     .frame(width: card.width, height: card.height)
                     .offset(x: card.minX, y: card.minY)
             }

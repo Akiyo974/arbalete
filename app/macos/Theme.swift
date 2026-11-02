@@ -42,6 +42,9 @@ func color(_ hex: String) -> Color {
     return Color(red: rgb[0], green: rgb[1], blue: rgb[2])
 }
 
+/// Arc's dark window without theme colors.
+private let defaultViolet = "#100a1c"
+
 /// A theme's colors over the blur, like Arc's: black over a dark blur, at half, or white over a
 /// light one, at 35%, then a gradient from the left edge to the right one and a third color rising from
 /// the bottom edge, from faint to half opaque as the theme is more intense.
@@ -52,13 +55,14 @@ struct Tint: View {
 
     var body: some View {
         ZStack {
-            isDark(theme) ? Color.black.opacity(0.5) : Color.white.opacity(0.35)
-            colors
-            // In the background, the blur falls flat: without colors, Arc's window shows a deep
-            // violet there, measured, rather than the blur's gray.
-            if !active, isDark(theme), theme?.colors.isEmpty ?? true {
-                color("#100918")
+            if isDark(theme), theme?.colors.isEmpty ?? true {
+                // Without colors, Arc's dark window is its deep violet, measured: three quarters
+                // over the blur, and whole once the blur falls flat in the background.
+                color(defaultViolet).opacity(active ? 0.75 : 1)
+            } else {
+                isDark(theme) ? Color.black.opacity(0.5) : Color.white.opacity(0.35)
             }
+            colors
         }
     }
 
