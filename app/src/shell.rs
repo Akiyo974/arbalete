@@ -257,9 +257,12 @@ struct Win {
     /// macOS only rounds the corners of a window of its own. Without a selected tab, its own
     /// color paints an empty Space's panel.
     card: RefCell<Option<OverlayController>>,
-    /// Under the bar above the page, in the card: the tabs' pages, one shown at a time, or a
-    /// split, over the shown page's developer tools.
+    /// Under the bar above the page, in the card: the shown page's developer tools, under the
+    /// stage; it paints an empty Space's panel.
     body: RefCell<Option<Panel>>,
+    /// Over the developer tools, filling the body: the tabs' pages, one shown at a time, or a
+    /// split, within the room the developer tools leave them while docked.
+    stage: RefCell<Option<Panel>>,
     /// The tab whose page the window shows.
     shown: Cell<Option<NodeId>>,
     /// Shown above the page, to open tabs.
@@ -341,6 +344,7 @@ impl Win {
             sidebar: RefCell::new(None),
             card: RefCell::new(None),
             body: RefCell::new(None),
+            stage: RefCell::new(None),
             shown: Cell::new(None),
             overlay_view: RefCell::new(None),
             overlay: RefCell::new(None),
@@ -527,14 +531,14 @@ const CASCADE: i32 = 22;
 
 /// Moves the pages of the window `id`, which closes, into another window, hidden.
 fn hand_pages_over(id: u32) {
-    let Some(card) = window_by_id(id).and_then(|win| win.body.with_borrow(Clone::clone)) else {
+    let Some(card) = window_by_id(id).and_then(|win| win.stage.with_borrow(Clone::clone)) else {
         return;
     };
     let other = WINDOWS.with_borrow(|windows| {
         windows
             .iter()
             .find(|win| win.id != id)
-            .and_then(|win| win.body.with_borrow(Clone::clone))
+            .and_then(|win| win.stage.with_borrow(Clone::clone))
     });
     let Some(other) = other else { return };
     let pages: Vec<_> =
@@ -1889,6 +1893,11 @@ fn card_window() -> Option<*mut std::ffi::c_void> {
 
 /// The panel holding the content views, under the bar above the page.
 fn card_panel() -> Option<Panel> {
+    win().stage.with_borrow(Clone::clone)
+}
+
+/// The panel under the stage, which paints an empty Space's panel and holds the developer tools.
+fn card_body() -> Option<Panel> {
     win().body.with_borrow(Clone::clone)
 }
 
@@ -2133,7 +2142,7 @@ fn toggle_inspector(panel: Option<&'static str>) {
         return;
     }
     let (Some(body), Some(host)) = (
-        card_panel(),
+        card_body(),
         content().and_then(|view| view.browser()?.host()),
     ) else {
         return;
@@ -2179,13 +2188,46 @@ fn close_inspector(tab: NodeId) {
     lay_out_bodies();
 }
 
-/// Lays every window's card body out again, as the room the developer tools leave changed.
+/// Places every window's stage again, as the room the developer tools leave changed.
 fn lay_out_bodies() {
-    in_each_window(|| {
-        if let Some(body) = card_panel() {
-            body.layout();
-        }
-    });
+    in_each_window(place_stage);
+}
+
+/// Lays the stage out, the shown page in the room its docked developer tools leave it, or the
+/// whole body: it gets its size at once, never the body's first, which would resize it twice.
+fn place_stage() {
+    let (Some(body), Some(stage)) = (card_body(), card_panel()) else {
+        return;
+    };
+    let size = body.bounds();
+    let room = win()
+        .shown
+        .get()
+        .filter(|_| split_shown().is_none())
+        .and_then(inspected_room);
+    let insets = room.map_or(
+        Insets {
+            top: 0,
+            left: 0,
+            bottom: 0,
+            right: 0,
+        },
+        |room| Insets {
+            top: room.y.max(0),
+            left: room.x.max(0),
+            bottom: (size.height - room.y - room.height).max(0),
+            right: (size.width - room.x - room.width).max(0),
+        },
+    );
+    stage.set_to_box_layout(Some(&BoxLayoutSettings {
+        horizontal: 1,
+        cross_axis_alignment: AxisAlignment::STRETCH,
+        default_flex: 1,
+        inside_border_insets: insets,
+        ..Default::default()
+    }));
+    body.layout();
+    stage.layout();
 }
 
 /// Runs a script in a page's developer tools' front end.
@@ -2212,7 +2254,7 @@ fn inspected_room(tab: NodeId) -> Option<Rect> {
 /// Shows the shown page's docked developer tools in this window's card, under the page, and hides
 /// the others it holds: like a page, they show in one window at a time.
 fn sync_inspectors() {
-    let Some(body) = card_panel() else { return };
+    let Some(body) = card_body() else { return };
     let shown = win().shown.get().filter(|_| split_shown().is_none());
     let inspectors: Vec<_> = INSPECTORS.with_borrow(|inspectors| {
         inspectors
@@ -2236,7 +2278,7 @@ fn sync_inspectors() {
             view.set_visible(0);
         }
     }
-    body.layout();
+    place_stage();
 }
 
 wrap_task! {
@@ -2294,7 +2336,7 @@ fn inspector_asked(tab: NodeId, kind: &str, data: &str) {
                 // Out of its window before the window closes, which would destroy it.
                 if let Some(window) = inspector.window.take() {
                     window.remove_child_view(Some(&mut View::from(&inspector.frontend)));
-                    if let Some(body) = card_panel() {
+                    if let Some(body) = card_body() {
                         body.add_child_view(Some(&mut View::from(&inspector.frontend)));
                     }
                     window.close();
@@ -4692,7 +4734,7 @@ fn show_split(focused: NodeId, tabs: &[NodeId], views: &[BrowserView], layout: S
         split.set_visible(1);
         // The room between the pages shows the window, like the margins around the card; the
         // pages' bars stand for the bar above the page.
-        if let Some(panel) = card_panel() {
+        if let Some(panel) = card_body() {
             panel.set_background_color(0x0000_0001);
         }
         if let Some(toolbar) = win().toolbar_view.with_borrow(Clone::clone) {
@@ -5233,7 +5275,7 @@ fn hide_content() {
             toolbar.set_visible(page_toolbar().into());
         }
         if let (Some(panel), Some((card_color, _, _))) =
-            (card_panel(), win().window_colors.with_borrow(Clone::clone))
+            (card_body(), win().window_colors.with_borrow(Clone::clone))
         {
             panel.set_background_color(empty_card(card_color));
         }
@@ -5328,7 +5370,7 @@ fn set_window_colors(card_color: u32, grain: f64, colors: &[u32]) {
         window.set_background_color(colors[0]);
     }
     // A split's pages show the window between them instead.
-    if let Some(panel) = card_panel()
+    if let Some(panel) = card_body()
         && split_shown().is_none()
     {
         panel.set_background_color(empty_card(card_color));
@@ -6119,12 +6161,16 @@ wrap_window_delegate! {
             win().toolbar_view.set(Some(toolbar));
             // The card shows its body, which paints an empty Space's panel.
             card.set_background_color(0x0000_0001);
-            // Its views fill it, the page shown or a split, over its developer tools, which
-            // leave it the room they ask for (Inspector).
+            // The stage, with the page shown or a split, over the developer tools, which leave
+            // the page the room they ask for (Inspector).
             let body = panel_create(None).expect("body");
             body.set_to_fill_layout();
             card.add_child_view(Some(&mut View::from(&body)));
             win().body.set(Some(body.clone()));
+            let stage = panel_create(None).expect("stage");
+            body.add_child_view(Some(&mut View::from(&stage)));
+            win().stage.set(Some(stage.clone()));
+            place_stage();
             #[cfg(target_os = "macos")]
             crate::mac::toolbar_shown(app_settings().show_toolbar);
             let controller = window
@@ -6136,7 +6182,7 @@ wrap_window_delegate! {
             // The room between the pages shows the window, like the margins around the card.
             split.set_background_color(0x0000_0001);
             split.set_visible(0);
-            body.add_child_view(Some(&mut View::from(&split)));
+            stage.add_child_view(Some(&mut View::from(&split)));
             win().split_view.set(Some(split));
             for _ in 0..MAX_SPLIT_TABS {
                 let index = win().slots.borrow().len();
@@ -6601,20 +6647,6 @@ wrap_browser_view_delegate! {
     impl ViewDelegate {
         fn preferred_size(&self, _view: Option<&mut View>) -> Size {
             Size { width: (self.width)(), height: self.height }
-        }
-
-        /// A page whose developer tools are docked keeps to the room they leave it.
-        fn on_layout_changed(&self, view: Option<&mut View>, new_bounds: Option<&Rect>) {
-            let (Some(view), Some(bounds)) = (view, new_bounds) else { return };
-            let Some(page) = view.as_browser_view() else { return };
-            let Some(tab) = page.browser().and_then(|browser| page_tab(&browser)) else { return };
-            let same = |room: &Rect| {
-                (room.x, room.y, room.width, room.height)
-                    == (bounds.x, bounds.y, bounds.width, bounds.height)
-            };
-            if let Some(room) = inspected_room(tab).filter(|room| !same(room)) {
-                view.set_bounds(Some(&room));
-            }
         }
     }
 
