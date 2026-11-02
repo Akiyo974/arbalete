@@ -4780,16 +4780,20 @@ fn empty_card(card_color: u32) -> u32 {
     }
 }
 
-/// Tells the native interface where the card is while it shows no page, which washes the window's
-/// blur there, or that it shows one.
+/// Tells the native interface where the card is, which shades the window around it and washes it
+/// while it shows no page; a split's pages are cards of their own.
 fn send_empty_card() {
     #[cfg(target_os = "macos")]
     {
-        let empty = win().shown.get().is_none() && !fills_window();
+        let alone = !fills_window() && split_shown().is_none();
         let card = win()
             .card
             .with_borrow(|card| card.as_ref().map(OverlayController::bounds));
-        crate::native::empty_card(win().id, card.filter(|_| empty));
+        crate::native::card(
+            win().id,
+            card.filter(|_| alone),
+            win().shown.get().is_none(),
+        );
     }
 }
 

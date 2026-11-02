@@ -35,7 +35,15 @@ unsafe extern "C" {
     fn arbalete_ui_panes(window: u32, card: *mut std::ffi::c_void, panes: *const c_char);
     fn arbalete_ui_is_default_browser() -> bool;
     fn arbalete_ui_peek(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
-    fn arbalete_ui_empty_card(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
+    fn arbalete_ui_card(
+        window: u32,
+        shown: bool,
+        empty: bool,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    );
     fn arbalete_ui_place_sidebar(
         window: u32,
         visible: bool,
@@ -176,15 +184,16 @@ pub fn peek(window: u32, frame: Option<cef::Rect>) {
     };
 }
 
-/// Shows the empty card's wash at `frame`, in the window's points from its top left corner, or
-/// takes it away without a frame.
-pub fn empty_card(window: u32, frame: Option<cef::Rect>) {
+/// Tells where the card is, in the window's points from its top left corner, and whether it shows
+/// a page; without a frame, that it does not show alone.
+pub fn card(window: u32, frame: Option<cef::Rect>, empty: bool) {
     let frame = frame.unwrap_or_default();
     // SAFETY: plain values.
     unsafe {
-        arbalete_ui_empty_card(
+        arbalete_ui_card(
             window,
             frame.width > 0,
+            empty,
             frame.x.into(),
             frame.y.into(),
             frame.width.into(),

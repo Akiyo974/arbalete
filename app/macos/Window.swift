@@ -50,6 +50,13 @@ final class Backdrop {
 /// The card's corners (CARD_RADIUS in app/src/mac.rs).
 private let cardRadius: CGFloat = 6
 
+/// How much white lightens an empty card, measured on Arc's: without colors, 11% in the dark
+/// and half in the light; over a theme's colors, 8% while the app is in front, 2% behind.
+private func emptyWash(colored: Bool, dark: Bool, active: Bool) -> Double {
+    guard colored else { return dark ? 0.11 : 0.5 }
+    return active ? 0.08 : 0.02
+}
+
 struct BackdropTint: View {
     @ObservedObject var model: AppModel
 
@@ -58,12 +65,27 @@ struct BackdropTint: View {
         let colored = !(theme?.colors.isEmpty ?? true)
         ZStack(alignment: .topLeading) {
             Tint(theme: theme, active: model.active)
-            // Without colors, an empty card is a little lighter than the window, measured.
-            if !colored, let card = model.emptyCard {
-                RoundedRectangle(cornerRadius: cardRadius)
-                    .fill(Color.white.opacity(isDark(theme) ? 0.11 : 0.5))
-                    .frame(width: card.width, height: card.height)
-                    .offset(x: card.minX, y: card.minY)
+            if let card = model.card {
+                // Like Arc's, a faint shade around the card, outside it only.
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: cardRadius)
+                        .fill(Color.black.opacity(0.12))
+                        .frame(width: card.width + 2, height: card.height + 2)
+                        .offset(x: card.minX - 1, y: card.minY - 1)
+                        .blur(radius: 2)
+                    RoundedRectangle(cornerRadius: cardRadius)
+                        .frame(width: card.width, height: card.height)
+                        .offset(x: card.minX, y: card.minY)
+                        .blendMode(.destinationOut)
+                }
+                .compositingGroup()
+                // An empty card is a little lighter than the window, measured on Arc's.
+                if model.cardEmpty {
+                    RoundedRectangle(cornerRadius: cardRadius)
+                        .fill(Color.white.opacity(emptyWash(colored: colored, dark: isDark(theme), active: model.active)))
+                        .frame(width: card.width, height: card.height)
+                        .offset(x: card.minX, y: card.minY)
+                }
             }
         }
         .ignoresSafeArea()

@@ -31,9 +31,11 @@ final class AppModel: ObservableObject {
     var draggedTabs: [Int] = []
     /// The tabs selected at once with ⌘ or ⇧, besides the one shown, like Arc's; none otherwise.
     @Published var marked: [Int] = []
-    /// Where the card is while it shows no page, from the window's top left corner, which the
-    /// window's blur is washed under (Backdrop); nil when it shows one.
-    @Published var emptyCard: NSRect?
+    /// Where the card is, from the window's top left corner, which the window is shaded around and
+    /// washed under while it shows no page (Backdrop); nil while a split shows.
+    @Published var card: NSRect?
+    /// Whether the card shows no page.
+    @Published var cardEmpty = false
     /// Whether the app is in front, which shows the window's blur (Backdrop).
     @Published var active = NSApp.isActive
     /// The Space switch a drag resting at the sidebar's edge waits for, and where it rested.
