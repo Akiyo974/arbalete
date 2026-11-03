@@ -85,18 +85,26 @@ struct NavButtons: View {
 
     var body: some View {
         let page = model.state?.page
-        IconButton(symbol: "arrow.left", label: "Back", symbolSize: toolbarSymbol) {
-            model.run("back")
+        // Measured on Arc's: the symbols' centers 34 then 28 points apart.
+        HStack(spacing: 0) {
+            IconButton(symbol: "arrow.left", label: "Back", size: 34, symbolSize: toolbarSymbol) {
+                model.run("back")
+            }
+                .disabled(!(page?.canGoBack ?? false))
+            IconButton(symbol: "arrow.right", label: "Forward", size: 34, symbolSize: toolbarSymbol) {
+                model.run("forward")
+            }
+                .disabled(!(page?.canGoForward ?? false))
+            IconButton(symbol: "arrow.clockwise", label: "Reload", size: 22, symbolSize: toolbarSymbol) {
+                model.run("reload")
+            }
+            reloadOptions
         }
-            .disabled(!(page?.canGoBack ?? false))
-        IconButton(symbol: "arrow.right", label: "Forward", symbolSize: toolbarSymbol) {
-            model.run("forward")
-        }
-            .disabled(!(page?.canGoForward ?? false))
-        IconButton(symbol: "arrow.clockwise", label: "Reload", symbolSize: toolbarSymbol) {
-            model.run("reload")
-        }
-        // Like Arc's, a site in developer mode offers to reload it afresh.
+    }
+
+    /// Like Arc's, a site in developer mode offers to reload it afresh, from a chevron against
+    /// the reload button.
+    @ViewBuilder private var reloadOptions: some View {
         if model.activeTab?.developer == true {
             Menu {
                 Button("Reload the Page") { model.run("reload") }
@@ -105,11 +113,12 @@ struct NavButtons: View {
                     model.run("menu/choose/site/any/clear-cookies")
                 }
             } label: {
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .medium))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .frame(width: 10, height: 28)
             .help("Reload Options")
         }
     }
@@ -178,7 +187,7 @@ struct AddressRow: View {
                 Text(tab.map { domain($0.url) } ?? "")
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 10)
+                    .padding(.leading, 14)
                     .frame(height: Measure.rowFill)
                     .contentShape(Rectangle())
             }
@@ -194,7 +203,10 @@ struct AddressRow: View {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
                     }
                 }
-                SiteControlsButton(model: model)
+                // Like Arc's, the site controls show while the pointer is over the address.
+                if hovered {
+                    SiteControlsButton(model: model)
+                }
                 ForEach(model.state?.extensions ?? []) { ext in
                     PinnedExtension(model: model, extension: ext)
                 }
@@ -211,7 +223,8 @@ struct AddressRow: View {
             }
         }
         .onHover { hovered = $0 }
-        .padding(.bottom, 8)
+        .padding(.top, 2)
+        .padding(.bottom, 7)
     }
 }
 
@@ -488,7 +501,7 @@ struct FavoriteTile: View {
                 .frame(height: Measure.tile)
                 .background(
                     RoundedRectangle(cornerRadius: Measure.radius)
-                        .fill(active ? Ink.selected : hovered ? Ink.itemHovered : Ink.item)
+                        .fill(active ? model.selectedInk : hovered ? Ink.itemHovered : Ink.item)
                         .shadow(color: active ? Ink.selectedShadow : .clear, radius: 1, y: 1))
                 .contentShape(Rectangle())
         }
@@ -507,21 +520,36 @@ struct FavoritesHint: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            Image(systemName: "star.circle.fill").font(.system(size: 16))
-            Text("Drag tabs here to keep them close").font(.system(size: 13, weight: .semibold))
-            Text("Favorites stay one click away in every Space of this profile")
+            // Like Arc's, a star in the accent, darkened, on a white disc, which glows.
+            Image(systemName: "star.circle.fill")
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(
+                    Color(nsColor: NSColor(model.accent).blended(withFraction: 0.5, of: .black)!),
+                    .white)
+                .font(.system(size: 16))
+                .shadow(color: model.accent.opacity(0.8), radius: 4)
+            // Our own words, as long as Arc's: two lines at its narrowest.
+            Text("Drag tabs to Favorites").font(.system(size: 13, weight: .semibold))
+            Text("Favorites stay one click away in every Space")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
-        .padding(12)
+        .padding([.horizontal, .top], 12)
+        .padding(.bottom, 10.5)
         .frame(maxWidth: .infinity)
         // Dashed, like Arc's.
         .background(
             RoundedRectangle(cornerRadius: Measure.radius)
                 .strokeBorder(.primary.opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+        // Like Arc's, the accent glows inside the border.
+        .background(
+            RoundedRectangle(cornerRadius: Measure.radius)
+                .strokeBorder(model.accent.opacity(0.25), lineWidth: 4)
+                .blur(radius: 4)
+                .clipShape(RoundedRectangle(cornerRadius: Measure.radius)))
         .overlay(alignment: .topTrailing) {
-            IconButton(symbol: "xmark", label: "Hide this hint", size: 20) {
+            IconButton(symbol: "xmark", label: "Hide this hint", size: 20, symbolSize: 10) {
                 model.run("favorites/hide-hint/\(space)")
             }
             .padding(4)
@@ -559,7 +587,7 @@ struct SpaceHeader: View {
                                     .rotationEffect(.degrees(page.collapsed ? 0 : 90))
                                     .font(.system(size: 10, weight: .semibold))
                             } else {
-                                Text(emoji).font(.system(size: 16))
+                                Text(emoji).font(.system(size: 14))
                             }
                         }
                         .frame(width: 24)
@@ -584,7 +612,8 @@ struct SpaceHeader: View {
             }
         }
         .padding(.horizontal, 6)
-        .frame(height: 32)
+        // Measured on Arc's: its icon 19.5 points under the favorites, 38 over the divider.
+        .frame(height: 39)
         .foregroundStyle(.secondary)
         .onHover { hovered = $0 }
         .rightClick { model.run("menu/space/\(page.space)") }
@@ -674,6 +703,8 @@ struct DividerRow: View {
         .frame(height: 20)
         .contentShape(Rectangle())
         .onHover { hovered = $0 }
+        // Like Arc's, New Tab's label 23.5 points under the line.
+        .padding(.bottom, -2.5)
     }
 }
 
@@ -702,6 +733,7 @@ struct NewTabRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .font(.system(size: 14))
         .foregroundStyle(.secondary)
         .onHover { hovered = $0 }
     }
@@ -803,7 +835,7 @@ struct TabRow: View {
             RoundedRectangle(cornerRadius: Measure.radius)
                 .fill(
                     active
-                        ? Ink.selected
+                        ? model.selectedInk
                         : model.marked.contains(tab.id) ? Ink.marked : hovered ? Ink.item : .clear)
                 .shadow(color: active ? Ink.selectedShadow : .clear, radius: 1, y: 1))
         .padding(.vertical, (Measure.row - Measure.rowFill) / 2)
@@ -929,7 +961,7 @@ struct SplitRow: View {
         .frame(height: Measure.rowFill)
         .background(
             RoundedRectangle(cornerRadius: Measure.radius)
-                .fill(active ? Ink.selected : hovered ? Ink.item : .clear)
+                .fill(active ? model.selectedInk : hovered ? Ink.item : .clear)
                 .shadow(color: active ? Ink.selectedShadow : .clear, radius: 1, y: 1))
         .padding(.vertical, (Measure.row - Measure.rowFill) / 2)
         .onHover { hovered = $0 }
@@ -1036,6 +1068,7 @@ struct Favicon: View {
                 Image(nsImage: image).resizable().interpolation(.high)
             } else {
                 RoundedRectangle(cornerRadius: 4).fill(.primary.opacity(0.15))
+                    .padding(size / 16)
             }
         }
         .frame(width: size, height: size)
@@ -1073,12 +1106,16 @@ struct Footer: View {
                 Divider()
                 Button("Profiles…") { model.profilesShown = true }
             } label: {
-                Image(systemName: "plus").font(.system(size: 13, weight: .medium))
+                // A menu's label takes no font: the symbol comes at Arc's size, measured.
+                Image(
+                    nsImage: NSImage(systemSymbolName: "plus", accessibilityDescription: "New")!
+                        .withSymbolConfiguration(.init(pointSize: 17, weight: .regular))!)
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
             .frame(width: 28, height: 28)
+            .padding(.trailing, 2)
             .help("New")
             .opacity(drafting ? 0 : 1)
             .disabled(drafting)
@@ -1087,6 +1124,8 @@ struct Footer: View {
             }
         }
         .frame(height: 40)
+        // Measured on Arc's: its icons' centers 25 points over the window's bottom.
+        .padding(.bottom, 5)
     }
 }
 
@@ -1108,11 +1147,11 @@ struct SpaceIcon: View {
         } label: {
             Group {
                 if let emoji = space.emoji {
-                    Text(emoji).font(.system(size: 13)).opacity(displayed ? 1 : 0.5)
+                    Text(emoji).font(.system(size: 12)).opacity(displayed ? 1 : 0.5)
                 } else {
                     Circle()
                         .fill(.primary.opacity(displayed ? 0.9 : 0.35))
-                        .frame(width: 6, height: 6)
+                        .frame(width: 7, height: 7)
                 }
             }
             .frame(width: 24, height: 24)

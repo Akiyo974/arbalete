@@ -609,8 +609,9 @@ impl SidebarMode {
     /// the sidebar is docked, the revealed one's place is the docked one's, which it docks into.
     fn layout(self, size: &Size) -> Layout {
         let left = match self {
-            SidebarMode::Shown => docked_width() + CARD_MARGIN,
-            SidebarMode::Floating => sidebar_width() + CARD_MARGIN,
+            // Like Arc's, the docked sidebar's own margin parts its content from the page.
+            SidebarMode::Shown => docked_width(),
+            SidebarMode::Floating => sidebar_width(),
             SidebarMode::Hidden | SidebarMode::Revealed => CARD_MARGIN,
         };
         let card = Rect {
@@ -8015,7 +8016,7 @@ mod tests {
             [
                 (0, 0, 1000, m),
                 (0, 600 - m, 1000, m),
-                (0, 0, s + m, 600),
+                (0, 0, s, 600),
                 (1000 - m, 0, m, 600)
             ]
         );
@@ -8028,12 +8029,7 @@ mod tests {
         assert_eq!(rect(&SidebarMode::Hidden.layout(&SIZE).card), card);
         // The revealed sidebar floats above the page without resizing it.
         assert_eq!(rect(&SidebarMode::Revealed.layout(&SIZE).card), card);
-        let docked = (
-            SIDEBAR_WIDTH + m,
-            m,
-            1000 - SIDEBAR_WIDTH - 2 * m,
-            600 - 2 * m,
-        );
+        let docked = (SIDEBAR_WIDTH, m, 1000 - SIDEBAR_WIDTH - m, 600 - 2 * m);
         assert_eq!(rect(&SidebarMode::Shown.layout(&SIZE).card), docked);
         // An empty Space's panel stays where it is while the sidebar floats beside it.
         assert_eq!(rect(&SidebarMode::Floating.layout(&SIZE).card), docked);
@@ -8049,12 +8045,7 @@ mod tests {
         win().library.set(false);
         assert_eq!(
             docked,
-            (
-                LIBRARY_WIDTH + m,
-                m,
-                1000 - LIBRARY_WIDTH - 2 * m,
-                600 - 2 * m
-            )
+            (LIBRARY_WIDTH, m, 1000 - LIBRARY_WIDTH - m, 600 - 2 * m)
         );
         assert_eq!(start, LIBRARY_WIDTH);
         // Hidden, the sidebar leaves the card its margins whatever it shows.

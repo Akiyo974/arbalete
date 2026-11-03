@@ -43,6 +43,12 @@ extension AppModel {
         (space?.theme.colors.isEmpty ?? true) ? color("#333ce8") : themeColor
     }
 
+    /// The selected tab's row, like Arc's: in the dark, it falls to a row at rest's while another
+    /// app is in front, measured.
+    var selectedInk: Color {
+        active ? Ink.selected : Ink.selectedBehind
+    }
+
     /// The tabs' titles, like Arc's: the theme's title color, or the sidebar's ink without colors.
     var titleInk: Color {
         guard let theme = space?.theme, let lead = theme.colors.first else { return Ink.primary }

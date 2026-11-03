@@ -191,11 +191,11 @@ final class SidebarHost {
             edge.frame = NSRect(x: 0, y: 0, width: 8, height: content.bounds.height)
         }
         edge.isHidden = frame != nil
-        // From the sidebar's edge across the margin before the page.
+        // Across the margin between the sidebar's content and the page.
         resizer.place(
             in: window,
             frame.flatMap { frame in
-                floating ? nil : NSRect(x: frame.maxX - 3, y: 0, width: 8, height: frame.height)
+                floating ? nil : NSRect(x: frame.maxX - 8, y: 0, width: 8, height: frame.height)
             }, raise: false)
         effect.isHidden = !floating
         // Floating, like Arc's: rounded 12 points, with a 1-point border.
