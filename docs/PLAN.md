@@ -449,9 +449,11 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
   side" menu docks it at the right, left or bottom, the page showing in the room it leaves, or undocks it
   into a window of its own. A split's pages keep Chromium's own DevTools window.
 - The reload button gets a menu: reload, clear the cache and reload, clear the cookies and reload.
-- Arc's page captures (a portion of the page, the whole page) are left for later.
-- Done, but for the captures; left for later too: Inspect from the page's menu opening on the element
-  clicked, the bar's picker starting the element picker, and the front end's device mode toolbar.
+- Captures, like Arc's: the bar copies a picture of the page, or of a part a drag picks on a veil over
+  it, with a short note.
+- Done. Inspect from the page's menu opens on the element clicked, the bar's picker starts the element
+  picker, and the page leaves the front end's resizer uncovered. Left for later: the front end's device
+  mode toolbar, which Chrome shows in a "toolbox" view of its own under the page.
 
 ### Phase 11 — Incognito
 - ⌘⇧N (and File › New Incognito Window) opens a separate window on an off-the-record request context: cookies,
@@ -463,7 +465,9 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
 - Done: an incognito window holds a Space and a profile of its own, listed nowhere and never saved, whose
   web data stays in memory and whose pages show dark; it keeps no history and no closed tabs, and goes with
   its window. Its tabs and the other windows' never reach each other, and other apps' links never open in
-  it. Extensions are off there; allowing one in incognito is left for later.
+  it. Extensions are off there. Allowing one in incognito is blocked: CEF makes the in-memory context the
+  off-the-record one of its global profile, not of the profile the extension is installed in, and no
+  longer loads an extension into a given context but through Chromium's folder picker.
 
 ### Phase 12 — Arc feature audit
 - Use Arc as a user, systematically, to find the features this plan misses: every menu and submenu, keyboard

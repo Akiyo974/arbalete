@@ -1280,6 +1280,20 @@ pub fn copy(url: &str) {
     pasteboard.setString_forType(&NSString::from_str(url), unsafe { NSPasteboardTypeString });
 }
 
+/// Puts a PNG image, in base64, on the clipboard, like a page's capture.
+pub fn copy_png(base64: &str) {
+    let Some(data) = NSData::initWithBase64EncodedString_options(
+        NSData::alloc(),
+        &NSString::from_str(base64),
+        NSDataBase64DecodingOptions::empty(),
+    ) else {
+        return;
+    };
+    let pasteboard = NSPasteboard::generalPasteboard();
+    pasteboard.clearContents();
+    pasteboard.setData_forType(Some(&data), unsafe { objc2_app_kit::NSPasteboardTypePNG });
+}
+
 /// Rounds the corners of the card's window, which draws the page, and outlines it. `view` is
 /// its content view, whose layer holds what the window's compositor draws.
 pub fn round_card(view: *mut c_void) {

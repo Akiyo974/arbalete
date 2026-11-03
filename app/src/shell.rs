@@ -204,6 +204,8 @@ thread_local! {
     static HISTORIES: RefCell<HashMap<ProfileId, History>> = RefCell::default();
     /// The pages' developer tools open, by tab.
     static INSPECTORS: RefCell<HashMap<NodeId, Rc<Inspector>>> = RefCell::default();
+    /// The page capture under way, until its picture is copied.
+    static CAPTURING: RefCell<Option<Capturing>> = const { RefCell::new(None) };
     /// The incognito windows' profiles, with the temporary folder that stands for their
     /// directory, removed with the window: their web data stays in memory.
     static INCOGNITO: RefCell<HashMap<ProfileId, PathBuf>> = RefCell::default();
@@ -260,8 +262,12 @@ struct Win {
     /// Under the bar above the page, in the card: the shown page's developer tools, under the
     /// stage; it paints an empty Space's panel.
     body: RefCell<Option<Panel>>,
-    /// Over the developer tools, filling the body: the tabs' pages, one shown at a time, or a
-    /// split, within the room the developer tools leave them while docked.
+    /// Over the developer tools, filling the body but while they are docked, when it spans the
+    /// room they leave the page alone: over them, it would take their clicks. It holds the stage.
+    stage_frame: RefCell<Option<Panel>>,
+    /// The stage's place in the body while the developer tools are docked.
+    room: RefCell<Option<Rect>>,
+    /// The tabs' pages, one shown at a time, or a split.
     stage: RefCell<Option<Panel>>,
     /// The tab whose page the window shows.
     shown: Cell<Option<NodeId>>,
@@ -344,6 +350,8 @@ impl Win {
             sidebar: RefCell::new(None),
             card: RefCell::new(None),
             body: RefCell::new(None),
+            stage_frame: RefCell::new(None),
+            room: RefCell::new(None),
             stage: RefCell::new(None),
             shown: Cell::new(None),
             overlay_view: RefCell::new(None),
@@ -2098,9 +2106,32 @@ struct Inspector {
     room: RefCell<Option<Rect>>,
     docked: Cell<bool>,
     window: RefCell<Option<Window>>,
+    /// The front end said it is ready; until then, what to do once it is.
+    ready: Cell<bool>,
+    pending: RefCell<Vec<InspectorAction>>,
     /// Keeps the page's protocol messages coming to the front end.
     _observer: Option<Registration>,
 }
+
+/// What a page's developer tools do once their front end is ready.
+enum InspectorAction {
+    /// Runs a script in the front end, like showing a panel.
+    Script(String),
+    /// Shows the element at a point of the page in the Elements panel, like Inspect.
+    InspectAt(i32, i32),
+}
+
+/// The ids of the app's own protocol messages to a page, from this one on, whose answers its
+/// developer tools' front end does not see: asking for the element at a point, its scroll
+/// offset for a capture, and the capture.
+const APP_MESSAGES: u64 = 1_000_000_000;
+const INSPECT_AT_ID: u64 = APP_MESSAGES + 1;
+const LAYOUT_ID: u64 = APP_MESSAGES + 2;
+const CAPTURE_ID: u64 = APP_MESSAGES + 3;
+
+/// How much of the front end's resizer, a few points across the page's edge, the page leaves
+/// uncovered beside docked developer tools, so that a drag finds it.
+const INSPECTOR_GRIP: i32 = 3;
 
 /// The front end's page, told it may dock.
 const INSPECTOR_URL: &str = "devtools://devtools/bundled/devtools_app.html?can_dock=true";
@@ -2118,6 +2149,8 @@ const INSPECTOR_HOST: &str = r#"(() => {
     host.setInspectedPageBounds = (bounds) => tell("room", JSON.stringify(bounds));
     host.closeWindow = () => tell("close", "");
     host.bringToFront = () => {};
+    const loaded = host.loadCompleted && host.loadCompleted.bind(host);
+    host.loadCompleted = () => { tell("ready", ""); if (loaded) loaded(); };
     return host;
   };
   let host = take(window.InspectorFrontendHost);
@@ -2128,19 +2161,37 @@ const INSPECTOR_HOST: &str = r#"(() => {
   } catch (_) {}
 })();"#;
 
-/// Opens the shown page's developer tools, docked, on `panel` if given, or shows that panel; or
-/// closes them.
-fn toggle_inspector(panel: Option<&'static str>) {
+/// Opens the shown page's developer tools, docked, or closes them.
+fn toggle_inspector() {
     let Some(tab) = win().shown.get() else { return };
-    if let Some(inspector) = INSPECTORS.with_borrow(|inspectors| inspectors.get(&tab).cloned()) {
-        match panel {
-            Some(panel) => {
-                run_in_inspector(&inspector, &format!("DevToolsAPI.showPanel({panel:?})"))
-            }
-            None => close_inspector(tab),
-        }
-        return;
+    if INSPECTORS.with_borrow(|inspectors| inspectors.contains_key(&tab)) {
+        close_inspector(tab);
+    } else {
+        open_inspector(tab, None, None);
     }
+}
+
+/// Shows the shown page's developer tools on `panel`, opening them if need be, then does
+/// `then`, like Chrome's developer tools buttons and Inspect.
+fn show_inspector(panel: &'static str, then: Option<InspectorAction>) {
+    let Some(tab) = win().shown.get() else { return };
+    match INSPECTORS.with_borrow(|inspectors| inspectors.get(&tab).cloned()) {
+        Some(inspector) => {
+            act_in_inspector(
+                tab,
+                &inspector,
+                InspectorAction::Script(format!("DevToolsAPI.showPanel({panel:?})")),
+            );
+            if let Some(then) = then {
+                act_in_inspector(tab, &inspector, then);
+            }
+        }
+        None => open_inspector(tab, Some(panel), then),
+    }
+}
+
+/// Opens a page's developer tools, docked, on `panel` if given, doing `then` once ready.
+fn open_inspector(tab: NodeId, panel: Option<&str>, then: Option<InspectorAction>) {
     let (Some(body), Some(host)) = (
         card_body(),
         content().and_then(|view| view.browser()?.host()),
@@ -2164,11 +2215,36 @@ fn toggle_inspector(panel: Option<&'static str>) {
                 room: RefCell::new(None),
                 docked: Cell::new(true),
                 window: RefCell::new(None),
+                ready: Cell::new(false),
+                pending: RefCell::new(then.into_iter().collect()),
                 _observer: observer,
             }),
         )
     });
     sync_inspectors();
+}
+
+/// Does `action` in a page's developer tools, at once if their front end is ready, or once it
+/// is.
+fn act_in_inspector(tab: NodeId, inspector: &Inspector, action: InspectorAction) {
+    if !inspector.ready.get() {
+        inspector.pending.borrow_mut().push(action);
+        return;
+    }
+    match action {
+        InspectorAction::Script(script) => run_in_inspector(inspector, &script),
+        InspectorAction::InspectAt(x, y) => {
+            let ask = json!({
+                "id": INSPECT_AT_ID,
+                "method": "DOM.getNodeForLocation",
+                "params": { "x": x, "y": y, "includeUserAgentShadowDOM": false },
+            });
+            let host = PAGES.with_borrow(|pages| pages.get(&tab)?.view.browser()?.host());
+            if let Some(host) = host {
+                host.send_dev_tools_message(Some(ask.to_string().as_bytes()));
+            }
+        }
+    }
 }
 
 /// Closes a page's developer tools, the page taking the card back.
@@ -2194,9 +2270,11 @@ fn lay_out_bodies() {
 }
 
 /// Lays the stage out, the shown page in the room its docked developer tools leave it, or the
-/// whole body: it gets its size at once, never the body's first, which would resize it twice.
+/// whole body. The page gets its size at once: the stage takes the room's size wherever its frame
+/// is, the whole body as the body lays it out, then the room (fit_stage).
 fn place_stage() {
-    let (Some(body), Some(stage)) = (card_body(), card_panel()) else {
+    let (Some(body), Some(frame)) = (card_body(), win().stage_frame.with_borrow(Clone::clone))
+    else {
         return;
     };
     let size = body.bounds();
@@ -2204,30 +2282,48 @@ fn place_stage() {
         .shown
         .get()
         .filter(|_| split_shown().is_none())
-        .and_then(inspected_room);
-    let insets = room.map_or(
-        Insets {
-            top: 0,
-            left: 0,
-            bottom: 0,
-            right: 0,
-        },
-        |room| Insets {
-            top: room.y.max(0),
-            left: room.x.max(0),
-            bottom: (size.height - room.y - room.height).max(0),
-            right: (size.width - room.x - room.width).max(0),
-        },
-    );
-    stage.set_to_box_layout(Some(&BoxLayoutSettings {
+        .and_then(inspected_room)
+        .map(|room| {
+            // The page leaves the front end's resizer whole on the side it touches the tools.
+            let grip = |gap: i32| if gap > 0 { INSPECTOR_GRIP } else { 0 };
+            let (left, top) = (grip(room.x), grip(room.y));
+            let right = grip(size.width - room.x - room.width);
+            let bottom = grip(size.height - room.y - room.height);
+            Rect {
+                x: room.x + left,
+                y: room.y + top,
+                width: room.width - left - right,
+                height: room.height - top - bottom,
+            }
+        });
+    frame.set_to_box_layout(Some(&BoxLayoutSettings {
         horizontal: 1,
-        cross_axis_alignment: AxisAlignment::STRETCH,
-        default_flex: 1,
-        inside_border_insets: insets,
+        // The tools docked at its left leave the page at the body's right.
+        main_axis_alignment: if room.as_ref().is_some_and(|room| room.x > 0) {
+            AxisAlignment::END
+        } else {
+            AxisAlignment::START
+        },
+        cross_axis_alignment: if room.is_some() {
+            AxisAlignment::START
+        } else {
+            AxisAlignment::STRETCH
+        },
+        default_flex: room.is_none().into(),
         ..Default::default()
     }));
+    win().room.replace(room);
     body.layout();
-    stage.layout();
+    fit_stage(&win());
+    frame.layout();
+}
+
+/// Fits a window's stage frame to the room its docked developer tools leave the page, if any.
+fn fit_stage(win: &Win) {
+    let frame = win.stage_frame.with_borrow(Clone::clone);
+    if let (Some(frame), Some(room)) = (frame, win.room.borrow().as_ref()) {
+        frame.set_bounds(Some(room));
+    }
 }
 
 /// Runs a script in a page's developer tools' front end.
@@ -2347,6 +2443,13 @@ fn inspector_asked(tab: NodeId, kind: &str, data: &str) {
                 lay_out_bodies();
             }
         }
+        "ready" => {
+            inspector.ready.set(true);
+            let pending = std::mem::take(&mut *inspector.pending.borrow_mut());
+            for action in pending {
+                act_in_inspector(tab, &inspector, action);
+            }
+        }
         "close" => close_inspector(tab),
         _ => {}
     }
@@ -2462,6 +2565,26 @@ wrap_dev_tools_message_observer! {
                 return 0;
             };
             let inspector = INSPECTORS.with_borrow(|inspectors| inspectors.get(&self.tab).cloned());
+            // The element at the point Inspect asked about, which the front end reveals as if
+            // picked.
+            if message.contains(&INSPECT_AT_ID.to_string()) {
+                let answer: serde_json::Value = serde_json::from_str(message).unwrap_or_default();
+                if answer["id"] == INSPECT_AT_ID {
+                    let node = &answer["result"]["backendNodeId"];
+                    if let (Some(inspector), false) = (inspector, node.is_null()) {
+                        let event = json!({
+                            "method": "Overlay.inspectNodeRequested",
+                            "params": { "backendNodeId": node },
+                        });
+                        let event = serde_json::to_string(&event.to_string()).expect("a string");
+                        run_in_inspector(&inspector, &format!("DevToolsAPI.dispatchMessage({event})"));
+                    }
+                    return 1;
+                }
+            }
+            if is_app_message(message) {
+                return 0;
+            }
             if let Some(inspector) = inspector {
                 let message = serde_json::to_string(message).expect("a string");
                 run_in_inspector(&inspector, &format!("DevToolsAPI.dispatchMessage({message})"));
@@ -2530,6 +2653,155 @@ const INSPECTOR_SIZE: Size = Size {
     width: 900,
     height: 700,
 };
+
+/// Whether a page's protocol message answers one of the app's own.
+fn is_app_message(message: &str) -> bool {
+    message.starts_with(r#"{"id":1"#)
+        && serde_json::from_str::<serde_json::Value>(message)
+            .ok()
+            .and_then(|message| message["id"].as_u64())
+            .is_some_and(|id| id >= APP_MESSAGES)
+}
+
+/// Where the shown page lies in the window, in points from its top left corner.
+fn page_frame() -> Option<Rect> {
+    let view = content()?;
+    let card = win()
+        .card
+        .with_borrow(|card| card.as_ref().map(OverlayController::bounds))?;
+    let mut origin = Point { x: 0, y: 0 };
+    view.convert_point_to_window(Some(&mut origin));
+    let size = view.bounds();
+    Some(Rect {
+        x: card.x + origin.x,
+        y: card.y + origin.y,
+        width: size.width,
+        height: size.height,
+    })
+}
+
+/// Shows the veil a drag picks the part of the shown page to capture on, like Arc's.
+fn show_capture_veil() {
+    #[cfg(target_os = "macos")]
+    crate::native::capture(win().id, page_frame());
+}
+
+/// The capture under way: the page's tab, the part of it to capture, in the page's points, and
+/// what brings its protocol messages, until the capture is copied.
+struct Capturing {
+    tab: NodeId,
+    area: Option<(i32, i32, i32, i32)>,
+    _observer: Option<Registration>,
+}
+
+/// Copies a picture of the shown page, or of a part of it, like Arc's captures: its scroll offset
+/// first for a part, which Chromium measures from the page's top, then the picture.
+fn capture(area: Option<(i32, i32, i32, i32)>) {
+    let Some(tab) = win().shown.get() else { return };
+    let Some(host) = content().and_then(|view| view.browser()?.host()) else {
+        return;
+    };
+    let observer = host.add_dev_tools_message_observer(Some(&mut CaptureObserver::new()));
+    CAPTURING.set(Some(Capturing {
+        tab,
+        area,
+        _observer: observer,
+    }));
+    let ask = match area {
+        Some(_) => json!({ "id": LAYOUT_ID, "method": "Page.getLayoutMetrics" }),
+        None => {
+            json!({ "id": CAPTURE_ID, "method": "Page.captureScreenshot", "params": { "format": "png" } })
+        }
+    };
+    host.send_dev_tools_message(Some(ask.to_string().as_bytes()));
+}
+
+wrap_task! {
+    struct CaptureAnswer {
+        message: String,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            capture_answered(&self.message);
+        }
+    }
+}
+
+/// Carries a capture on with the page's answer: shoots the part asked for, or copies the picture.
+fn capture_answered(message: &str) {
+    let answer: serde_json::Value = serde_json::from_str(message).unwrap_or_default();
+    let Some((tab, area)) = CAPTURING.with_borrow(|capturing| {
+        capturing
+            .as_ref()
+            .map(|capturing| (capturing.tab, capturing.area))
+    }) else {
+        return;
+    };
+    if answer["id"] == LAYOUT_ID {
+        let (Some((x, y, width, height)), Some(host)) = (
+            area,
+            PAGES.with_borrow(|pages| pages.get(&tab)?.view.browser()?.host()),
+        ) else {
+            return;
+        };
+        let viewport = &answer["result"]["cssVisualViewport"];
+        let (left, top) = (
+            viewport["pageX"].as_f64().unwrap_or(0.0),
+            viewport["pageY"].as_f64().unwrap_or(0.0),
+        );
+        let ask = json!({
+            "id": CAPTURE_ID,
+            "method": "Page.captureScreenshot",
+            "params": {
+                "format": "png",
+                "clip": {
+                    "x": left + f64::from(x),
+                    "y": top + f64::from(y),
+                    "width": width,
+                    "height": height,
+                    "scale": 1,
+                },
+            },
+        });
+        host.send_dev_tools_message(Some(ask.to_string().as_bytes()));
+        return;
+    }
+    CAPTURING.set(None);
+    let Some(picture) = answer["result"]["data"].as_str() else {
+        return;
+    };
+    #[cfg(target_os = "macos")]
+    {
+        crate::mac::copy_png(picture);
+        if let Some(frame) = page_frame() {
+            crate::native::note(
+                win().id,
+                "Copied Screenshot",
+                frame.x + frame.width,
+                frame.y + 8,
+            );
+        }
+    }
+}
+
+// Brings a page's answers to a capture under way.
+wrap_dev_tools_message_observer! {
+    struct CaptureObserver {}
+
+    impl DevToolsMessageObserver {
+        fn on_dev_tools_message(&self, _browser: Option<&mut Browser>, message: Option<&[u8]>) -> i32 {
+            let Some(message) = message.and_then(|message| std::str::from_utf8(message).ok()) else {
+                return 0;
+            };
+            if !is_app_message(message) {
+                return 0;
+            }
+            post_task(ThreadId::UI, Some(&mut CaptureAnswer::new(message.to_string())));
+            1
+        }
+    }
+}
 
 /// A Little Arbalete window: its page, in the profile it was opened in, and what its bar shows of
 /// the page.
@@ -5861,10 +6133,24 @@ fn run_command(command: Command) {
                     show_dev_tools(&host, at);
                 }
             } else {
-                toggle_inspector(at.map(|_| "elements"));
+                match at {
+                    Some((x, y)) => {
+                        show_inspector("elements", Some(InspectorAction::InspectAt(x, y)))
+                    }
+                    None => toggle_inspector(),
+                }
             }
         }
-        (Command::DevToolsPanel(panel), Some(_)) => toggle_inspector(Some(panel)),
+        // The bar's picker picks an element in the page, the others show their panel.
+        (Command::DevToolsPanel("elements"), Some(_)) => show_inspector(
+            "elements",
+            Some(InspectorAction::Script(
+                "DevToolsAPI.enterInspectElementMode()".into(),
+            )),
+        ),
+        (Command::DevToolsPanel(panel), Some(_)) => show_inspector(panel, None),
+        (Command::Capture(area), Some(_)) => capture(area),
+        (Command::CaptureArea, Some(_)) => show_capture_veil(),
         (Command::Stop, Some(browser)) => browser.stop_load(),
         (Command::ClearSiteData(data), Some(browser)) => clear_site_data(&browser, data),
         (Command::Zoom(zoom), Some(browser)) => {
@@ -6163,12 +6449,24 @@ wrap_window_delegate! {
             card.set_background_color(0x0000_0001);
             // The stage, with the page shown or a split, over the developer tools, which leave
             // the page the room they ask for (Inspector).
-            let body = panel_create(None).expect("body");
+            let id = win().id;
+            let body = panel_create(Some(&mut BodyDelegate::new(id))).expect("body");
             body.set_to_fill_layout();
             card.add_child_view(Some(&mut View::from(&body)));
             win().body.set(Some(body.clone()));
-            let stage = panel_create(None).expect("stage");
-            body.add_child_view(Some(&mut View::from(&stage)));
+            let frame = panel_create(None).expect("stage frame");
+            body.add_child_view(Some(&mut View::from(&frame)));
+            win().stage_frame.set(Some(frame));
+            let stage = panel_create(Some(&mut StageDelegate::new(id))).expect("stage");
+            stage.set_to_box_layout(Some(&BoxLayoutSettings {
+                horizontal: 1,
+                cross_axis_alignment: AxisAlignment::STRETCH,
+                default_flex: 1,
+                ..Default::default()
+            }));
+            win().stage_frame.with_borrow(|frame| {
+                frame.as_ref().expect("stage frame").add_child_view(Some(&mut View::from(&stage)))
+            });
             win().stage.set(Some(stage.clone()));
             place_stage();
             #[cfg(target_os = "macos")]
@@ -6599,6 +6897,42 @@ fn no_width() -> i32 {
 /// layout stacks it: an empty view, without a page of its own.
 fn place_view(width: fn() -> i32, height: i32) -> Panel {
     panel_create(Some(&mut PlaceDelegate::new(width, height))).expect("a place")
+}
+
+// The card's body: its layout fills the stage frame, which then goes back to its room.
+wrap_panel_delegate! {
+    struct BodyDelegate {
+        window: u32,
+    }
+
+    impl ViewDelegate {
+        fn on_layout_changed(&self, _view: Option<&mut View>, _new_bounds: Option<&Rect>) {
+            if let Some(win) = window_by_id(self.window) {
+                fit_stage(&win);
+            }
+        }
+    }
+
+    impl PanelDelegate {}
+}
+
+// The stage: the room's size while the developer tools are docked.
+wrap_panel_delegate! {
+    struct StageDelegate {
+        window: u32,
+    }
+
+    impl ViewDelegate {
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            let room = window_by_id(self.window).and_then(|win| win.room.borrow().clone());
+            room.map_or(Size { width: 1, height: 1 }, |room| Size {
+                width: room.width,
+                height: room.height,
+            })
+        }
+    }
+
+    impl PanelDelegate {}
 }
 
 // A split's slot: as long, along the split, as lay_out_split worked out (SLOT_LENGTHS).
@@ -7047,9 +7381,15 @@ wrap_context_menu_handler! {
 
         fn on_context_menu_command(&self, browser: Option<&mut Browser>, _frame: Option<&mut Frame>, params: Option<&mut ContextMenuParams>, command_id: i32, _event_flags: EventFlags) -> i32 {
             let Some(params) = params else { return 0 };
+            // The shown page's own developer tools, docked; another page of a split keeps
+            // Chromium's window of them.
             if command_id == INSPECT {
-                if let Some(host) = browser.and_then(|browser| browser.host()) {
-                    show_dev_tools(&host, Some((params.xcoord(), params.ycoord())));
+                let at = (params.xcoord(), params.ycoord());
+                let host = browser.as_ref().and_then(|browser| browser.host());
+                if is_shown(browser) {
+                    post(Command::DevTools(Some(at)));
+                } else if let Some(host) = host {
+                    show_dev_tools(&host, Some(at));
                 }
                 return 1;
             }

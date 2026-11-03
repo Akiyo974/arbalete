@@ -236,6 +236,9 @@ struct DeveloperBar: View {
             Spacer(minLength: 8)
             tool("link", "Copy URL") { model.run("menu/choose/site/any/copy-link") }
             separator
+            tool("rectangle.dashed", "Capture Part of the Page") { model.run("page/capture/area") }
+            tool("camera", "Capture the Page") { model.run("page/capture") }
+            separator
             tool("apple.terminal", "Console") { model.run("page/devtools/console") }
             tool("network", "Network") { model.run("page/devtools/network") }
             tool("scope", "Inspect Element") { model.run("page/devtools/elements") }

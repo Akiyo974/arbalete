@@ -35,6 +35,8 @@ unsafe extern "C" {
     fn arbalete_ui_panes(window: u32, card: *mut std::ffi::c_void, panes: *const c_char);
     fn arbalete_ui_is_default_browser() -> bool;
     fn arbalete_ui_peek(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
+    fn arbalete_ui_capture(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
+    fn arbalete_ui_note(window: u32, text: *const c_char, x: f64, y: f64);
     fn arbalete_ui_card(
         window: u32,
         shown: bool,
@@ -182,6 +184,31 @@ pub fn peek(window: u32, frame: Option<cef::Rect>) {
             frame.height.into(),
         )
     };
+}
+
+/// Shows the veil a drag picks the part of the page to capture on, over the page at `frame`, in
+/// the window's points from its top left corner, or takes it away without a frame.
+pub fn capture(window: u32, frame: Option<Rect>) {
+    let frame = frame.unwrap_or_default();
+    // SAFETY: plain values.
+    unsafe {
+        arbalete_ui_capture(
+            window,
+            frame.width > 0,
+            frame.x.into(),
+            frame.y.into(),
+            frame.width.into(),
+            frame.height.into(),
+        )
+    };
+}
+
+/// Shows a short note, like a capture copied, its top right corner at `x` and `y`, in the
+/// window's points from its top left corner.
+pub fn note(window: u32, text: &str, x: i32, y: i32) {
+    let text = CString::new(text).unwrap_or_default();
+    // SAFETY: a C string, which the call reads before returning.
+    unsafe { arbalete_ui_note(window, text.as_ptr(), x.into(), y.into()) };
 }
 
 /// Tells where the card is, in the window's points from its top left corner, and whether it shows
