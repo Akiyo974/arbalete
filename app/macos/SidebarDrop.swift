@@ -216,7 +216,9 @@ struct DropRow<Content: View>: View {
             .onGeometryChange(for: CGSize.self) { $0.size } action: { _size.wrappedValue = $0 }
             .background {
                 if model.dropTarget == .into(item.id) {
+                    // Like Arc's, across the whole sidebar.
                     Rectangle().fill(model.themeColor.opacity(0.5))
+                        .padding(.horizontal, -Measure.inset)
                 }
             }
             .overlay(alignment: .top) {
@@ -389,41 +391,139 @@ struct SplitHalf: View {
 }
 
 /// A tile of the favorites' grid while a drag goes on: a favorite, or the empty one opening for
-/// a tab from elsewhere.
+/// a tab or a split from elsewhere.
 struct FavoriteSlot: Hashable {
-    let tab: Tab?
+    let item: Item?
 
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.tab?.id == rhs.tab?.id }
-    func hash(into hasher: inout Hasher) { hasher.combine(tab?.id) }
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.item?.id == rhs.item?.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(item?.id) }
 }
 
-/// Where in the favorites' grid a drag lands: before the tile under the pointer, or after it
-/// past its middle.
-struct FavoritesDrop: DropDelegate {
+/// The favorites taking a drag, like Arc's: under the pointer, what the drag carries turns from
+/// its row into a tile of the favorites, and back into its row once it leaves them. AppKit's
+/// own, since SwiftUI's drops cannot change what a drag shows.
+struct FavoritesTarget: NSViewRepresentable {
     let model: AppModel
-    let favorites: Int
-    let count: Int
-    let columns: Int
-    let size: CGSize
+    /// The tile it turns into.
+    let tile: CGSize
+    /// Where the pointer is, from the view's top left corner, or nil once it leaves.
+    let hover: (CGPoint?) -> Void
+    let drop: () -> Bool
 
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        let spacing: CGFloat = 6
-        let width = (size.width - spacing * CGFloat(columns - 1)) / CGFloat(columns)
-        let column = min(columns - 1, max(0, Int(info.location.x / (width + spacing))))
-        let row = max(0, Int(info.location.y / (50 + spacing)))
-        let past = info.location.x - CGFloat(column) * (width + spacing) > width / 2
-        model.favoriteSlot = min(count, row * columns + column + (past ? 1 : 0))
-        return DropProposal(operation: .move)
+    func makeNSView(context: Context) -> Target {
+        let view = Target()
+        view.registerForDraggedTypes([.string])
+        return view
     }
 
-    func dropExited(info: DropInfo) { model.favoriteSlot = nil }
+    func updateNSView(_ view: Target, context: Context) {
+        view.model = model
+        view.tile = tile
+        view.hover = hover
+        view.drop = drop
+    }
 
-    func performDrop(info: DropInfo) -> Bool {
-        let (slot, dragged) = (model.favoriteSlot, model.dragged)
-        model.favoriteSlot = nil
-        _ = model.endDrag()
-        guard let slot, let dragged else { return false }
-        model.move(dragged, to: favorites, slot)
-        return true
+    final class Target: NSView {
+        var model: AppModel?
+        var tile = CGSize.zero
+        var hover: (CGPoint?) -> Void = { _ in }
+        var drop: () -> Bool = { false }
+        /// What each dragged item showed before it turned into a tile.
+        private var rows: [(frame: NSRect, components: [NSDraggingImageComponent])] = []
+
+        override var isFlipped: Bool { true }
+
+        /// Clicks go through to the tiles under it: only drags stop here.
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            switch NSApp.currentEvent?.type {
+            case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .mouseMoved:
+                return nil
+            default:
+                return super.hitTest(point)
+            }
+        }
+
+        /// Like Arc's, the favorites take tabs and splits, not folders.
+        private var takes: Bool {
+            guard let model, let dragged = model.dragged, let item = model.item(dragged) else {
+                return false
+            }
+            if case .folder = item { return false }
+            return true
+        }
+
+        override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+            rows = []
+            guard takes else { return [] }
+            let point = convert(sender.draggingLocation, from: nil)
+            let image = tileImage()
+            sender.enumerateDraggingItems(
+                options: [], for: self, classes: [NSPasteboardItem.self], searchOptions: [:]
+            ) { item, _, _ in
+                self.rows.append((item.draggingFrame, item.imageComponents ?? []))
+                item.setDraggingFrame(
+                    NSRect(
+                        x: point.x - self.tile.width / 2, y: point.y - self.tile.height / 2,
+                        width: self.tile.width, height: self.tile.height),
+                    contents: image)
+            }
+            return draggingUpdated(sender)
+        }
+
+        override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+            guard takes else { return [] }
+            hover(convert(sender.draggingLocation, from: nil))
+            return .move
+        }
+
+        override func draggingExited(_ sender: (any NSDraggingInfo)?) {
+            hover(nil)
+            guard let sender, !rows.isEmpty else { return }
+            var index = 0
+            sender.enumerateDraggingItems(
+                options: [], for: self, classes: [NSPasteboardItem.self], searchOptions: [:]
+            ) { item, _, _ in
+                guard index < self.rows.count else { return }
+                let row = self.rows[index]
+                index += 1
+                guard !row.components.isEmpty else { return }
+                item.draggingFrame = row.frame
+                item.imageComponentsProvider = { row.components }
+            }
+            rows = []
+        }
+
+        override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool { takes }
+
+        override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+            rows = []
+            return drop()
+        }
+
+        /// A favorite's tile for what the drag carries: its icons on the tile's fill, like Arc's.
+        private func tileImage() -> NSImage {
+            let tabs = model?.dragged.flatMap { model?.item($0) }?.tabs ?? []
+            let size = tile
+            return NSImage(size: size, flipped: true) { rect in
+                let shape = NSBezierPath(
+                    roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: Measure.radius,
+                    yRadius: Measure.radius)
+                NSColor.white.withAlphaComponent(0.35).setFill()
+                shape.fill()
+                NSColor.white.withAlphaComponent(0.6).setStroke()
+                shape.lineWidth = 1
+                shape.stroke()
+                let icon: CGFloat = 20
+                let gap: CGFloat = 8
+                let width = CGFloat(tabs.count) * icon + CGFloat(max(0, tabs.count - 1)) * gap
+                var x = (size.width - width) / 2
+                for tab in tabs {
+                    uiImage(tab.favicon)?.draw(
+                        in: NSRect(x: x, y: (size.height - icon) / 2, width: icon, height: icon))
+                    x += icon + gap
+                }
+                return true
+            }
+        }
     }
 }

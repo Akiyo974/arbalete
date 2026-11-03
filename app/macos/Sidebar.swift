@@ -618,61 +618,120 @@ struct Favorites: View {
     /// The favorites as a drag shows them, like Arc's: the one dragged moves to where it would
     /// land, or an empty tile opens there for a tab from elsewhere.
     private var shownFavorites: [FavoriteSlot] {
-        var slots = page.favorites.map { FavoriteSlot(tab: $0) }
+        var slots = page.favorites.map { FavoriteSlot(item: $0) }
         guard let slot = model.favoriteSlot, let dragged = model.dragged else { return slots }
-        if let from = slots.firstIndex(where: { $0.tab?.id == dragged }) {
+        if let from = slots.firstIndex(where: { $0.item?.id == dragged }) {
             let moved = slots.remove(at: from)
             slots.insert(moved, at: min(from < slot ? slot - 1 : slot, slots.count))
         } else {
-            slots.insert(FavoriteSlot(tab: nil), at: min(slot, slots.count))
+            slots.insert(FavoriteSlot(item: nil), at: min(slot, slots.count))
         }
         return slots
     }
 
     var body: some View {
         let count = page.favorites.count
+        let favorites = page.roots.favorites
         if count == 0 {
+            // Dropped on, the hint, or the room it leaves while a drag goes on, makes what the
+            // drag carries the first favorite.
+            let target = FavoritesTarget(
+                model: model, tile: CGSize(width: Measure.tile, height: Measure.tile),
+                hover: { model.favoritesTargeted = $0 != nil },
+                drop: { dropFavorite(at: 0) })
             if page.favoritesHint {
-                // Dropped on, the hint makes the node the first favorite.
                 FavoritesHint(model: model, space: page.space)
-                    .dropDestination(for: String.self) { ids, _ in
-                        drop(ids) { model.move($0, to: page.roots.favorites, 0) }
-                    }
+                    .overlay(target.padding(.bottom, 8))
+            } else if model.dragged != nil {
+                // Without the hint, the empty favorites still take a drag, like Arc's.
+                EmptyFavoritesDrop(model: model).overlay(target.padding(.bottom, 8))
             }
         } else {
-            let rows = max(1, (count + 3) / 4)
-            let columns = max(1, (count + rows - 1) / rows)
+            // Like Arc's, the tiles share one row, up to four, as a dragged one opens room.
+            let shown = shownFavorites
+            let rows = max(1, (shown.count + 3) / 4)
+            let columns = max(1, (shown.count + rows - 1) / rows)
+            let size = _size.wrappedValue
+            let tileWidth =
+                (size.width - Measure.inset * CGFloat(columns - 1)) / CGFloat(columns)
             LazyVGrid(
                 columns: Array(
                     repeating: GridItem(.flexible(minimum: Measure.tile), spacing: Measure.inset),
                     count: columns),
                 spacing: Measure.inset
             ) {
-                ForEach(shownFavorites, id: \.self) { slot in
-                    if let tab = slot.tab {
-                        FavoriteTile(model: model, tab: tab, active: tab.id == page.selected)
-                            .opacity(tab.id == model.dragged && model.favoriteSlot != nil ? 0 : 1)
-                            .onDrag { model.startDrag(.tab(tab)) }
+                ForEach(shown, id: \.self) { slot in
+                    if let item = slot.item {
+                        FavoriteTile(
+                            model: model, item: item,
+                            active: item.tabs.contains { $0.id == page.selected }
+                        )
+                        .opacity(item.id == model.dragged && model.favoriteSlot != nil ? 0 : 1)
+                        .onDrag { model.startDrag(item) }
                     } else {
                         Color.clear.frame(height: Measure.tile)
                     }
                 }
             }
-            .animation(.easeInOut(duration: 0.12), value: shownFavorites)
+            .animation(.easeInOut(duration: 0.12), value: shown)
             .onGeometryChange(for: CGSize.self) { $0.size } action: { _size.wrappedValue = $0 }
-            .onDrop(
-                of: [.plainText],
-                delegate: FavoritesDrop(
-                    model: model, favorites: page.roots.favorites, count: count,
-                    columns: columns, size: _size.wrappedValue))
+            .overlay(
+                FavoritesTarget(
+                    model: model,
+                    tile: CGSize(width: max(Measure.tile, tileWidth), height: Measure.tile),
+                    hover: { point in
+                        model.favoriteSlot = point.map {
+                            slot(at: $0, count: count, columns: columns, width: tileWidth)
+                        }
+                    },
+                    drop: { dropFavorite(at: model.favoriteSlot) }))
             .padding(.bottom, 8)
         }
     }
+
+    /// Where in the grid a drag at `point` lands: before the tile under it, or after it past its
+    /// middle.
+    private func slot(at point: CGPoint, count: Int, columns: Int, width: CGFloat) -> Int {
+        let column = min(columns - 1, max(0, Int(point.x / (width + Measure.inset))))
+        let row = max(0, Int(point.y / (Measure.tile + Measure.inset)))
+        let past = point.x - CGFloat(column) * (width + Measure.inset) > width / 2
+        return min(count, row * columns + column + (past ? 1 : 0))
+    }
+
+    /// Makes what the drag carries a favorite at `slot`.
+    private func dropFavorite(at slot: Int?) -> Bool {
+        let dragged = model.dragged
+        model.favoriteSlot = nil
+        model.favoritesTargeted = false
+        _ = model.endDrag()
+        guard let slot, let dragged else { return false }
+        model.move(dragged, to: page.roots.favorites, slot)
+        return true
+    }
 }
 
+/// The empty favorites' room while a drag goes on and their hint is hidden: a tile's height,
+/// outlined, which lights up under the drag.
+struct EmptyFavoritesDrop: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        let targeted = model.favoritesTargeted
+        RoundedRectangle(cornerRadius: Measure.radius)
+            .fill(model.accent.opacity(targeted ? 0.2 : 0))
+            .strokeBorder(
+                model.accent.opacity(targeted ? 0.6 : 0.35),
+                style: StrokeStyle(lineWidth: 1, dash: targeted ? [] : [4, 3]))
+            .frame(height: Measure.tile)
+            .padding(.bottom, 8)
+            .animation(.easeInOut(duration: 0.12), value: targeted)
+    }
+}
+
+/// A favorite's tile: a tab's icon or, like Arc's, a split's icons side by side.
 struct FavoriteTile: View {
     @ObservedObject var model: AppModel
-    let tab: Tab
+    let item: Item
     let active: Bool
     private let _hovered = State<Bool>(initialValue: false)
     private var hovered: Bool {
@@ -681,10 +740,14 @@ struct FavoriteTile: View {
     }
 
     var body: some View {
+        let tabs = item.tabs
         Button {
-            model.run("select/\(tab.id)")
+            // A split shows whole, with its first tab focused.
+            if let first = tabs.first { model.run("select/\(first.id)") }
         } label: {
-            Favicon(url: tab.favicon, size: 20)
+            HStack(spacing: 8) {
+                ForEach(tabs) { tab in Favicon(url: tab.favicon, size: 20) }
+            }
                 .frame(maxWidth: .infinity)
                 .frame(height: Measure.tile)
                 .background(
@@ -694,9 +757,9 @@ struct FavoriteTile: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(tab.label)
+        .help(tabs.map(\.label).joined(separator: " | "))
         .onHover { hovered = $0 }
-        .rightClick { model.run("menu/node/\(tab.id)") }
+        .rightClick { model.run("menu/node/\(item.id)") }
     }
 }
 
@@ -709,6 +772,7 @@ struct FavoritesHint: View {
     private var dark: Bool { isDark(model.space?.theme) }
 
     var body: some View {
+        let targeted = model.favoritesTargeted
         VStack(spacing: 4) {
             // Like Arc's: in the dark, a star in the accent, darkened, on a white disc, which
             // glows; in the light, a white star on a disc in the accent.
@@ -730,6 +794,8 @@ struct FavoritesHint: View {
                 .foregroundStyle(Ink.hint)
                 .multilineTextAlignment(.center)
         }
+        // Like Arc's, under a drag, the words fade behind the tile it shows.
+        .opacity(targeted ? 0.5 : 1)
         .padding([.horizontal, .top], 12)
         .padding(.bottom, 10.5)
         .frame(maxWidth: .infinity)
@@ -738,7 +804,7 @@ struct FavoritesHint: View {
             RoundedRectangle(cornerRadius: Measure.radius)
                 .strokeBorder(
                     dark ? Color.white.opacity(0.3) : model.accent.opacity(0.35),
-                    style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                    style: StrokeStyle(lineWidth: 1, dash: targeted ? [] : [4, 3])))
         // Like Arc's, in the dark, the accent glows inside the border.
         .background(
             RoundedRectangle(cornerRadius: Measure.radius)
@@ -752,6 +818,7 @@ struct FavoritesHint: View {
             .padding(4)
         }
         .padding(.bottom, 8)
+        .animation(.easeInOut(duration: 0.12), value: targeted)
     }
 }
 
@@ -1008,7 +1075,16 @@ struct TabRow: View {
             if model.renaming == tab.id {
                 NameField(model: model, id: tab.id, title: tab.label, blank: true)
             } else {
-                Text(tab.label).lineLimit(1).opacity(tab.asleep == true ? 0.55 : 1)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(tab.label).lineLimit(1).opacity(tab.asleep == true ? 0.55 : 1)
+                    if model.renameHint == tab.id {
+                        Text("Double-click to rename")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Ink.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.15), value: model.renameHint == tab.id)
                 if tab.muted == true {
                     Image(systemName: "speaker.slash").font(.system(size: 11))
                         .foregroundStyle(.secondary)

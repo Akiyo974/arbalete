@@ -202,7 +202,7 @@ pub enum NodeKind {
     },
     Tab(Tab),
     /// From two to `MAX_SPLIT_TABS` tabs side by side in one row, its children; it never holds
-    /// fewer, nor goes into the favorites. Its layout is apart (`Sidebar::split_layout`).
+    /// fewer. Like Arc's, it may be a favorite. Its layout is apart (`Sidebar::split_layout`).
     Split,
 }
 
@@ -1002,14 +1002,17 @@ impl Sidebar {
 
     /// Moves a tab or a folder, with its content, to `index` among `parent`'s children. Tabs that
     /// become pinned save their url, tabs that stop being pinned forget it. Favorites hold only
-    /// tabs.
+    /// tabs and splits.
     pub fn move_node(&mut self, id: NodeId, parent: NodeId, index: usize) -> Result<(), Error> {
         let old_parent = self.movable(id)?;
         self.check_container(parent)?;
         if self.ancestors(parent).any(|ancestor| ancestor == id) {
             return Err(Error::MoveIntoItself);
         }
-        if !self.is_tab(id) && self.profiles.iter().any(|p| p.favorites == parent) {
+        if !self.is_tab(id)
+            && !self.is_split(id)
+            && self.profiles.iter().any(|p| p.favorites == parent)
+        {
             return Err(Error::NotATab);
         }
         if parent != old_parent {
@@ -1242,7 +1245,11 @@ impl Sidebar {
     }
 
     pub fn is_favorite(&self, id: NodeId) -> bool {
-        let parent = self.nodes.get(&id).and_then(|node| node.parent);
+        // A tab of a favorite split is a favorite too.
+        let parent = self
+            .nodes
+            .get(&self.row_of(id))
+            .and_then(|node| node.parent);
         self.profiles.iter().any(|p| Some(p.favorites) == parent)
     }
 
@@ -3252,7 +3259,7 @@ mod tests {
     }
 
     #[test]
-    fn refuses_splits_in_the_favorites_and_moves_into_a_split() {
+    fn makes_a_split_a_favorite_but_splits_no_favorite_nor_moves_into_a_split() {
         let mut sidebar = Sidebar::default();
         let home = home(&sidebar);
         let favorites = sidebar.profiles()[0].favorites;
@@ -3263,7 +3270,11 @@ mod tests {
         assert!(children(&sidebar, favorites).is_empty());
         assert_eq!(sidebar.move_node(c, split, 0), Err(Error::NotAContainer));
         assert_eq!(sidebar.add_tab(split, "d", "d"), Err(Error::NotAContainer));
-        assert_eq!(sidebar.move_node(split, favorites, 0), Err(Error::NotATab));
+        sidebar.move_node(split, favorites, 0).unwrap();
+        assert_eq!(children(&sidebar, favorites), [split]);
+        assert!(sidebar.is_favorite(a) && sidebar.is_favorite(b));
+        let folder = sidebar.add_folder(home.pinned, "f").unwrap();
+        assert_eq!(sidebar.move_node(folder, favorites, 0), Err(Error::NotATab));
     }
 
     #[test]

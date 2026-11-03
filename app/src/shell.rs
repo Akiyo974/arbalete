@@ -914,14 +914,15 @@ impl UiState {
             "selected": space.selected,
             "collapsed": space.collapsed,
             "roots": { "favorites": favorites, "pinned": space.pinned, "today": space.today },
-            "favorites": self.tabs(favorites, space.profile),
+            // Tabs and, like Arc's, splits.
+            "favorites": self.items(favorites, space.profile),
             "favoritesHint": profile.is_some_and(|p| !p.favorites_hint_hidden),
             "pinned": self.items(space.pinned, space.profile),
             "today": self.items(space.today, space.profile),
         })
     }
 
-    /// The tabs directly inside a container, like the favorites, which hold no folders.
+    /// The tabs directly inside a container or a split.
     fn tabs(&self, parent: NodeId, profile: ProfileId) -> Vec<serde_json::Value> {
         let node = self.sidebar.node(parent).expect("a known container");
         node.children

@@ -67,7 +67,8 @@ struct SpacePage: Decodable, Identifiable {
     var collapsed: Bool
     /// The containers of the sections, to move tabs and folders into.
     var roots: Roots
-    var favorites: [Tab]
+    /// Tabs and, like Arc's, splits.
+    var favorites: [Item]
     /// The empty favorites show a box inviting to drag tabs there.
     var favoritesHint: Bool
     var pinned: [Item]

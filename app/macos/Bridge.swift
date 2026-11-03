@@ -50,6 +50,11 @@ final class AppModel: ObservableObject {
     @Published var dropTarget: DropTarget?
     /// Where in the favorites a drag would land.
     @Published var favoriteSlot: Int?
+    /// Whether a drag is over the empty favorites.
+    @Published var favoritesTargeted = false
+    /// The tab just pinned, which says how to rename it.
+    @Published var renameHint: Int?
+    private var renameHintWait: DispatchWorkItem?
     /// Option is held: a split's tabs offer to leave it rather than close.
     @Published var optionHeld = false
     private var flags: Any?
@@ -122,7 +127,7 @@ final class AppModel: ObservableObject {
     /// The displayed Space's selected tab, a favorite, a pinned tab or one of today's.
     var activeTab: Tab? {
         guard let page else { return nil }
-        let all = page.favorites + (page.pinned + page.today).flatMap(\.tabs)
+        let all = (page.favorites + page.pinned + page.today).flatMap(\.tabs)
         return all.first { $0.id == page.selected }
     }
 
@@ -323,6 +328,24 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// A favorite, tab, folder or split of the displayed Space's page.
+    func item(_ id: Int) -> Item? {
+        guard let page else { return nil }
+        func find(_ items: [Item]) -> Item? {
+            for item in items {
+                if item.id == id { return item }
+                if case .folder(_, _, _, let children) = item, let found = find(children) {
+                    return found
+                }
+                if case .split(_, let tabs) = item, let tab = tabs.first(where: { $0.id == id }) {
+                    return .tab(tab)
+                }
+            }
+            return nil
+        }
+        return find(page.favorites + page.pinned + page.today)
+    }
+
     /// Where a node is in the displayed Space's page: its parent and its index among the
     /// parent's children.
     func place(of id: Int) -> (parent: Int, index: Int)? {
@@ -355,7 +378,33 @@ final class AppModel: ObservableObject {
         }
         let to = from.parent == parent && from.index < index ? index - 1 : index
         if from.parent == parent && to == from.index { return }
+        let pinning = page.map { page in
+            page.today.flatMap(\.tabs).contains { $0.id == id } && pins(parent, in: page)
+        } ?? false
         run("move/\(id)/\(parent)/\(to)")
+        if pinning { hintRename(id) }
+    }
+
+    /// Whether a container is the page's pinned tabs or a folder among them.
+    private func pins(_ container: Int, in page: SpacePage) -> Bool {
+        func holds(_ items: [Item]) -> Bool {
+            items.contains { item in
+                guard case .folder(let id, _, _, let children) = item else { return false }
+                return id == container || holds(children)
+            }
+        }
+        return container == page.roots.pinned || holds(page.pinned)
+    }
+
+    /// Like Arc's, a tab just pinned says, for 3 seconds, that a double-click renames it.
+    private func hintRename(_ tab: Int) {
+        renameHintWait?.cancel()
+        renameHint = tab
+        let end = DispatchWorkItem { [weak self] in
+            if self?.renameHint == tab { self?.renameHint = nil }
+        }
+        renameHintWait = end
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: end)
     }
 
     /// Puts a tab beside another in a split, after it or `before` it, or a copy of it with
