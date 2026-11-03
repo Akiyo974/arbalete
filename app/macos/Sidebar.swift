@@ -1110,12 +1110,11 @@ struct SplitRow: View {
     /// closes it, or with Option takes it out of the split, like Arc's. The title stays, unseen,
     /// so that nothing moves.
     private func chip(_ tab: Tab) -> some View {
+        // Like Arc's, the title shortens beside the button that shows on hover.
         HStack(spacing: 6) {
             Favicon(url: tab.favicon, size: 14)
-            Text(tab.label).lineLimit(1).opacity(hovered ? 0 : 1)
+            Text(tab.label).lineLimit(1)
             Spacer(minLength: 0)
-        }
-        .overlay(alignment: .trailing) {
             if hovered {
                 let separate = model.optionHeld
                 ChipButton(
@@ -1130,8 +1129,8 @@ struct SplitRow: View {
         .padding(.trailing, 4)
         .font(.system(size: 14))
         .frame(height: 28)
-        .background(
-            RoundedRectangle(cornerRadius: 8).fill(tab.id == selected ? Ink.child : .clear))
+        // Like Arc's, each tab of the split shown has its bubble.
+        .background(RoundedRectangle(cornerRadius: 8).fill(active ? Ink.child : .clear))
         .contentShape(Rectangle())
         .onTapGesture { model.run("select/\(tab.id)") }
         .rightClick { model.run("menu/node/\(id)") }
