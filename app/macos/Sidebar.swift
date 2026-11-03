@@ -638,7 +638,7 @@ struct Favorites: View {
             let target = FavoritesTarget(
                 model: model, tile: CGSize(width: Measure.tile, height: Measure.tile),
                 hover: { model.favoritesTargeted = $0 != nil },
-                drop: { dropFavorite(at: 0) })
+                drop: { dropFavorite($0, at: 0) })
             if page.favoritesHint {
                 FavoritesHint(model: model, space: page.space)
                     .overlay(target.padding(.bottom, 8))
@@ -684,7 +684,7 @@ struct Favorites: View {
                             slot(at: $0, count: count, columns: columns, width: tileWidth)
                         }
                     },
-                    drop: { dropFavorite(at: model.favoriteSlot) }))
+                    drop: { dropFavorite($0, at: model.favoriteSlot) }))
             .padding(.bottom, 8)
         }
     }
@@ -698,13 +698,12 @@ struct Favorites: View {
         return min(count, row * columns + column + (past ? 1 : 0))
     }
 
-    /// Makes what the drag carries a favorite at `slot`.
-    private func dropFavorite(at slot: Int?) -> Bool {
-        let dragged = model.dragged
+    /// Makes the node a drag carries a favorite at `slot`.
+    private func dropFavorite(_ dragged: Int, at slot: Int?) -> Bool {
         model.favoriteSlot = nil
         model.favoritesTargeted = false
         _ = model.endDrag()
-        guard let slot, let dragged else { return false }
+        guard let slot else { return false }
         model.move(dragged, to: page.roots.favorites, slot)
         return true
     }
@@ -733,6 +732,7 @@ struct FavoriteTile: View {
     @ObservedObject var model: AppModel
     let item: Item
     let active: Bool
+    private var dark: Bool { isDark(model.space?.theme) }
     private let _hovered = State<Bool>(initialValue: false)
     private var hovered: Bool {
         get { _hovered.wrappedValue }
@@ -745,15 +745,33 @@ struct FavoriteTile: View {
             // A split shows whole, with its first tab focused.
             if let first = tabs.first { model.run("select/\(first.id)") }
         } label: {
-            HStack(spacing: 8) {
-                ForEach(tabs) { tab in Favicon(url: tab.favicon, size: 20) }
+            // Like Arc's, a split's tile is cut in equal parts by a 2-point line, light grey like
+            // the outline once selected, a 13-point icon in the middle of each; a tab's has a 20-point icon.
+            HStack(spacing: 0) {
+                ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
+                    if index > 0 {
+                        Rectangle()
+                            .fill(active && dark ? Color(white: 0.85) : Ink.separator)
+                            .frame(width: 2)
+                    }
+                    Favicon(url: tab.favicon, size: tabs.count > 1 ? 13 : 20)
+                        .frame(maxWidth: .infinity)
+                }
             }
                 .frame(maxWidth: .infinity)
                 .frame(height: Measure.tile)
                 .background(
                     RoundedRectangle(cornerRadius: Measure.radius)
-                        .fill(active ? model.selectedInk : hovered ? Ink.itemHovered : Ink.item)
+                        .fill(
+                            active
+                                ? (dark ? Color.white.opacity(0.53) : model.selectedInk)
+                                : hovered ? Ink.itemHovered : Ink.item)
                         .shadow(color: active ? model.selectedShadow : .clear, radius: 1, y: 1))
+                // Like Arc's, in the dark, the selected tile has a light grey outline.
+                .overlay(
+                    RoundedRectangle(cornerRadius: Measure.radius)
+                        .strokeBorder(Color(white: 0.85), lineWidth: 2)
+                        .opacity(active && dark ? 1 : 0))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

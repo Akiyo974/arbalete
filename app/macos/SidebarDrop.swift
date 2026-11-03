@@ -408,7 +408,8 @@ struct FavoritesTarget: NSViewRepresentable {
     let tile: CGSize
     /// Where the pointer is, from the view's top left corner, or nil once it leaves.
     let hover: (CGPoint?) -> Void
-    let drop: () -> Bool
+    /// Drops the node with this id, which the drag carries.
+    let drop: (Int) -> Bool
 
     func makeNSView(context: Context) -> Target {
         let view = Target()
@@ -427,7 +428,7 @@ struct FavoritesTarget: NSViewRepresentable {
         var model: AppModel?
         var tile = CGSize.zero
         var hover: (CGPoint?) -> Void = { _ in }
-        var drop: () -> Bool = { false }
+        var drop: (Int) -> Bool = { _ in false }
         /// What each dragged item showed before it turned into a tile.
         private var rows: [(frame: NSRect, components: [NSDraggingImageComponent])] = []
 
@@ -443,20 +444,24 @@ struct FavoritesTarget: NSViewRepresentable {
             }
         }
 
+        /// The node the drag carries, from its pasteboard: the model may forget its drag as the
+        /// mouse button comes up, before the drop.
+        private func carried(_ sender: any NSDraggingInfo) -> Int? {
+            sender.draggingPasteboard.string(forType: .string).flatMap { Int($0) }
+        }
+
         /// Like Arc's, the favorites take tabs and splits, not folders.
-        private var takes: Bool {
-            guard let model, let dragged = model.dragged, let item = model.item(dragged) else {
-                return false
-            }
+        private func takes(_ sender: any NSDraggingInfo) -> Bool {
+            guard let id = carried(sender), let item = model?.item(id) else { return false }
             if case .folder = item { return false }
             return true
         }
 
         override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
             rows = []
-            guard takes else { return [] }
+            guard takes(sender) else { return [] }
             let point = convert(sender.draggingLocation, from: nil)
-            let image = tileImage()
+            let image = tileImage(carried(sender))
             sender.enumerateDraggingItems(
                 options: [], for: self, classes: [NSPasteboardItem.self], searchOptions: [:]
             ) { item, _, _ in
@@ -471,7 +476,7 @@ struct FavoritesTarget: NSViewRepresentable {
         }
 
         override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
-            guard takes else { return [] }
+            guard takes(sender) else { return [] }
             hover(convert(sender.draggingLocation, from: nil))
             return .move
         }
@@ -493,16 +498,19 @@ struct FavoritesTarget: NSViewRepresentable {
             rows = []
         }
 
-        override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool { takes }
+        override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+            takes(sender)
+        }
 
         override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
             rows = []
-            return drop()
+            guard let id = carried(sender) else { return false }
+            return drop(id)
         }
 
         /// A favorite's tile for what the drag carries: its icons on the tile's fill, like Arc's.
-        private func tileImage() -> NSImage {
-            let tabs = model?.dragged.flatMap { model?.item($0) }?.tabs ?? []
+        private func tileImage(_ id: Int?) -> NSImage {
+            let tabs = id.flatMap { model?.item($0) }?.tabs ?? []
             let size = tile
             return NSImage(size: size, flipped: true) { rect in
                 let shape = NSBezierPath(
