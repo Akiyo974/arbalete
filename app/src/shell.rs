@@ -4522,7 +4522,8 @@ fn toggle_pin(tab: Option<NodeId>) {
 fn new_folder(parent: Option<NodeId>) {
     let folder = update_sidebar(|sidebar| {
         let parent = parent.unwrap_or(sidebar.displayed().pinned);
-        sidebar.add_folder(parent, "New Folder")
+        // Like Arc's.
+        sidebar.add_folder(parent, "Untitled")
     });
     if let Ok(folder) = folder {
         ask("arbalete:rename", &json!(folder));
@@ -4554,8 +4555,13 @@ fn new_profile() {
 /// tab.
 fn create_space(title: &str, emoji: &str, color: Color, tab: Option<NodeId>) {
     let created = update_sidebar(|sidebar| {
-        let profile = sidebar.displayed().profile;
+        let displayed = sidebar.displayed();
+        let (profile, current) = (displayed.profile, displayed.id);
         let space = sidebar.create_space(title, profile)?;
+        // Like Arc's, right after the Space it was created from.
+        if let Some(index) = sidebar.spaces().iter().position(|s| s.id == current) {
+            sidebar.move_space(space, index + 1)?;
+        }
         sidebar.set_space_emoji(space, emoji)?;
         sidebar.set_space_theme(space, color.into())?;
         // A tab moved there is selected; a folder moved there is not a tab to select.

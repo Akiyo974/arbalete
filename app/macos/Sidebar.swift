@@ -7,6 +7,9 @@
 import AppKit
 import SwiftUI
 
+/// How long a Space's page takes to slide in, like Arc's.
+let spaceSlide = 0.3
+
 struct SidebarView: View {
     @ObservedObject var model: AppModel
 
@@ -16,23 +19,39 @@ struct SidebarView: View {
         } else {
             VStack(spacing: 0) {
                 SidebarToolbar(model: model)
-                if let space = model.space, model.draftSpace == space.id {
-                    // Like Arc's, a new Space's form takes the address's and the tabs' room.
-                    SpaceDraft(model: model, space: space)
-                } else {
-                    if !(model.state?.toolbar ?? false) {
-                        AddressRow(model: model)
-                    }
-                    if model.state?.incognito == true, let page = model.page {
-                        IncognitoSections(model: model, page: page)
-                    } else if let page = model.page, model.space != nil {
-                        // Like Arc's, the profile's favorites stay while the Spaces slide below.
-                        Favorites(model: model, page: page)
-                        SpacePager(model: model)
+                // Like Arc's, a new Space's form slides in from the right over the tabs' room,
+                // which slides out to the left.
+                ZStack {
+                    if let space = model.space, model.draftSpace == space.id {
+                        // Like Arc's, a new Space's form takes the address's and the tabs' room.
+                        SpaceDraft(model: model, space: space)
+                            // A swipe back, rightward, carries it along, like Arc's.
+                            .offset(x: max(0, model.swipe))
+                            .transition(.move(edge: .trailing))
                     } else {
-                        Spacer()
+                        VStack(spacing: 0) {
+                            if !(model.state?.toolbar ?? false) {
+                                AddressRow(model: model)
+                            }
+                            if model.state?.incognito == true, let page = model.page {
+                                IncognitoSections(model: model, page: page)
+                            } else if let page = model.page, model.space != nil {
+                                // Like Arc's, the profile's favorites stay while the Spaces slide
+                                // below.
+                                Favorites(model: model, page: page)
+                                    // Past the first or the last Space, like Arc's, the
+                                    // favorites go along with the tabs.
+                                    .offset(x: model.edgeShift)
+                                SpacePager(model: model)
+                            } else {
+                                Spacer()
+                            }
+                        }
+                        .transition(.move(edge: .leading))
                     }
                 }
+                .clipped()
+                .animation(.easeInOut(duration: spaceSlide), value: model.draftSpace != nil)
                 RecentDownloads(model: model)
                 if model.state?.incognito == true {
                     // Like Arc's, only a button for a new tab.
@@ -47,6 +66,7 @@ struct SidebarView: View {
             }
             .padding(.horizontal, Measure.inset)
             .foregroundStyle(.primary)
+            .overlay(alignment: .trailing) { CreateHint(model: model) }
             // Like Arc's, the sidebar's empty room offers the displayed Space's menu.
             .overlay(RightClick(underOthers: true) {
                 if let page = model.page { model.run("menu/space/\(page.space)") }
@@ -491,10 +511,17 @@ struct SpacePager: View {
     var body: some View {
         GeometryReader { geometry in
             let width = geometry.size.width
+            // Like Arc's, a click on a Space a few away carries the page across those between.
+            let carousel = model.carousel
+            let pages = carousel ?? model.neighbors()
+            let shift =
+                carousel.map { -model.carouselShare * CGFloat($0.count - 1) * width }
+                ?? model.pagerShift - width
             HStack(spacing: 0) {
-                ForEach(model.neighbors(), id: \.id) { neighbor in
+                ForEach(pages, id: \.id) { neighbor in
                     Group {
-                        if let (page, space) = neighbor.shown {
+                        // The app's latest page, once it sends the one a carousel goes to.
+                        if let (page, space) = model.livePage(neighbor.id) ?? neighbor.shown {
                             SpaceSections(model: model, page: page, space: space)
                         } else {
                             Color.clear
@@ -503,24 +530,60 @@ struct SpacePager: View {
                     .frame(width: width)
                 }
             }
-            .offset(x: model.pagerShift - width)
+            .offset(x: shift)
             .onAppear { model.pageWidth = width }
             .onChange(of: width) { _, now in model.pageWidth = now }
         }
         .clipped()
-        // Past the last Space, a "+" comes in from the edge, its ring filling as the swipe goes.
-        .overlay(alignment: .trailing) {
-            let share = model.creatingShare
-            if share > 0 {
-                CreateDial(share: share, tint: model.accent)
-                    .offset(x: 48 * (1 - min(1, share * 2)))
-                    .padding(.trailing, 8)
-            }
-        }
     }
 }
 
-/// The "+" a swipe past the last Space fills, like Arc's: a ring around it, then whole, tinted.
+/// What a swipe past the last Space shows, like Arc's (its EdgeFeedbackView): along the sidebar's
+/// right edge, 85 points wide, a light and a "+" slide in on a spring as the swipe passes the
+/// last Space, the "+"'s ring filling as it goes.
+struct CreateHint: View {
+    @ObservedObject var model: AppModel
+    /// How far in the light and the "+" have slid, from 0 to 1.
+    private let _shown = State<CGFloat>(initialValue: 0)
+
+    var body: some View {
+        let share = model.creatingShare
+        let shown = _shown.wrappedValue
+        GeometryReader { geometry in
+            let height = geometry.size.height
+            ZStack(alignment: .topLeading) {
+                // An oval twice as wide as the edge, centered on it once in, fading out from
+                // its middle: Arc's radial gradient, from its key color at 22%.
+                Rectangle()
+                    .fill(
+                        EllipticalGradient(
+                            colors: [Color.white.opacity(0.22), Color.white.opacity(0)],
+                            center: .center, startRadiusFraction: 0, endRadiusFraction: 0.5))
+                    .frame(width: edgeWidth * 2, height: height)
+                    .offset(x: (edgeWidth - 10) * (1 - shown))
+                    .opacity(min(1, shown * 2))
+                CreateDial(share: share, tint: model.accent)
+                    .offset(x: edgeWidth + 5 - 47 * shown, y: (height - 30) / 2)
+                    .opacity(min(1, shown / 0.2))
+            }
+            .frame(width: edgeWidth, height: height, alignment: .topLeading)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .allowsHitTesting(false)
+        .onChange(of: share > 0) { _, now in
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                _shown.wrappedValue = now ? 1 : 0
+            }
+        }
+    }
+
+    private let edgeWidth: CGFloat = 85
+}
+
+/// The "+" a swipe past the last Space fills, like Arc's (its CircularProgressView): 30 points,
+/// a disc in the theme's color with a white "+" and a white ring 2.5 points wide filling as the
+/// swipe goes; once full, the ring thickens to fill the disc and the "+" takes the theme's color.
 struct CreateDial: View {
     let share: CGFloat
     let tint: Color
@@ -528,17 +591,21 @@ struct CreateDial: View {
     var body: some View {
         let full = share >= 1
         ZStack {
-            Circle().fill(full ? tint : Color.white.opacity(0.9))
-            Circle().trim(from: 0, to: share)
-                .stroke(tint, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+            Circle().fill(tint)
+            Circle()
+                .inset(by: 1.25)
+                .trim(from: 0, to: min(1, share))
+                .stroke(Color.white, lineWidth: full ? 30 : 2.5)
                 .rotationEffect(.degrees(-90))
-                .padding(1.5)
-            Image(systemName: "plus").font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(full ? Color.white : tint)
+                // Core Animation's own duration, which Arc's change of width takes.
+                .animation(.easeInOut(duration: 0.25), value: full)
+            Image(systemName: "plus")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(full ? tint : Color.white)
         }
         .frame(width: 30, height: 30)
-        .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
-        .animation(.easeOut(duration: 0.15), value: full)
+        .clipShape(Circle())
+        .shadow(color: .black.opacity(0.3), radius: 1.5, y: 1)
     }
 }
 
@@ -1036,14 +1103,19 @@ struct NameField: View {
         nonmutating set { _text.wrappedValue = newValue }
     }
     @FocusState private var focused: Bool
+    /// Whether the field had the keyboard: until then, losing it ends nothing.
+    private let _began = State<Bool>(initialValue: false)
 
     var body: some View {
         TextField("", text: _text.projectedValue)
             .textFieldStyle(.plain)
             .focused($focused)
+            // The sidebar's panel takes the keyboard first, which a click on a button there
+            // doesn't give it: the field would lose it as it shows.
+            .background(TakesKeyboard())
             .onAppear {
                 text = title
-                focused = true
+                DispatchQueue.main.async { focused = true }
             }
             .onSubmit { focused = false }
             .onExitCommand {
@@ -1051,13 +1123,27 @@ struct NameField: View {
                 focused = false
             }
             .onChange(of: focused) { _, now in
-                guard !now else { return }
+                if now { _began.wrappedValue = true }
+                guard !now, _began.wrappedValue else { return }
                 let value = text.trimmingCharacters(in: .whitespaces)
                 if (!value.isEmpty || blank) && value != title {
                     model.run("rename/\(id)/\(percentEncoded(value))")
                 }
                 model.renaming = nil
             }
+    }
+}
+
+/// Makes its window the key one as it shows in it.
+private struct TakesKeyboard: NSViewRepresentable {
+    func makeNSView(context: Context) -> View { View() }
+    func updateNSView(_ view: View, context: Context) {}
+
+    final class View: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            window?.makeKey()
+        }
     }
 }
 
@@ -1208,6 +1294,16 @@ struct Favicon: View {
 struct Footer: View {
     @ObservedObject var model: AppModel
 
+    private let _menuShown = State<Bool>(initialValue: false)
+    private var menuShown: Bool {
+        get { _menuShown.wrappedValue }
+        nonmutating set { _menuShown.wrappedValue = newValue }
+    }
+    /// The menu's and the "+"'s frames, from the window's top left corner.
+    private let _menuFrame = State<CGRect>(initialValue: .zero)
+    private let _plusFrame = State<CGRect>(initialValue: .zero)
+    private let _clicks = State<Any?>(initialValue: nil)
+
     /// Like Arc's, a new Space's form leaves only the Spaces' icons.
     private var drafting: Bool { model.draftSpace != nil }
 
@@ -1218,45 +1314,133 @@ struct Footer: View {
             }
             .opacity(drafting ? 0 : 1)
             .disabled(drafting)
-            Spacer()
-            HStack(spacing: 2) {
-                ForEach(model.state?.spaces ?? []) { space in
-                    SpaceIcon(model: model, space: space, displayed: space.id == model.state?.space)
+            SpaceIcons(model: model)
+                .padding(.horizontal, 5)
+            // Like Arc's, the "+" opens its own menu, turning into a "×" while it shows.
+            PlusButton(shown: menuShown, active: model.active) { setMenu(!menuShown) }
+                .padding(.trailing, 2)
+                .help(menuShown ? "" : "New")
+                .opacity(drafting ? 0 : 1)
+                .disabled(drafting)
+                .background(Frame(frame: _plusFrame.projectedValue))
+                .popover(isPresented: $model.profilesShown, arrowEdge: .top) {
+                    ProfilesView(model: model)
                 }
-            }
-            Spacer()
-            Menu {
-                Button("New Space…") { model.newSpace() }
-                Button("New Folder") { model.run("folder/new") }
-                    .keyboardShortcut("n", modifiers: [.command, .shift])
-                Divider()
-                Button("New Tab") { model.run("overlay/show") }
-                    .keyboardShortcut("t", modifiers: .command)
-                Divider()
-                Button("Profiles…") { model.profilesShown = true }
-            } label: {
-                // A menu's label takes no font: the symbol comes at Arc's size, measured.
-                Image(
-                    nsImage: NSImage(systemSymbolName: "plus", accessibilityDescription: "New")!
-                        .withSymbolConfiguration(.init(pointSize: 17, weight: .regular))!)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .frame(width: 28, height: 28)
-            .padding(.trailing, 2)
-            .opacity(model.active ? 1 : 0.3)
-            .help("New")
-            .opacity(drafting ? 0 : 1)
-            .disabled(drafting)
-            .popover(isPresented: $model.profilesShown, arrowEdge: .top) {
-                ProfilesView(model: model)
-            }
         }
         .frame(height: 40)
         .foregroundStyle(model.buttonInk)
+        .overlay(alignment: .bottomTrailing) {
+            if menuShown {
+                PlusMenu(model: model) { setMenu(false) }
+                    .background(Frame(frame: _menuFrame.projectedValue))
+                    .padding(.trailing, 2 + 14 - plusMenuArrowTrailing)
+                    // The arrow's tip over the "+"'s center, 20 points over the footer's bottom.
+                    .padding(.bottom, 20 + plusMenuAbovePlus)
+                    .fixedSize()
+                    .transition(
+                        .asymmetric(
+                            insertion: .scale(scale: 0.95, anchor: .bottomTrailing)
+                                .combined(with: .opacity)
+                                .animation(.easeOut(duration: 0.05)),
+                            removal: .scale(scale: 0.95, anchor: .bottomTrailing)
+                                .combined(with: .opacity)
+                                .animation(.easeIn(duration: 0.1))))
+            }
+        }
         // Measured on Arc's: its icons' centers 25 points over the window's bottom.
         .padding(.bottom, 5)
+        .onDisappear { setMenu(false) }
+    }
+
+    /// Shows or hides the "+" menu, which a click anywhere else closes.
+    private func setMenu(_ shown: Bool) {
+        if let monitor = _clicks.wrappedValue {
+            NSEvent.removeMonitor(monitor)
+            _clicks.wrappedValue = nil
+        }
+        withAnimation { menuShown = shown }
+        guard shown else { return }
+        _clicks.wrappedValue = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { event in
+            let inside: Bool = {
+                guard let content = event.window?.contentView else { return false }
+                // SwiftUI's frames are from the window's top left corner.
+                let point = NSPoint(
+                    x: event.locationInWindow.x,
+                    y: content.bounds.height - event.locationInWindow.y)
+                return _menuFrame.wrappedValue.contains(point) || _plusFrame.wrappedValue.contains(point)
+            }()
+            if !inside { setMenu(false) }
+            return event
+        }
+    }
+}
+
+/// The footer's "+", turned into a "×" while its menu shows.
+struct PlusButton: View {
+    let shown: Bool
+    let active: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            // At Arc's size, measured; like Arc's, it turns a quarter of a half turn into a "×".
+            Image(systemName: "plus")
+                .font(.system(size: 17, weight: .regular))
+                .rotationEffect(.degrees(shown ? 45 : 0))
+                .animation(.easeInOut(duration: 0.2), value: shown)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(active || shown ? 1 : 0.3)
+    }
+}
+
+/// Keeps a view's frame from the window's top left corner.
+struct Frame: View {
+    @Binding var frame: CGRect
+
+    var body: some View {
+        GeometryReader { geometry in
+            Color.clear
+                .onAppear { frame = geometry.frame(in: .global) }
+                .onChange(of: geometry.frame(in: .global)) { _, new in frame = new }
+        }
+    }
+}
+
+/// The Spaces' icons, measured on Arc's: alone, a Space shows none; otherwise each takes up to
+/// 34 points, centered, and when they don't fit they share the room, the displayed one keeping
+/// at least 22.5 points.
+struct SpaceIcons: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        let spaces = model.state?.spaces ?? []
+        GeometryReader { geometry in
+            let count = CGFloat(spaces.count)
+            let room = geometry.size.width
+            let roomy = count * 34 <= room
+            let even = min(34, room / max(count, 1))
+            let displayed = roomy ? even : max(even, 22.5)
+            let other = roomy ? even : (room - displayed) / max(count - 1, 1)
+            HStack(spacing: 0) {
+                ForEach(spaces) { space in
+                    let shown = space.id == model.state?.space
+                    SpaceIcon(model: model, space: space, displayed: shown, slot: shown ? displayed : other)
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
+            .frame(width: room, height: geometry.size.height)
+            // Like Arc's, a new Space's icon grows in as the others make room, and they resize
+            // as the displayed one changes.
+            .animation(.easeInOut(duration: spaceSlide), value: spaces.map(\.id))
+            .animation(.easeInOut(duration: spaceSlide), value: model.state?.space)
+        }
+        .frame(height: 24)
+        .opacity(spaces.count > 1 ? 1 : 0)
     }
 }
 
@@ -1266,6 +1450,8 @@ struct SpaceIcon: View {
     @ObservedObject var model: AppModel
     let space: Space
     let displayed: Bool
+    /// The room it takes along the footer.
+    let slot: CGFloat
     private let _hovered = State<Bool>(initialValue: false)
     private var hovered: Bool {
         get { _hovered.wrappedValue }
@@ -1274,20 +1460,24 @@ struct SpaceIcon: View {
 
     var body: some View {
         Button {
-            model.run("space/\(space.id)")
+            model.slide(to: space.id)
         } label: {
             Group {
                 if let emoji = space.emoji {
                     Text(emoji).font(.system(size: 12)).opacity(displayed ? 1 : 0.5)
                 } else {
+                    // Measured on Arc's: 8 points with room, 4 without, dimmed while the
+                    // window is inactive.
+                    let size: CGFloat = slot >= 22.5 ? 8 : 4
                     Circle()
-                        .fill(.primary.opacity(displayed ? 0.9 : 0.35))
-                        .frame(width: 7, height: 7)
+                        .fill(.primary.opacity((displayed ? 0.5 : 0.18) * (model.active ? 1 : 0.5)))
+                        .frame(width: size, height: size)
                 }
             }
-            .frame(width: 24, height: 24)
+            .frame(width: min(24, slot), height: 24)
             .background(
                 RoundedRectangle(cornerRadius: 6).fill(.primary.opacity(hovered ? 0.1 : 0)))
+            .frame(width: slot)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

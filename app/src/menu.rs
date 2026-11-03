@@ -390,12 +390,8 @@ fn space_menu(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
             json!({ "space": id, "field": field }),
         )
     };
-    let delete = Action::Confirm {
-        question: format!("Delete the Space “{}”?", space.title),
-        detail: "Its tabs and folders will be closed.",
-        button: "Delete",
-        command: Command::DeleteSpace(id),
-    };
+    // Like Arc's, at once, with no confirmation.
+    let delete = Action::Run(Command::DeleteSpace(id));
     vec![
         item("icon", "Change Space Icon…", edit("emoji")),
         item("rename", "Rename Space…", edit("name")),
@@ -797,7 +793,7 @@ mod tests {
     }
 
     #[test]
-    fn a_space_edits_itself_changes_its_profile_and_deletes_itself_once_confirmed() {
+    fn a_space_edits_itself_changes_its_profile_and_deletes_itself() {
         let mut sidebar = Sidebar::default();
         let work = sidebar.create_profile("Work").unwrap();
         let home = sidebar.spaces()[0].clone();
@@ -854,12 +850,7 @@ mod tests {
         );
         assert_eq!(
             choose("delete"),
-            Some(Action::Confirm {
-                question: "Delete the Space “Home”?".into(),
-                detail: "Its tabs and folders will be closed.",
-                button: "Delete",
-                command: Command::DeleteSpace(home.id),
-            })
+            Some(Action::Run(Command::DeleteSpace(home.id)))
         );
     }
 

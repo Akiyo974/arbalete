@@ -120,7 +120,7 @@ final class PaneBars {
         cutCorners(of: panes.map { frame($0.x, $0.y, $0.width, $0.height) }, in: card)
         // Around the focused page, once at least two show.
         if panes.count > 1, let focused = panes.first(where: \.focused) {
-            outline.layer?.borderColor = NSColor(model.themeColor).cgColor
+            outline.layer?.borderColor = NSColor(model.focusColor).cgColor
             outline.frame = placed(frame(focused.x, focused.y, focused.width, focused.height))
             raise(outline)
         } else {

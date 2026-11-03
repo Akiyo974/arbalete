@@ -63,6 +63,12 @@ final class AppModel: ObservableObject {
     var pageWidth: CGFloat = 0
     /// The Space a finished swipe slid to, until the app shows it.
     private var swipedTo: Int?
+    /// The Spaces a click carries the page across, left to right, while it does, like Arc's
+    /// carousel, and how far along it is, from 0 at the left to 1 at the right.
+    @Published var carousel: [(id: Int, shown: (SpacePage, Space)?)]?
+    @Published var carouselShare: CGFloat = 0
+    /// The last page the app sent of each Space, which a carousel shows passing by.
+    private var seenPages: [Int: SpacePage] = [:]
     @Published var section = LibrarySection.spaces
     @Published var query = "" {
         didSet { if section == .history { searchHistory() } }
@@ -134,6 +140,7 @@ final class AppModel: ObservableObject {
             }
             paintWindow()
             followDraft()
+            for page in state?.pages ?? [] { seenPages[page.space] = page }
             // The page slid to is now the displayed one, in the middle.
             if let swipedTo, state?.space == swipedTo {
                 self.swipedTo = nil
@@ -200,6 +207,16 @@ final class AppModel: ObservableObject {
             swipe += dx
         default:
             let threshold = swipeThreshold
+            // Like Arc's, a new Space's form only goes back, rightward, which drops the Space:
+            // only its button creates it.
+            if let draft = draftSpace {
+                if swipe > threshold {
+                    draftSpace = nil
+                    run("space/delete/\(draft)")
+                }
+                withAnimation(.spring(duration: 0.3)) { swipe = 0 }
+                return
+            }
             guard let state, let index = state.spaces.firstIndex(where: { $0.id == state.space })
             else { return }
             let (previous, next) = (index > 0, index < state.spaces.count - 1)
@@ -227,6 +244,37 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// The page the app last sent of a Space, with the Space, if it sent one.
+    func livePage(_ space: Int) -> (SpacePage, Space)? {
+        guard let state, let page = state.pages.first(where: { $0.space == space }),
+            let space = state.spaces.first(where: { $0.id == space })
+        else { return nil }
+        return (page, space)
+    }
+
+    /// Displays a Space, like Arc's: the page slides across the Spaces between, a carousel.
+    func slide(to space: Int) {
+        guard let state, space != state.space,
+            let from = state.spaces.firstIndex(where: { $0.id == state.space }),
+            let to = state.spaces.firstIndex(where: { $0.id == space })
+        else { return run("space/\(space)") }
+        let forward = to > from
+        carousel = state.spaces[min(from, to)...max(from, to)].map { space in
+            (space.id, seenPages[space.id].map { ($0, space) })
+        }
+        var still = Transaction()
+        still.disablesAnimations = true
+        withTransaction(still) { carouselShare = forward ? 0 : 1 }
+        run("space/\(space)")
+        // Longer the more Spaces it passes, a little.
+        let duration = min(0.5, spaceSlide + 0.05 * Double(abs(to - from) - 1))
+        withAnimation(.easeInOut(duration: duration)) {
+            carouselShare = forward ? 1 : 0
+        } completion: {
+            self.carousel = nil
+        }
+    }
+
     /// How far a swipe goes before it pages, or opens the library or a new Space.
     var swipeThreshold: CGFloat { 80 }
 
@@ -241,9 +289,13 @@ final class AppModel: ObservableObject {
     /// Space, where they resist like Arc's.
     var pagerShift: CGFloat { swipePastEdge ? swipe / 5 : swipe }
 
+    /// How far a swipe past the first or the last Space moves the whole sidebar's content.
+    var edgeShift: CGFloat { swipePastEdge ? pagerShift : 0 }
+
     /// How far a swipe past the last Space has gone toward creating one, from 0 to 1.
     var creatingShare: CGFloat {
-        swipe < 0 && swipePastEdge ? min(1, -swipe / swipeThreshold) : 0
+        // A new Space's form creates nothing more, like Arc's.
+        draftSpace == nil && swipe < 0 && swipePastEdge ? min(1, -swipe / swipeThreshold) : 0
     }
 
     /// The theme of the Space a swipe brings in, and how far it has come, from 0 to 1.

@@ -137,6 +137,17 @@ struct BackdropTint: View {
             }
             // Like Arc's, each of a split's pages loading shows a line above it, in the room over
             // the card or between the pages, where a grabber rests between stacked ones.
+            if model.panes.count > 1, let pane = model.panes.first(where: \.focused) {
+                // Like Arc's, a glow around the focused page, outside it, measured.
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(
+                        isDark(theme) ? Color.white.opacity(0.27) : model.focusColor.opacity(0.3))
+                    .frame(width: pane.width, height: pane.height)
+                    .blur(radius: 8)
+                    .position(
+                        x: pane.cardX + pane.x + pane.width / 2,
+                        y: pane.cardY + pane.y + pane.height / 2)
+            }
             if model.panes.count > 1 {
                 ForEach(model.panes, id: \.tab) { pane in
                     LoadingLine(loading: pane.loading, dark: isDark(theme), grabber: pane.y > 0)
@@ -230,7 +241,8 @@ final class SidebarHost {
             guard let self, self.panel.alphaValue == 0 else { return }
             self.place(nil, floating: false, revealed: false)
         }
-        resize.tint = { NSColor(model.accent).withAlphaComponent(0.6) }
+        // Like Arc's, read in its code: the theme's color, half seen.
+        resize.tint = { NSColor(model.themeColor) }
         // Right clicks never reach the views under the pointer that want them, the rows and
         // Spaces whose menus they open, only their release does: this hands it over.
         rightClicks = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseUp]) { [weak self] event in
@@ -310,15 +322,68 @@ final class SidebarHost {
     }
 }
 
-/// Resizes the docked sidebar when dragged, to the pointer. Like Arc's, a line in the accent
-/// shows along the page while the pointer is over it or drags it.
+/// Resizes the docked sidebar when dragged, to the pointer. Like Arc's, a line shows along the
+/// page once the pointer rests over it a moment, and while it drags.
+/// Like Arc's: the pointer rests a quarter of a second before the line fades in or out, which
+/// takes a fifth of one, to half the tint.
+private let hoverDelay = 0.25
+private let fadeDuration = 0.2
+private let litOpacity: Float = 0.5
+
 final class SidebarResize: NSView {
     var send: (String) -> Void = { _ in }
     var tint: () -> NSColor = { .controlAccentColor }
     /// Called once a drag ends.
     var ended: () -> Void = {}
-    private var hovered = false { didSet { needsDisplay = true } }
-    private(set) var dragging = false { didSet { needsDisplay = true } }
+    private(set) var dragging = false { didSet { light() } }
+    private var hovered = false { didSet { light() } }
+    private var hover: DispatchWorkItem?
+    private let line = CAShapeLayer()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        line.isHidden = true
+        line.opacity = 0
+        layer?.addSublayer(line)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        line.frame = bounds
+        // Like Arc's: 3 points wide with round ends, 2.5 points short of the page, 4 points
+        // short of its top and bottom (CARD_MARGIN, 10).
+        let rect = NSRect(x: bounds.width - 5.5, y: 14, width: 3, height: max(0, bounds.height - 28))
+        line.path = CGPath(roundedRect: rect, cornerWidth: 1.5, cornerHeight: 1.5, transform: nil)
+        CATransaction.commit()
+    }
+
+    /// Fades the line in while hovered or dragged, out otherwise, then hides it.
+    private func light() {
+        let lit = dragging || hovered
+        guard lit != (line.opacity == litOpacity) else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if lit {
+            line.fillColor = tint().cgColor
+            line.isHidden = false
+        }
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = line.presentation()?.opacity ?? line.opacity
+        fade.toValue = lit ? litOpacity : 0
+        fade.duration = fadeDuration
+        line.opacity = lit ? litOpacity : 0
+        CATransaction.setCompletionBlock { [weak self] in
+            guard let self, !(dragging || hovered) else { return }
+            line.isHidden = true
+        }
+        line.add(fade, forKey: "opacity")
+        CATransaction.commit()
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -333,22 +398,23 @@ final class SidebarResize: NSView {
                 owner: self))
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        guard hovered || dragging else { return }
-        // Measured on Arc's: 4 points wide, against the page, as tall as it.
-        tint().setFill()
-        let line = NSRect(x: bounds.width - 5, y: 10, width: 4, height: bounds.height - 20)
-        NSBezierPath(roundedRect: line, xRadius: 2, yRadius: 2).fill()
-    }
-
     override func cursorUpdate(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
     override func mouseMoved(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
-    override func mouseEntered(with event: NSEvent) { hovered = true }
+    override func mouseEntered(with event: NSEvent) { rest(true) }
+
     override func mouseExited(with event: NSEvent) {
-        hovered = false
+        rest(false)
         // Only over it: the cursor goes back to the arrow past it, but while dragging it.
         if !dragging { NSCursor.arrow.set() }
     }
+    /// Like Arc's, the line follows the pointer in or out of it only once it rests there.
+    private func rest(_ over: Bool) {
+        hover?.cancel()
+        let change = DispatchWorkItem { [weak self] in self?.hovered = over }
+        hover = change
+        DispatchQueue.main.asyncAfter(deadline: .now() + hoverDelay, execute: change)
+    }
+
     override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) {

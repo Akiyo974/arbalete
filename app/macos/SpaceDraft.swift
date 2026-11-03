@@ -26,7 +26,9 @@ extension AppModel {
             let bare = #"{"colors":[],"mode":"auto","intensity":0.8,"noise":0}"#
             run("space/theme/\(state.space)/\(percentEncoded(bare))")
         } else if let draft = draftSpace, draft != state.space {
+            // Left for another Space without its button, it was never created, like Arc's.
             draftSpace = nil
+            run("space/delete/\(draft)")
         }
     }
 }

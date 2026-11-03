@@ -395,7 +395,7 @@ pub enum Command {
     SetUrlRouting(UrlRouting),
     /// Hides a Space's tabs in the sidebar, or shows them again: `space/toggle/<space id>`.
     ToggleSpace(SpaceId),
-    /// Deletes a Space with its tabs, once confirmed: `space/delete/<space id>`.
+    /// Deletes a Space with its tabs: `space/delete/<space id>`.
     DeleteSpace(SpaceId),
     /// Moves a Space to an index in sidebar order, as the app counts them once the Space has
     /// left: `space/move/<space id>/<index>`.

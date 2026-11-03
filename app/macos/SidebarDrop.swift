@@ -38,6 +38,14 @@ extension AppModel {
         return color(ThemePalette(lead).strongest(dark: isDark(theme)))
     }
 
+    /// The color around the focused page of a split: the theme's, or without colors, Arc's blue,
+    /// a brighter one in the dark, measured.
+    var focusColor: Color {
+        guard space?.theme.colors.isEmpty ?? true else { return themeColor }
+        // Drawn as #3139fb is on Arc's, once the display's colors take their share.
+        return color(systemDark() ? "#2f38ff" : "#333ce8")
+    }
+
     /// The color of a Space's main buttons, like Arc's: its theme's, or its blue without colors.
     var accent: Color {
         (space?.theme.colors.isEmpty ?? true) ? color("#333ce8") : themeColor
