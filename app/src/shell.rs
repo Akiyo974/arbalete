@@ -60,7 +60,7 @@ const WINDOW_COLOR: u32 = 0xff1b_0e1f;
 const EDGE_WIDTH: i32 = 4;
 
 /// How far the floating sidebar sits from the window's edges.
-const FLOAT_INSET: i32 = 4;
+const FLOAT_INSET: i32 = 5;
 
 /// How long the sidebar's moves last, in milliseconds: hiding or showing it, the card following;
 /// the revealed sidebar floating in, with a spring, and out; and docking, from above the page or
@@ -123,6 +123,8 @@ const LITTLE_BAR_HEIGHT: i32 = 47;
 
 /// The height of the bar above the page, in toolbar mode, like Arc's.
 const PAGE_TOOLBAR_HEIGHT: i32 = 40;
+/// The bar above the page in toolbar mode, outside developer mode: lower, measured on Arc's.
+const PLAIN_TOOLBAR_HEIGHT: i32 = 33;
 
 /// The height of the settings window's title row, which holds the window buttons
 /// (ui/src/index.css). Not on macOS, whose settings window is native.
@@ -269,6 +271,9 @@ struct Win {
     room: RefCell<Option<Rect>>,
     /// The tabs' pages, one shown at a time, or a split.
     stage: RefCell<Option<Panel>>,
+    /// The bars over the pages last sent to the native interface, and where (send_panes).
+    #[cfg(target_os = "macos")]
+    panes_sent: RefCell<Option<(Option<*mut std::ffi::c_void>, String)>>,
     /// The tab whose page the window shows.
     shown: Cell<Option<NodeId>>,
     /// Shown above the page, to open tabs.
@@ -312,6 +317,8 @@ struct Win {
     sidebar_mode: Cell<SidebarMode>,
     /// The Command Bar edits the address over the docked sidebar's url bar.
     over_url_bar: Cell<bool>,
+    /// The window's least width while the Command Bar shows over the page (minimum_size).
+    overlay_min_width: Cell<Option<i32>>,
     /// The Command Bar is open for a page to show beside the selected one, in its split.
     adding_pane: Cell<bool>,
     /// The tabs selected last, the most recent first, which the tab switcher lists.
@@ -353,6 +360,8 @@ impl Win {
             stage_frame: RefCell::new(None),
             room: RefCell::new(None),
             stage: RefCell::new(None),
+            #[cfg(target_os = "macos")]
+            panes_sent: RefCell::new(None),
             shown: Cell::new(None),
             overlay_view: RefCell::new(None),
             overlay: RefCell::new(None),
@@ -377,6 +386,7 @@ impl Win {
             extension_popup: RefCell::new(None),
             sidebar_mode: Cell::new(SidebarMode::Shown),
             over_url_bar: Cell::new(false),
+            overlay_min_width: Cell::new(None),
             adding_pane: Cell::new(false),
             recent: RefCell::new(Vec::new()),
             switch: RefCell::new(None),
@@ -669,10 +679,14 @@ fn docked_width() -> i32 {
 }
 
 /// The least and the most the sidebar's edge may make it wide.
+// Measured on Arc's.
 const MIN_SIDEBAR: i32 = 164;
 const MAX_SIDEBAR: i32 = 500;
 /// The width the sidebar's edge snaps to, like Arc's.
 const SNAP_SIDEBAR: i32 = 228;
+/// The window's least size, measured on Arc's, whatever the sidebar's width.
+const MIN_WINDOW_WIDTH: i32 = 470;
+const MIN_WINDOW_HEIGHT: i32 = 385;
 
 /// The sidebar's width, as dragging its edge set it.
 fn sidebar_width() -> i32 {
@@ -689,6 +703,21 @@ fn library_width() -> i32 {
 /// The cards follow at once; the rest of the window is laid out once the drag ends
 /// (end_sidebar_resize).
 fn resize_sidebar(x: f64) {
+    // Like Arc's, dragged well past its least width, the sidebar hides; dragged back within the
+    // same drag, it shows again.
+    let has_tab = STATE.with_borrow(|state| state.sidebar.displayed().selected.is_some());
+    let mode = win().sidebar_mode.get();
+    // Like Arc's: under half its least width.
+    if x < f64::from(MIN_SIDEBAR / 2) {
+        if mode == SidebarMode::Shown && has_tab {
+            SIDEBAR_DRAG.set(SIDEBAR_DRAG.get().or(Some(sidebar_width())));
+            set_sidebar(SidebarMode::Hidden);
+        }
+        return;
+    }
+    if mode == SidebarMode::Hidden && SIDEBAR_DRAG.get().is_some() {
+        set_sidebar(SidebarMode::Shown);
+    }
     let mut width = (x.round() as i32).clamp(MIN_SIDEBAR, MAX_SIDEBAR);
     // Like Arc's, it snaps to its usual width near it.
     if (width - SNAP_SIDEBAR).abs() < 14 {
@@ -1074,6 +1103,15 @@ fn page_toolbar() -> bool {
     app_settings().show_toolbar || selected_url().is_some_and(|url| developer_mode(&url))
 }
 
+/// The bar above the page's height: the developer bar's, or the lower plain one's, like Arc's.
+fn toolbar_height() -> i32 {
+    if selected_url().is_some_and(|url| developer_mode(&url)) {
+        PAGE_TOOLBAR_HEIGHT
+    } else {
+        PLAIN_TOOLBAR_HEIGHT
+    }
+}
+
 /// Shows or hides the bar above the page as `page_toolbar` says, but over a split, which shows
 /// its pages' own bars.
 fn sync_page_toolbar() {
@@ -1081,7 +1119,9 @@ fn sync_page_toolbar() {
         return;
     };
     let shown = page_toolbar() && split_shown().is_none();
-    if (toolbar.is_visible() == 1) != shown {
+    // Shown or hidden, or as high as its mode wants it.
+    let height = toolbar_height();
+    if (toolbar.is_visible() == 1) != shown || (shown && toolbar.bounds().height != height) {
         toolbar.set_visible(shown.into());
         if let Some(card) = card_frame() {
             card.layout();
@@ -1318,7 +1358,6 @@ fn native_surface(view: *const ()) -> Option<&'static str> {
         (place(&current.find_view), "find"),
         (place(&current.site_view), "site"),
         (place(&current.theme_view), "theme"),
-        (place(&current.toolbar_view), "toolbar"),
         (
             SETTINGS_VIEW.with(|cell| std::ptr::from_ref(cell).cast()),
             "settings",
@@ -1372,14 +1411,42 @@ fn open_overlay(visible: bool, tab: Option<(String, Option<String>)>) {
         });
         let engine = engine.unwrap_or_default();
         let search = json!({ "name": engine.name(), "url": engine.url() });
+        let empty = url.is_none();
         let detail = json!({ "url": url, "favicon": favicon.flatten(), "search": search });
         dispatch(
             &win().overlay_view,
             &format!(r#"new CustomEvent("arbalete:show", {{ detail: {detail} }})"#),
         );
+        // Like Arc's, an empty bar offers the sites visited most.
+        if empty {
+            search_overlay("");
+        }
     }
     if !visible {
         win().adding_pane.set(false);
+    }
+    // Like Arc's, the window keeps the Command Bar's room while it shows, as wide as it was.
+    let window = win().window.with_borrow(Clone::clone);
+    let min_width = window
+        .as_ref()
+        .filter(|_| visible && !win().over_url_bar.get())
+        .map(|window| {
+            window
+                .size()
+                .width
+                .clamp(MIN_WINDOW_WIDTH, OVERLAY_WIDTH + 160)
+        });
+    if win().overlay_min_width.replace(min_width) != min_width
+        && let Some(window) = window
+    {
+        #[cfg(target_os = "macos")]
+        crate::mac::set_min_size(
+            window.window_handle(),
+            min_width.unwrap_or(MIN_WINDOW_WIDTH),
+            MIN_WINDOW_HEIGHT,
+        );
+        #[cfg(not(target_os = "macos"))]
+        window.invalidate_layout();
     }
     overlay.set_visible(visible.into());
     #[cfg(target_os = "macos")]
@@ -1398,7 +1465,7 @@ fn round_overlay() {
 }
 
 /// Shows the native surfaces where the app shows their web counterparts, after every command
-/// and layout: the overlays above the page and the bar at the card's top in toolbar mode.
+/// and layout: the overlays above the page, and the bars over the pages.
 #[cfg(target_os = "macos")]
 fn sync_native_surfaces() {
     let current = win();
@@ -1415,20 +1482,7 @@ fn sync_native_surfaces() {
     if let Some(overlay) = IMPORT.with_borrow(Clone::clone) {
         IMPORT_VIEW.with(|view| mirror(view, &overlay));
     }
-    let card = win()
-        .card
-        .with_borrow(|card| card.as_ref().map(|card| (card.is_visible(), card.bounds())));
-    if let Some((visible, card)) = card {
-        let shown = visible == 1
-            && page_toolbar()
-            && split_shown().is_none()
-            && win().slide.with_borrow(Option::is_none);
-        let bar = Rect {
-            height: PAGE_TOOLBAR_HEIGHT,
-            ..card
-        };
-        crate::native::surface(win().id, "toolbar", shown, &bar);
-    }
+    send_panes();
 }
 
 /// Shows a native surface where the app shows its web counterpart's overlay, which stays out of
@@ -1507,14 +1561,21 @@ fn search_overlay(text: &str) {
         };
         (tabs, sidebar.displayed().profile)
     });
-    let pages = if wanted.is_empty() {
-        Vec::new()
+    // Nothing typed, like Arc's: the sites visited most, one page each.
+    let pages = with_history(profile, |history| {
+        let limit = if wanted.is_empty() { 8 } else { 1 } * (OVERLAY_PAGES + OVERLAY_TABS);
+        history.suggest(text.trim(), limit, now())
+    })
+    .and_then(Result::ok)
+    .unwrap_or_default();
+    let pages: Vec<_> = if wanted.is_empty() {
+        let mut sites = std::collections::HashSet::new();
+        pages
+            .into_iter()
+            .filter(|page| sites.insert(site(&page.url).trim_start_matches("www.").to_string()))
+            .collect()
     } else {
-        with_history(profile, |history| {
-            history.suggest(text.trim(), OVERLAY_PAGES + OVERLAY_TABS, now())
-        })
-        .and_then(Result::ok)
-        .unwrap_or_default()
+        pages
     };
     let pages: Vec<_> = pages
         .iter()
@@ -1618,8 +1679,9 @@ fn set_sidebar(mode: SidebarMode) {
     ) else {
         return;
     };
+    // Like Arc's, a drag of the sidebar's edge hides and shows it at once, under the pointer.
     #[cfg(target_os = "macos")]
-    let duration = if crate::mac::reduce_motion() {
+    let duration = if crate::mac::reduce_motion() || SIDEBAR_DRAG.get().is_some() {
         0
     } else {
         slide_duration(before, mode)
@@ -1711,6 +1773,8 @@ fn step_slide() {
     let (Some(size), true) = (size, progress < 1.0) else {
         win().slide.set(None);
         settle_sidebar();
+        // The bar over the page, which the card hid while it moved.
+        send_panes();
         return;
     };
     let eased = crate::motion::ease_out(progress);
@@ -1836,6 +1900,18 @@ fn place_card() {
     }
     place_split_handles();
     send_empty_card();
+    float_beside_empty_card();
+}
+
+/// Like Arc's, beside an empty Space's panel, the hidden sidebar floats, which has nothing to
+/// give the room to; once a tab shows, it hides again.
+fn float_beside_empty_card() {
+    let empty = STATE.with_borrow(|state| state.sidebar.displayed().selected.is_none());
+    match win().sidebar_mode.get() {
+        SidebarMode::Hidden | SidebarMode::Revealed if empty => set_sidebar(SidebarMode::Floating),
+        SidebarMode::Floating if !empty => set_sidebar(SidebarMode::Hidden),
+        _ => {}
+    }
 }
 
 /// Moves the card `offset` points right of where it rests beside the docked sidebar, which pages
@@ -4230,14 +4306,12 @@ fn remove_tab(tab: NodeId) -> Option<NodeId> {
     next
 }
 
-/// Shows the tab that replaces the selected one, or the overlay when none is left.
+/// Shows the tab that replaces the selected one, or, like Arc's, the empty Space's panel when
+/// none is left.
 fn show_next(next: Option<NodeId>) {
     match next {
         Some(next) => select_tab(next),
-        None => {
-            hide_content();
-            show_overlay(true);
-        }
+        None => hide_content(),
     }
 }
 
@@ -5171,6 +5245,7 @@ fn send_panes() {
                         }) == 1
                     })
                 };
+                let developer = url.as_deref().is_some_and(developer_mode);
                 json!({
                     "tab": tab, "split": split,
                     "x": rect.x - card.x, "y": rect.y - card.y, "width": rect.width, "height": rect.height,
@@ -5180,10 +5255,33 @@ fn send_panes() {
                     "loading": browser.as_ref().is_some_and(|browser| browser.is_loading() == 1),
                     "focused": focused == Some(tab),
                     "color": TOP_COLORS.with_borrow(|colors| colors.get(&tab).cloned()),
+                    "developer": developer,
+                    "toolbar": false,
+                    "cardX": card.x, "cardY": card.y,
                 })
             })
             .collect();
-        crate::native::panes(win().id, win().card_view.get(), &json!(panes).to_string());
+        // A page alone has the bar above it in toolbar or developer mode, a view of the card like a
+        // split's page's, which the sidebar passes over, like Arc's.
+        let mut panes = panes;
+        if tabs.is_empty() && page_toolbar() {
+            panes.push(json!({
+                "tab": focused, "split": null,
+                "x": 0, "y": 0, "width": card.width, "height": card.height,
+                "bar": toolbar_height(), "url": selected_url().unwrap_or_default(),
+                "back": false, "forward": false, "loading": false, "focused": true,
+                // Like Arc's, the bar takes the color at the page's top.
+                "color": focused.and_then(|tab| TOP_COLORS.with_borrow(|colors| colors.get(&tab).cloned())),
+                "developer": false, "toolbar": true, "cardX": card.x, "cardY": card.y,
+            }));
+        }
+        // Only once they change: placing the bars again would end a click on them.
+        let sent = (win().card_view.get(), json!(panes).to_string());
+        if win().panes_sent.borrow().as_ref() == Some(&sent) {
+            return;
+        }
+        crate::native::panes(win().id, sent.0, &sent.1);
+        win().panes_sent.replace(Some(sent));
     }
 }
 
@@ -6372,6 +6470,16 @@ wrap_window_delegate! {
             Size { width: 1280, height: 820 }
         }
 
+        /// Like Arc's, as narrow as its card's least width beside the sidebar.
+        fn minimum_size(&self, _view: Option<&mut View>) -> Size {
+            // Like Arc's, no narrower than the Command Bar's room while it shows over the page,
+            // unless the window already was.
+            let width = window_by_id(self.id)
+                .and_then(|win| win.overlay_min_width.get())
+                .unwrap_or(MIN_WINDOW_WIDTH);
+            Size { width, height: MIN_WINDOW_HEIGHT }
+        }
+
         // CEF gives views its theme's colors again once it changes, as when the window shows:
         // the window's own, transparent on macOS, and the card's come back.
         fn on_theme_changed(&self, _view: Option<&mut View>) {
@@ -6389,6 +6497,12 @@ wrap_window_delegate! {
                 place_card();
                 place_reveal();
                 place_find();
+            }
+            // Like Arc's, the Command Bar stays centered as the window is resized.
+            let overlay = win().overlay.with_borrow(Clone::clone);
+            if let Some(overlay) = overlay.filter(|o| o.is_visible() == 1 && !win().over_url_bar.get()) {
+                place_overlay(overlay.bounds().height);
+                round_overlay();
             }
             update_drag_regions();
             send_window_width();
@@ -6440,7 +6554,7 @@ wrap_window_delegate! {
                 .expect("box layout");
             // Any width: the layout stretches it across the card. A zero one would make its size
             // "empty", which CEF ignores, with its height.
-            let toolbar = place_view(|| 1, PAGE_TOOLBAR_HEIGHT);
+            let toolbar = panel_create(Some(&mut ToolbarDelegate::new())).expect("toolbar");
             toolbar.set_visible(page_toolbar().into());
             let mut view = View::from(&toolbar);
             card.add_child_view(Some(&mut view));
@@ -6570,9 +6684,14 @@ wrap_window_delegate! {
         // that may take it.
         fn on_window_activation_changed(&self, _window: Option<&mut Window>, active: i32) {
             focus(self.id);
-            if active == 1 {
+            // Like Arc's, the Command Bar stays as the window comes back, as when it is resized:
+            // the page it shows over keeps it from the focus.
+            let overlay = win()
+                .overlay
+                .with_borrow(|overlay| overlay.as_ref().is_some_and(|o| o.is_visible() == 1));
+            if active == 1 && !overlay {
                 show_selected();
-            } else {
+            } else if active == 0 {
                 snapshot_shown();
             }
         }
@@ -6898,6 +7017,19 @@ fn no_width() -> i32 {
 /// layout stacks it: an empty view, without a page of its own.
 fn place_view(width: fn() -> i32, height: i32) -> Panel {
     panel_create(Some(&mut PlaceDelegate::new(width, height))).expect("a place")
+}
+
+// The bar above the page: as high as its mode wants it (toolbar_height).
+wrap_panel_delegate! {
+    struct ToolbarDelegate {}
+
+    impl ViewDelegate {
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            Size { width: 1, height: toolbar_height() }
+        }
+    }
+
+    impl PanelDelegate {}
 }
 
 // The card's body: its layout fills the stage frame, which then goes back to its room.

@@ -69,6 +69,12 @@ final class AppModel: ObservableObject {
     }
     /// The window the model is the interface of, which its commands come from.
     let window: UInt32
+    /// Whether the sidebar floats above the page, which then shows the window's buttons.
+    @Published var sidebarFloating = false
+    /// Whether the sidebar is docked, which keeps its toggle from the bar above the page.
+    @Published var sidebarDocked = true
+    /// The split's pages shown, from the card's top left corner, each loading above its own.
+    @Published var panes: [Pane] = []
     let send: Send
 
     init(window: UInt32, send: @escaping Send) {
@@ -361,14 +367,20 @@ final class AppModel: ObservableObject {
 }
 
 /// What the interface puts in one of the app's windows.
-/// How far below the window's top its buttons and the sidebar's toolbar are centered, like
-/// Arc's.
-let windowButtonsCenter: CGFloat = 24
+/// How far below the window's top its buttons and the sidebar's toolbar are centered, like the
+/// system's own windows, as System Settings.
+let windowButtonsCenter: CGFloat = 25.5
 
-/// Where the window's buttons' circles start from its left edge, and how far apart they are,
-/// like Arc's.
-private let windowButtonsLeading: CGFloat = 13.5
-private let windowButtonsSpacing: CGFloat = 23.5
+/// Where the window's buttons' circles start from its left edge, how wide and how far apart they
+/// are, like the system's own windows, measured on System Settings.
+let windowButtonsLeading: CGFloat = 18.5
+let windowButtonsCircle: CGFloat = 14
+let windowButtonsSpacing: CGFloat = 23
+/// Where the room past them starts: 12 points after the last circle, like Arc's.
+let windowButtonsEnd: CGFloat = windowButtonsLeading + 2 * windowButtonsSpacing + windowButtonsCircle + 12
+/// The three circles' room.
+let windowLightsSize = NSSize(
+    width: windowButtonsCircle + 2 * windowButtonsSpacing, height: windowButtonsCircle)
 
 /// Places the window's buttons like Arc's: centered `windowButtonsCenter` below its top, their
 /// titlebar grown to twice that, the first circle `windowButtonsLeading` from the left edge.
@@ -386,11 +398,14 @@ func centerWindowButtons(_ window: NSWindow) {
         .enumerated()
     {
         guard let button = window.standardWindowButton(kind) else { continue }
-        // The circle, 14 points wide, in the middle of the button.
-        let x =
-            windowButtonsLeading - (button.frame.width - 14) / 2 + CGFloat(index)
-            * windowButtonsSpacing
-        button.setFrameOrigin(NSPoint(x: x, y: (height - button.frame.height) / 2))
+        // Drawn at Arc's circles' size, from AppKit's own.
+        if button.frame.width != windowButtonsCircle {
+            let natural = button.frame.size
+            button.setFrameSize(NSSize(width: windowButtonsCircle, height: windowButtonsCircle))
+            button.setBoundsSize(natural)
+        }
+        let x = windowButtonsLeading + CGFloat(index) * windowButtonsSpacing
+        button.setFrameOrigin(NSPoint(x: x, y: (height - windowButtonsCircle) / 2))
     }
 }
 
@@ -412,6 +427,8 @@ final class NativeWindow {
     /// The panels above the page, by the name of the web view they stand for, like "overlay".
     var surfaces: [String: Surface] = [:]
     private var observers: [NSObjectProtocol] = []
+    /// Closes the Command Bar on a click out of it (closeCommandBar).
+    private var clicks: Any?
 
     init(window: NSWindow, content: NSView, app: AppModel) {
         model = app
@@ -440,6 +457,13 @@ final class NativeWindow {
             field.window?.makeFirstResponder(field)
         }
         surfaces["overlay"] = overlay
+        clicks = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) {
+            [weak window, weak overlay, weak bar] event in
+            if let window, let overlay, let bar {
+                closeCommandBar(bar, overlay, window, event)
+            }
+            return event
+        }
         let find = FindBar(app: app)
         findBar = find
         let findSurface = Surface(in: window, radius: 10) { FindView(bar: find) }
@@ -450,9 +474,6 @@ final class NativeWindow {
             field.selectText(nil)
         }
         surfaces["find"] = findSurface
-        surfaces["toolbar"] = Surface(in: window, radius: 0, material: .titlebar) {
-            PageToolbar(model: app)
-        }
         let site = SiteControls(app: app)
         siteControls = site
         let siteSurface = Surface(in: window, radius: 12) { SiteView(controls: site) }
@@ -482,6 +503,7 @@ final class NativeWindow {
     /// Closes its panels, the window they belong to closing.
     func close() {
         observers.forEach(NotificationCenter.default.removeObserver)
+        if let clicks { NSEvent.removeMonitor(clicks) }
         sidebar.close()
         surfaces.values.forEach { $0.close() }
         splitHandles.close()
@@ -567,8 +589,10 @@ public func placeSidebar(
         nativeWindows[id]?.sidebar.place(
             visible ? NSRect(x: x, y: y, width: width, height: height) : nil,
             floating: floating, revealed: revealed)
+        // Floating too: the drop over the page starts past it, or it would take the drags the
+        // sidebar's rows wait for.
         nativeWindows[id]?.pageDrop.sidebar =
-            visible && !floating ? NSRect(x: x, y: y, width: width, height: height) : nil
+            visible ? NSRect(x: x, y: y, width: width, height: height) : nil
     }
 }
 

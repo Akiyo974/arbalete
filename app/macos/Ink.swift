@@ -1,5 +1,6 @@
 // The sidebar's colors and sizes, like Arc's: each color has a light and a dark ink, which the
-// theme's appearance picks (SidebarHost sets it on the sidebar).
+// theme's appearance picks (SidebarHost sets it on the sidebar). Like Arc's, measured, the light
+// inks are a deep navy's.
 
 import AppKit
 import SwiftUI
@@ -20,23 +21,31 @@ extension Color {
 
 enum Ink {
     /// A row or a pill at rest, like the address's, and a row hovered.
-    static let item = Color.ink((0x0E0F10, 0.05), (0xFAFBFF, 0.10))
-    static let itemHovered = Color.ink((0x0E0F10, 0.10), (0xFAFBFF, 0.15))
+    static let item = Color.ink((navy, 0.07), (0xFAFBFF, 0.10))
+    static let itemHovered = Color.ink((navy, 0.12), (0xFAFBFF, 0.15))
     /// The selected tab's row, and its shadow in light themes.
     static let selected = Color.ink((0xFFFFFF, 0.85), (0xFAFBFF, 0.20))
-    static let selectedBehind = Color.ink((0xFFFFFF, 0.85), (0xFAFBFF, 0.10))
+    static let selectedBehind = Color.ink((0xFFFFFF, 0.20), (0xFAFBFF, 0.10))
+    /// The sidebar's buttons while another app is in front, under their own 75%.
+    static let buttonBehind = Color.ink((navy, 0.37), (0xFFFFFF, 0.32))
     static let selectedShadow = Color.ink((0x000000, 0.20), (0x000000, 0))
     /// A tab among several selected at once.
-    static let marked = Color.ink((0x000000, 0.10), (0xFAFBFF, 0.10))
+    static let marked = Color.ink((navy, 0.10), (0xFAFBFF, 0.10))
     /// A tab of a split, or of a row inside another.
-    static let child = Color.ink((0x000000, 0.07), (0xFFFFFF, 0.07))
+    static let child = Color.ink((navy, 0.07), (0xFFFFFF, 0.07))
     /// Where a tab resting on another's middle would go in their split.
     static let splitDrop = Color.ink((0xFFFFFF, 0.85), (0xFFFFFF, 0.45))
-    static let separator = Color.ink((0x000000, 0.15), (0xFFFFFF, 0.15))
+    static let separator = Color.ink((navy, 0.15), (0xFFFFFF, 0.15))
+    /// The line between the pinned tabs and today's.
+    static let divider = Color.ink((navy, 0.17), (0xFFFFFF, 0.12))
     /// Secondary icons and labels.
-    static let secondary = Color.ink((0x000000, 0.30), (0xFFFFFF, 0.45))
+    static let secondary = Color.ink((navy, 0.35), (0xFFFFFF, 0.45))
+    /// The empty favorites' invitation's text.
+    static let hint = Color.ink((navy, 0.70), (0xFFFFFF, 0.55))
     /// A tab's title.
-    static let primary = Color.ink((0x0E0F10, 0.90), (0xFFFFFF, 0.80))
+    static let primary = Color.ink((navy, 1), (0xFFFFFF, 0.80))
+    /// The light inks' navy.
+    private static let navy: UInt32 = 0x02053A
 }
 
 /// The sidebar's measures, in points.

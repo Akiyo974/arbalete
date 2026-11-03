@@ -81,7 +81,7 @@ pub enum Command {
     Back,
     Forward,
     Reload,
-    /// Reloads the page without its cache, from the menu.
+    /// Reloads the page without its cache, from the menu or the sidebar's "⋯".
     ForceReload,
     /// Stops loading the page, from the menu.
     Stop,
@@ -511,6 +511,8 @@ impl Command {
             "back" => Some(Self::Back),
             "forward" => Some(Self::Forward),
             "reload" => Some(Self::Reload),
+            "reload/force" => Some(Self::ForceReload),
+            "stop" => Some(Self::Stop),
             "overlay/show" => Some(Self::ShowOverlay),
             "overlay/hide" => Some(Self::HideOverlay),
             "overlay/edit" => Some(Self::EditUrl),
@@ -1037,6 +1039,8 @@ mod tests {
         assert_eq!(Command::parse("back"), Some(Command::Back));
         assert_eq!(Command::parse("forward"), Some(Command::Forward));
         assert_eq!(Command::parse("reload"), Some(Command::Reload));
+        assert_eq!(Command::parse("reload/force"), Some(Command::ForceReload));
+        assert_eq!(Command::parse("stop"), Some(Command::Stop));
         assert_eq!(Command::parse("find/hide"), Some(Command::HideFind));
         assert_eq!(Command::parse("history/show"), Some(Command::ShowHistory));
         assert_eq!(

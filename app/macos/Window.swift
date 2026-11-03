@@ -47,6 +47,9 @@ final class Backdrop {
     }
 }
 
+/// The room between a split's pages (SPLIT_GAP in app/src/shell.rs).
+private let splitGap: CGFloat = 10
+
 /// The card's corners (CARD_RADIUS in app/src/mac.rs).
 private let cardRadius: CGFloat = 6
 
@@ -55,6 +58,63 @@ private let cardRadius: CGFloat = 6
 private func emptyWash(colored: Bool, dark: Bool, active: Bool) -> Double {
     guard colored else { return dark ? 0.11 : 0.5 }
     return active ? 0.08 : 0.02
+}
+
+/// A page's loading, like Arc's scrim loader, measured in its code: for 3.2 seconds a 48 by 4
+/// track pulses in opacity and scale; then, at the pulse's trough, it widens to 128 and a bar runs
+/// along it, growing for 0.375 seconds, shrinking for 0.375, then gone for 0.375. It goes once the
+/// page loads, or after 30 seconds. Between a split's stacked pages, it rests as a 64 by 2 grabber.
+private struct LoadingLine: View {
+    let loading: Bool
+    let dark: Bool
+    var grabber = false
+    private let _start = State<Date?>(initialValue: nil)
+
+    var body: some View {
+        let start = _start.wrappedValue
+        TimelineView(.animation(paused: start == nil)) { context in
+            let elapsed = start.map { context.date.timeIntervalSince($0) } ?? 0
+            let shown = start != nil && elapsed < 30
+            // From the grabber, the pulse starts at its peak, and its trough comes 1.6 later.
+            let carouselAt = grabber ? 4.8 : 3.2
+            let carousel = shown && elapsed >= carouselAt
+            let wave = cos(2 * .pi * elapsed / 3.2)
+            let progress: Double =
+                carousel ? 1 : shown ? (grabber ? 0.5 + 0.5 * wave : 0.5 - 0.5 * wave) : grabber ? 1 : 0
+            let ink = dark ? Color.white : Color.black
+            let fill: Double =
+                carousel ? (dark ? 0.46 : 0.276) : shown ? 0.92 * progress : grabber ? 0.5 : 0
+            let size: CGSize =
+                carousel ? CGSize(width: 128, height: 4)
+                : shown ? CGSize(width: 48, height: 4)
+                : grabber ? CGSize(width: 64, height: 2) : CGSize(width: 48, height: 4)
+            ZStack(alignment: .leading) {
+                Rectangle().fill(ink.opacity(fill))
+                if carousel {
+                    let (from, to) = segment(elapsed - carouselAt)
+                    Rectangle().fill(ink.opacity(0.92))
+                        .frame(width: 128 * (to - from))
+                        .offset(x: 128 * from)
+                }
+            }
+            .frame(width: size.width, height: size.height, alignment: .leading)
+            .clipShape(Capsule())
+            .scaleEffect(0.88 + 0.12 * progress)
+            .animation(.spring(response: 0.8, dampingFraction: 0.92), value: carousel)
+            .animation(.spring(response: 0.8, dampingFraction: 0.92), value: shown)
+        }
+        .frame(width: 128, height: 4)
+        .onAppear { if loading { _start.wrappedValue = Date() } }
+        .onChange(of: loading) { _, now in _start.wrappedValue = now ? Date() : nil }
+    }
+
+    /// The bar's start and end along the track, from 0 to 1, `time` into the carousel.
+    private func segment(_ time: Double) -> (Double, Double) {
+        let t = time.truncatingRemainder(dividingBy: 1.125)
+        if t <= 0.375 { return (0, t / 0.375) }
+        if t <= 0.75 { return ((t - 0.375) / 0.375, 1) }
+        return (0, 0)
+    }
 }
 
 struct BackdropTint: View {
@@ -75,6 +135,17 @@ struct BackdropTint: View {
                     Tint(theme: coming, active: model.active).opacity(share)
                 }
             }
+            // Like Arc's, each of a split's pages loading shows a line above it, in the room over
+            // the card or between the pages, where a grabber rests between stacked ones.
+            if model.panes.count > 1 {
+                ForEach(model.panes, id: \.tab) { pane in
+                    LoadingLine(loading: pane.loading, dark: isDark(theme), grabber: pane.y > 0)
+                        .position(
+                            x: pane.cardX + pane.x + pane.width / 2,
+                            y: pane.y <= 0
+                                ? pane.cardY / 2 : pane.cardY + pane.y - splitGap / 2)
+                }
+            }
             if let card = model.card {
                 // Like Arc's, a faint shade around the card, outside it only, and an empty card a
                 // little lighter than the window, measured on Arc's.
@@ -92,6 +163,9 @@ struct BackdropTint: View {
                     context.blendMode = .normal
                     context.fill(shape, with: .color(.white.opacity(wash)))
                 }
+                // Like Arc's, a page loading shows a line in the margin above it.
+                LoadingLine(loading: model.state?.page.loading == true, dark: isDark(theme))
+                    .position(x: card.midX, y: card.minY / 2)
             }
         }
         .ignoresSafeArea()
@@ -108,22 +182,15 @@ final class SidebarHost {
     private let panel = ChildPanel(view: NSView())
     private let container = NSView()
     private let effect = NSVisualEffectView()
-    /// The toolbar's gap between its buttons, which moves the window.
-    private let drag = WindowDrag()
     /// Barely there, so that clicks on the docked sidebar's transparent parts reach it, rather
     /// than the main window under it: below the toolbar, and the toolbar past the window's
     /// buttons, which keep theirs.
     private let catchers = [NSView(), NSView()]
     /// While the sidebar hides, its edge of the window shows it again on hover.
     private let edge = Tracking()
-    /// While it is docked, the room between it and the page resizes it, like Arc's: a window of
-    /// its own, as the main one keeps the clicks on its views.
+    /// While it is docked, the margin between its content and the page resizes it, like Arc's:
+    /// above its other views.
     private let resize = SidebarResize()
-    private lazy var resizer: ChildPanel = {
-        let panel = ChildPanel(view: resize)
-        panel.ignoresMouseEvents = false
-        return panel
-    }()
     private var watch: AnyCancellable?
     private var revealed = false
     private var rightClicks: Any?
@@ -150,7 +217,6 @@ final class SidebarHost {
         }
         container.addSubview(effect)
         container.addSubview(host)
-        container.addSubview(drag)
         leave.exited = { [weak self] in
             if self?.revealed == true { model.run("sidebar/conceal") }
         }
@@ -159,6 +225,12 @@ final class SidebarHost {
         edge.autoresizingMask = [.height]
         window.contentView?.addSubview(edge)
         resize.send = { model.run($0) }
+        resize.ended = { [weak self] in
+            // Hidden by the drag, it goes once the drag ends.
+            guard let self, self.panel.alphaValue == 0 else { return }
+            self.place(nil, floating: false, revealed: false)
+        }
+        resize.tint = { NSColor(model.accent).withAlphaComponent(0.6) }
         // Right clicks never reach the views under the pointer that want them, the rows and
         // Spaces whose menus they open, only their release does: this hands it over.
         rightClicks = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseUp]) { [weak self] event in
@@ -181,22 +253,22 @@ final class SidebarHost {
         if let rightClicks { NSEvent.removeMonitor(rightClicks) }
         rightClicks = nil
         panel.close()
-        resizer.close()
     }
 
     /// Shows the sidebar at `frame`, from the window's top left corner, or hides it.
     func place(_ frame: NSRect?, floating: Bool, revealed: Bool) {
+        // Like Arc's, a drag of its edge hides it past its least width and shows it again: while
+        // the drag goes on, it only fades, as a window out of sight would lose the drag.
+        if frame == nil, resize.dragging, panel.isVisible {
+            panel.alphaValue = 0
+            return
+        }
+        panel.alphaValue = 1
         self.revealed = revealed
         if let content = window.contentView {
             edge.frame = NSRect(x: 0, y: 0, width: 8, height: content.bounds.height)
         }
         edge.isHidden = frame != nil
-        // Across the margin between the sidebar's content and the page.
-        resizer.place(
-            in: window,
-            frame.flatMap { frame in
-                floating ? nil : NSRect(x: frame.maxX - 8, y: 0, width: 8, height: frame.height)
-            }, raise: false)
         effect.isHidden = !floating
         // Floating, like Arc's: rounded 12 points, with a 1-point border.
         container.layer?.cornerRadius = floating ? 12 : 0
@@ -206,7 +278,19 @@ final class SidebarHost {
             (isDark(model.space?.theme)
             ? NSColor.white.withAlphaComponent(0.2) : NSColor.black.withAlphaComponent(0.1)).cgColor
         panel.hasShadow = floating
-        panel.place(in: window, frame)
+        // Only once it changes: publishing it draws the sidebar again, which ends a drag in it.
+        let floats = floating && frame != nil
+        let floated = model.sidebarFloating
+        if floated != floats { model.sidebarFloating = floats }
+        let docked = frame != nil && !floating
+        if model.sidebarDocked != docked { model.sidebarDocked = docked }
+        // Raised above the window's others only as it shows: raising takes it out of the window
+        // a moment, which would end a drag in it.
+        panel.place(in: window, frame, raise: !panel.isVisible)
+        // As it starts floating, above the card's window too, which CEF orders as it lays the
+        // card out: like Arc's, the sidebar passes over the page and its bar. Ordering it again
+        // while it floats would end a drag in it.
+        if floats, !floated { panel.order(.above, relativeTo: 0) }
         if container.superview != panel.contentView {
             panel.contentView?.addSubview(container)
         }
@@ -214,20 +298,27 @@ final class SidebarHost {
         container.autoresizingMask = [.width, .height]
         container.subviews.forEach { $0.frame = container.bounds }
         let bounds = container.bounds
+        // Across the margin between the sidebar's content and the page.
+        if resize.superview != container { container.addSubview(resize) }
+        resize.frame = NSRect(x: bounds.width - 8, y: 0, width: 8, height: bounds.height)
+        resize.isHidden = floating
         catchers[0].frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - 40))
-        catchers[1].frame = NSRect(x: 76, y: bounds.height - 40, width: max(0, bounds.width - 76), height: 40)
-        // Past the window's buttons and the sidebar's toggle, before the navigation buttons, in
-        // the toolbar's room, centered with the window's buttons.
-        let band = windowButtonsCenter * 2
-        drag.frame = NSRect(
-            x: 108, y: bounds.height - band, width: max(0, bounds.width - 208), height: band)
+        let past = windowButtonsEnd - 6
+        catchers[1].frame = NSRect(
+            x: past, y: bounds.height - 40, width: max(0, bounds.width - past), height: 40)
         panel.invalidateShadow()
     }
 }
 
-/// Resizes the docked sidebar when dragged, to the pointer.
+/// Resizes the docked sidebar when dragged, to the pointer. Like Arc's, a line in the accent
+/// shows along the page while the pointer is over it or drags it.
 final class SidebarResize: NSView {
     var send: (String) -> Void = { _ in }
+    var tint: () -> NSColor = { .controlAccentColor }
+    /// Called once a drag ends.
+    var ended: () -> Void = {}
+    private var hovered = false { didSet { needsDisplay = true } }
+    private(set) var dragging = false { didSet { needsDisplay = true } }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -235,18 +326,48 @@ final class SidebarResize: NSView {
         addTrackingArea(
             NSTrackingArea(
                 rect: .zero,
-                options: [.cursorUpdate, .mouseMoved, .activeAlways, .inVisibleRect],
+                options: [
+                    .cursorUpdate, .mouseMoved, .mouseEnteredAndExited, .activeAlways,
+                    .inVisibleRect,
+                ],
                 owner: self))
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard hovered || dragging else { return }
+        // Measured on Arc's: 4 points wide, against the page, as tall as it.
+        tint().setFill()
+        let line = NSRect(x: bounds.width - 5, y: 10, width: 4, height: bounds.height - 20)
+        NSBezierPath(roundedRect: line, xRadius: 2, yRadius: 2).fill()
     }
 
     override func cursorUpdate(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
     override func mouseMoved(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
+    override func mouseEntered(with event: NSEvent) { hovered = true }
+    override func mouseExited(with event: NSEvent) {
+        hovered = false
+        // Only over it: the cursor goes back to the arrow past it, but while dragging it.
+        if !dragging { NSCursor.arrow.set() }
+    }
     override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func mouseDown(with event: NSEvent) {}
-    override func mouseUp(with event: NSEvent) { send("resized") }
+    override func mouseDown(with event: NSEvent) {
+        // Like Arc's, a double-click gives it back its usual width (SNAP_SIDEBAR).
+        if event.clickCount == 2 {
+            send("sidebar/width/228")
+            return
+        }
+        dragging = true
+    }
+    override func mouseUp(with event: NSEvent) {
+        dragging = false
+        send("resized")
+        ended()
+    }
 
     override func mouseDragged(with event: NSEvent) {
+        // Like Arc's, the cursor stays until the drag ends, past the edge, the sidebar hidden.
+        NSCursor.resizeLeftRight.set()
         guard let parent = window?.parent else { return }
         // In the main window's points from its left edge, like the app's.
         send("sidebar/width/\(parent.convertPoint(fromScreen: NSEvent.mouseLocation).x)")
@@ -273,6 +394,49 @@ final class Tracking: NSView {
 
 /// Moves the main window when dragged, like a title bar and Arc's WindowDraggableView: the
 /// sidebar is a window of its own, which asks the main one to move.
+/// The window's buttons, like Arc's in its floating sidebar, which covers the window's own: the
+/// same buttons, acting on the main window.
+struct WindowLights: NSViewRepresentable {
+    func makeNSView(context: Context) -> LightsView { LightsView() }
+    func updateNSView(_ view: LightsView, context: Context) {}
+}
+
+final class LightsView: NSView {
+    private let buttons: [NSButton]
+
+    init() {
+        let kinds: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+        buttons = kinds.compactMap {
+            NSWindow.standardWindowButton($0, for: [.titled, .closable, .miniaturizable, .resizable])
+        }
+        super.init(frame: NSRect(origin: .zero, size: windowLightsSize))
+        for (index, button) in buttons.enumerated() {
+            let natural = button.frame.size
+            button.frame = NSRect(
+                x: CGFloat(index) * windowButtonsSpacing, y: 0, width: windowButtonsCircle,
+                height: windowButtonsCircle)
+            button.setBoundsSize(natural)
+            addSubview(button)
+        }
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var intrinsicContentSize: NSSize { windowLightsSize }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        let actions = [
+            #selector(NSWindow.performClose(_:)), #selector(NSWindow.miniaturize(_:)),
+            #selector(NSWindow.zoom(_:)),
+        ]
+        for (button, action) in zip(buttons, actions) {
+            button.target = window?.parent
+            button.action = action
+        }
+    }
+}
+
 final class WindowDrag: NSView {
     /// Whether a double-click minimizes or zooms the window, as the system's setting asks.
     var doubleClicks = true

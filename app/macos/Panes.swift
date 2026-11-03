@@ -1,6 +1,7 @@
-// The bars at the top of a split's pages and the focused page's outline, like Arc's Split View:
-// the app places them over each page (send_panes in app/src/shell.rs). They are views of the
-// card's window, above the pages it holds, so they move with them in one go.
+// The bars at the top of a split's pages and the focused page's outline, like Arc's Split View,
+// or the bar above a page alone: the app places them over each page (send_panes in
+// app/src/shell.rs). They are views of the card's window, above the pages it holds, so they move
+// with them in one go, and the sidebar passes over them, like Arc's.
 
 import AppKit
 import SwiftUI
@@ -22,12 +23,25 @@ struct Pane: Decodable, Equatable {
     var focused: Bool
     /// The color at the top of the page, as #rrggbb, which tints the bar like Arc's.
     var color: String?
+    /// Whether its site is in developer mode: its bar is the developer bar.
+    var developer: Bool
+    /// The bar above a page alone, in toolbar or developer mode, rather than a split's page.
+    var toolbar: Bool
+    /// The card's top left corner, from the window's.
+    var cardX: Double
+    var cardY: Double
 }
 
 /// The focused pane's outline, like Arc's: the theme's color, 2 points wide.
 private let outlineWidth: CGFloat = 2
 /// The card's, like Arc's (CARD_RADIUS in app/src/mac.rs).
 private let paneRadius: CGFloat = 6
+
+/// A bar's view: the card's window never becomes the key one, so every click in it is a first
+/// one, which the bar's buttons take at once.
+private final class BarHost: NSHostingView<PaneBar> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
 
 /// A view the page under it keeps the clicks through.
 private final class Outline: NSView {
@@ -38,7 +52,7 @@ private final class Outline: NSView {
 @MainActor
 final class PaneBars {
     private let model: AppModel
-    private var bars: [NSHostingView<PaneBar>] = []
+    private var bars: [BarHost] = []
     private let outline: Outline = {
         let view = Outline()
         view.wantsLayer = true
@@ -47,6 +61,9 @@ final class PaneBars {
         return view
     }()
 
+    /// The card's view the bars were last placed over.
+    private weak var card: NSView?
+
     init(model: AppModel) {
         self.model = model
     }
@@ -54,7 +71,7 @@ final class PaneBars {
     /// Lays `panes` out in `card`, the card's view, or takes them away without it.
     func place(_ panes: [Pane], in card: NSView?) {
         while bars.count < panes.count {
-            let host = NSHostingView(rootView: PaneBar(model: model, pane: nil))
+            let host = BarHost(rootView: PaneBar(model: model, pane: nil))
             host.sizingOptions = []
             host.wantsLayer = true
             host.layer?.cornerRadius = paneRadius
@@ -65,17 +82,22 @@ final class PaneBars {
             close()
             return
         }
+        self.card = card
         // Rects from the card's top left corner, in its own coordinates.
         func frame(_ x: Double, _ y: Double, _ width: Double, _ height: Double) -> NSRect {
             NSRect(
                 x: x, y: card.isFlipped ? y : card.bounds.height - y - height, width: width,
                 height: height)
         }
+        // In the card's window, over Chromium's content view rather than in it: its hit test
+        // would hand the bars clicks at the wrong place.
+        let container = card.window?.contentView?.superview ?? card
+        func placed(_ rect: NSRect) -> NSRect { container.convert(rect, from: card) }
         // Above the pages, which CEF may add or order since.
-        let covered = card.subviews.last.map(ours) == false
+        let covered = container.subviews.last.map(ours) == false
         func raise(_ view: NSView) {
-            if view.superview !== card || covered {
-                card.addSubview(view, positioned: .above, relativeTo: nil)
+            if view.superview !== container || covered {
+                container.addSubview(view, positioned: .above, relativeTo: nil)
             }
         }
         for (index, host) in bars.enumerated() {
@@ -92,14 +114,14 @@ final class PaneBars {
                 host.isFlipped
                 ? [.layerMinXMinYCorner, .layerMaxXMinYCorner]
                 : [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
-            host.frame = frame(pane.x, pane.y, pane.width, pane.bar)
+            host.frame = placed(frame(pane.x, pane.y, pane.width, pane.bar))
             raise(host)
         }
         cutCorners(of: panes.map { frame($0.x, $0.y, $0.width, $0.height) }, in: card)
         // Around the focused page, once at least two show.
         if panes.count > 1, let focused = panes.first(where: \.focused) {
             outline.layer?.borderColor = NSColor(model.themeColor).cgColor
-            outline.frame = frame(focused.x, focused.y, focused.width, focused.height)
+            outline.frame = placed(frame(focused.x, focused.y, focused.width, focused.height))
             raise(outline)
         } else {
             outline.removeFromSuperview()
@@ -151,7 +173,7 @@ final class PaneBars {
     }
 
     func close() {
-        if let card = bars.first?.superview { cutCorners(of: [], in: card) }
+        if let card { cutCorners(of: [], in: card) }
         bars.forEach { $0.removeFromSuperview() }
         outline.removeFromSuperview()
     }
@@ -164,13 +186,29 @@ struct PaneBar: View {
     let pane: Pane?
 
     var body: some View {
-        if let pane {
+        if let pane, pane.toolbar {
+            PageToolbar(model: model)
+                // Its ink reads on its color: the page's at its top, or the card's.
+                .environment(
+                    \.colorScheme,
+                    luminance(pane.color ?? model.cardColor) < 0.179 ? .dark : .light)
+        } else if let pane, pane.developer {
+            DeveloperBar(
+                model: model, url: pane.url,
+                focus: { if !pane.focused { model.run("select/\(pane.tab)") } },
+                close: { model.run("close/\(pane.tab)") })
+        } else if let pane {
             ZStack {
                 HStack(spacing: 0) {
                     button("arrow.left", "Back", enabled: pane.back) { act(pane, "back") }
                     button("arrow.right", "Forward", enabled: pane.forward) { act(pane, "forward") }
                     if pane.focused {
-                        button("arrow.clockwise", "Reload", enabled: true) { act(pane, "reload") }
+                        // Like Arc's, it stops the page while it loads.
+                        if pane.loading {
+                            button("xmark", "Stop", enabled: true) { act(pane, "stop") }
+                        } else {
+                            button("arrow.clockwise", "Reload", enabled: true) { act(pane, "reload") }
+                        }
                     }
                     Spacer()
                     if pane.focused, let split = pane.split {
@@ -231,6 +269,8 @@ public func placePanes(
         // The card's view, which its window keeps alive.
         let card = card.map { Unmanaged<NSView>.fromOpaque($0).takeUnretainedValue() }
         nativeWindows[id]?.paneBars.place(panes, in: card)
-        nativeWindows[id]?.pageDrop.panes = panes
+        let split = panes.filter { !$0.toolbar }
+        nativeWindows[id]?.pageDrop.panes = split
+        if let model = nativeWindows[id]?.model, model.panes != split { model.panes = split }
     }
 }

@@ -110,6 +110,9 @@ final class Surface {
 
     var isShown: Bool { panel.isVisible }
 
+    /// Its window, which clicks in it land in.
+    var window: NSWindow { panel }
+
     /// Closes it, its window closing.
     func close() { panel.close() }
 

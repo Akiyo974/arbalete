@@ -63,17 +63,40 @@ struct SidebarToolbar: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        HStack(spacing: 2) {
-            IconButton(symbol: "sidebar.left", label: "Toggle sidebar", symbolSize: toolbarSymbol) {
-                model.run("sidebar/toggle")
+        // Like Arc's, too narrow for them all, the toggle and reload go into a "⋯" menu.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 2) {
+                IconButton(
+                    symbol: "sidebar.left", label: "Toggle sidebar", symbolSize: toolbarSymbol
+                ) {
+                    model.run("sidebar/toggle")
+                }
+                Spacer(minLength: 0)
+                if !(model.state?.toolbar ?? false) {
+                    NavButtons(model: model)
+                }
             }
-            Spacer()
-            if !(model.state?.toolbar ?? false) {
-                NavButtons(model: model)
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                if !(model.state?.toolbar ?? false) {
+                    NavButtons(model: model, compact: true)
+                }
             }
         }
-        .padding(.leading, 72)
         .frame(height: 40)
+        // Past the window's buttons, which take their own clicks.
+        .background(WindowDragArea(doubleClicks: true))
+        // Past the window's buttons, the toggle's symbol 5 points into its button.
+        .padding(.leading, windowButtonsEnd - Measure.inset - 5)
+        // Like Arc's, floating, it shows the window's buttons, which it covers, where they stand.
+        .overlay(alignment: .leading) {
+            if model.sidebarFloating {
+                WindowLights()
+                    .frame(width: windowLightsSize.width, height: windowLightsSize.height)
+                    .padding(.leading, windowButtonsLeading - Measure.inset)
+            }
+        }
+        .foregroundStyle(model.buttonInk)
         // Centered with the window's buttons, on a split's bars, like Arc's.
         .padding(.top, windowButtonsCenter - 20)
     }
@@ -82,23 +105,39 @@ struct SidebarToolbar: View {
 /// The page's back, forward and reload buttons.
 struct NavButtons: View {
     @ObservedObject var model: AppModel
+    /// Reload, and the sidebar's toggle, in a "⋯" menu, like Arc's in a narrow sidebar.
+    var compact = false
 
     var body: some View {
         let page = model.state?.page
-        // Measured on Arc's: the symbols' centers 34 then 28 points apart.
+        // Measured on Arc's: the symbols' centers 34 then 28 points apart, 28 once narrow.
         HStack(spacing: 0) {
-            IconButton(symbol: "arrow.left", label: "Back", size: 34, symbolSize: toolbarSymbol) {
+            IconButton(
+                symbol: "arrow.left", label: "Back", size: compact ? 28 : 34, symbolSize: toolbarSymbol
+            ) {
                 model.run("back")
             }
                 .disabled(!(page?.canGoBack ?? false))
-            IconButton(symbol: "arrow.right", label: "Forward", size: 34, symbolSize: toolbarSymbol) {
+            IconButton(
+                symbol: "arrow.right", label: "Forward", size: compact ? 28 : 34,
+                symbolSize: toolbarSymbol
+            ) {
                 model.run("forward")
             }
                 .disabled(!(page?.canGoForward ?? false))
-            IconButton(symbol: "arrow.clockwise", label: "Reload", size: 22, symbolSize: toolbarSymbol) {
-                model.run("reload")
+            if compact {
+                MoreButton(model: model)
+            } else {
+                // Like Arc's, it stops the page while it loads.
+                let loading = page?.loading == true
+                IconButton(
+                    symbol: loading ? "xmark" : "arrow.clockwise",
+                    label: loading ? "Stop" : "Reload", size: 22, symbolSize: toolbarSymbol
+                ) {
+                    model.run(loading ? "stop" : "reload")
+                }
+                reloadOptions
             }
-            reloadOptions
         }
     }
 
@@ -119,8 +158,87 @@ struct NavButtons: View {
             .menuIndicator(.hidden)
             .fixedSize()
             .frame(width: 10, height: 28)
+            // A menu's label takes no style: it dims like the buttons by itself.
+            .opacity(model.active ? 1 : 0.3)
             .help("Reload Options")
         }
+    }
+}
+
+/// The narrow sidebar's "⋯", like Arc's: a popover with reload, force reload, clearing the
+/// site's cookies and the sidebar's toggle; it turns into a "×" while open.
+struct MoreButton: View {
+    @ObservedObject var model: AppModel
+    private let _shown = State<Bool>(initialValue: false)
+    private var shown: Bool {
+        get { _shown.wrappedValue }
+        nonmutating set { _shown.wrappedValue = newValue }
+    }
+
+    var body: some View {
+        Button {
+            shown.toggle()
+        } label: {
+            Image(systemName: shown ? "xmark" : "ellipsis")
+                .font(.system(size: toolbarSymbol, weight: .medium))
+                .frame(width: 17, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(shown ? 1 : 0.75)
+        .help("More")
+        .popover(isPresented: _shown.projectedValue, arrowEdge: .bottom) {
+            VStack(spacing: 0) {
+                row("arrow.clockwise", "Reload", "⌘R") { model.run("reload") }
+                row("arrow.clockwise.circle", "Force Reload", "⇧⌘R") { model.run("reload/force") }
+                row("arrow.triangle.2.circlepath", "Clear Cookies", nil) {
+                    model.run("menu/choose/site/any/clear-cookies")
+                }
+                row("sidebar.left", "Toggle Sidebar", "⌘S") { model.run("sidebar/toggle") }
+            }
+            .padding(8)
+            .frame(width: 200)
+        }
+    }
+
+    private func row(
+        _ symbol: String, _ title: String, _ shortcut: String?, action: @escaping () -> Void
+    ) -> some View {
+        MoreRow(symbol: symbol, title: title, shortcut: shortcut, accent: model.accent) {
+            shown = false
+            action()
+        }
+    }
+}
+
+/// A row of the "⋯" popover, highlighted in the accent on hover.
+private struct MoreRow: View {
+    let symbol: String
+    let title: String
+    let shortcut: String?
+    let accent: Color
+    let action: () -> Void
+    private let _hovered = State<Bool>(initialValue: false)
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: symbol).font(.system(size: 15, weight: .medium)).frame(width: 22)
+                Text(title).font(.system(size: 13, weight: .medium))
+                Spacer(minLength: 8)
+                if let shortcut {
+                    Text(shortcut).font(.system(size: 12)).foregroundStyle(accent.opacity(0.45))
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 38)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(accent.opacity(_hovered.wrappedValue ? 0.18 : 0)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { _hovered.wrappedValue = $0 }
     }
 }
 
@@ -223,7 +341,8 @@ struct AddressRow: View {
             }
         }
         .onHover { hovered = $0 }
-        .padding(.top, 2)
+        // 46 points from the window's top, like Arc's.
+        .padding(.top, 46 - windowButtonsCenter - 20)
         .padding(.bottom, 7)
     }
 }
@@ -242,10 +361,12 @@ struct SiteControlsButton: View {
     /// Where the button is: "docked" for a frame in the window, or "toolbar" for one in the bar
     /// above the page.
     var view = "docked"
+    var symbol = "slider.horizontal.3"
+    var symbolSize: CGFloat = 13
 
     var body: some View {
         GeometryReader { geometry in
-            IconButton(symbol: "slider.horizontal.3", label: "Site controls", size: 26) {
+            IconButton(symbol: symbol, label: "Site controls", size: 26, symbolSize: symbolSize) {
                 model.run("site/show/\(view)/\(inMainWindow(geometry.frame(in: .global)))")
             }
         }
@@ -502,7 +623,7 @@ struct FavoriteTile: View {
                 .background(
                     RoundedRectangle(cornerRadius: Measure.radius)
                         .fill(active ? model.selectedInk : hovered ? Ink.itemHovered : Ink.item)
-                        .shadow(color: active ? Ink.selectedShadow : .clear, radius: 1, y: 1))
+                        .shadow(color: active ? model.selectedShadow : .clear, radius: 1, y: 1))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -518,21 +639,28 @@ struct FavoritesHint: View {
     @ObservedObject var model: AppModel
     let space: Int
 
+    private var dark: Bool { isDark(model.space?.theme) }
+
     var body: some View {
         VStack(spacing: 4) {
-            // Like Arc's, a star in the accent, darkened, on a white disc, which glows.
+            // Like Arc's: in the dark, a star in the accent, darkened, on a white disc, which
+            // glows; in the light, a white star on a disc in the accent.
             Image(systemName: "star.circle.fill")
                 .symbolRenderingMode(.palette)
                 .foregroundStyle(
-                    Color(nsColor: NSColor(model.accent).blended(withFraction: 0.5, of: .black)!),
-                    .white)
+                    dark
+                        ? Color(
+                            nsColor: NSColor(model.accent).blended(withFraction: 0.5, of: .black)!)
+                        : .white,
+                    dark ? .white : model.accent)
                 .font(.system(size: 16))
-                .shadow(color: model.accent.opacity(0.8), radius: 4)
+                .shadow(color: model.accent.opacity(dark ? 0.8 : 0), radius: 4)
             // Our own words, as long as Arc's: two lines at its narrowest.
             Text("Drag tabs to Favorites").font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Ink.primary)
             Text("Favorites stay one click away in every Space")
                 .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Ink.hint)
                 .multilineTextAlignment(.center)
         }
         .padding([.horizontal, .top], 12)
@@ -541,11 +669,13 @@ struct FavoritesHint: View {
         // Dashed, like Arc's.
         .background(
             RoundedRectangle(cornerRadius: Measure.radius)
-                .strokeBorder(.primary.opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
-        // Like Arc's, the accent glows inside the border.
+                .strokeBorder(
+                    dark ? Color.white.opacity(0.3) : model.accent.opacity(0.35),
+                    style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+        // Like Arc's, in the dark, the accent glows inside the border.
         .background(
             RoundedRectangle(cornerRadius: Measure.radius)
-                .strokeBorder(model.accent.opacity(0.25), lineWidth: 4)
+                .strokeBorder(model.accent.opacity(dark ? 0.25 : 0), lineWidth: 4)
                 .blur(radius: 4)
                 .clipShape(RoundedRectangle(cornerRadius: Measure.radius)))
         .overlay(alignment: .topTrailing) {
@@ -690,7 +820,7 @@ struct DividerRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Rectangle().fill(.primary.opacity(0.12)).frame(height: 1)
+            Rectangle().fill(Ink.divider).frame(height: 1)
             if clearable && hovered {
                 Button("↓ Clear") { model.run("today/clear") }
                     .buttonStyle(.plain)
@@ -734,7 +864,7 @@ struct NewTabRow: View {
         }
         .buttonStyle(.plain)
         .font(.system(size: 14))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Ink.secondary)
         .onHover { hovered = $0 }
     }
 }
@@ -837,7 +967,7 @@ struct TabRow: View {
                     active
                         ? model.selectedInk
                         : model.marked.contains(tab.id) ? Ink.marked : hovered ? Ink.item : .clear)
-                .shadow(color: active ? Ink.selectedShadow : .clear, radius: 1, y: 1))
+                .shadow(color: active ? model.selectedShadow : .clear, radius: 1, y: 1))
         .padding(.vertical, (Measure.row - Measure.rowFill) / 2)
         .contentShape(Rectangle())
         .onTapGesture { model.click(tab.id) }
@@ -962,7 +1092,7 @@ struct SplitRow: View {
         .background(
             RoundedRectangle(cornerRadius: Measure.radius)
                 .fill(active ? model.selectedInk : hovered ? Ink.item : .clear)
-                .shadow(color: active ? Ink.selectedShadow : .clear, radius: 1, y: 1))
+                .shadow(color: active ? model.selectedShadow : .clear, radius: 1, y: 1))
         .padding(.vertical, (Measure.row - Measure.rowFill) / 2)
         .onHover { hovered = $0 }
     }
@@ -1116,6 +1246,7 @@ struct Footer: View {
             .fixedSize()
             .frame(width: 28, height: 28)
             .padding(.trailing, 2)
+            .opacity(model.active ? 1 : 0.3)
             .help("New")
             .opacity(drafting ? 0 : 1)
             .disabled(drafting)
@@ -1124,6 +1255,7 @@ struct Footer: View {
             }
         }
         .frame(height: 40)
+        .foregroundStyle(model.buttonInk)
         // Measured on Arc's: its icons' centers 25 points over the window's bottom.
         .padding(.bottom, 5)
     }
@@ -1213,12 +1345,15 @@ struct RightClick: NSViewRepresentable {
     }
 }
 
-/// The tab list's empty room, which moves the window like Arc's: a double-click there does not
-/// zoom it.
+/// The room behind views' buttons, which moves the window like Arc's, as its titlebar would:
+/// SwiftUI hands it the clicks they do not take. In the tab list's empty room, a double-click
+/// does not zoom it; behind the toolbar, it does.
 struct WindowDragArea: NSViewRepresentable {
+    var doubleClicks = false
+
     func makeNSView(context: Context) -> WindowDrag {
         let view = WindowDrag()
-        view.doubleClicks = false
+        view.doubleClicks = doubleClicks
         return view
     }
 

@@ -1447,6 +1447,13 @@ pub fn hide_window(handle: *mut c_void) {
     }
 }
 
+/// Keeps a window at least `width` by `height` points, which CEF only asks its delegate once.
+pub fn set_min_size(handle: *mut c_void, width: i32, height: i32) {
+    if let Some(window) = ns_window(handle) {
+        window.setContentMinSize(objc2_foundation::NSSize::new(width.into(), height.into()));
+    }
+}
+
 /// The NSWindow of a handle CEF gives: the window itself, or one of its views.
 fn ns_window(handle: *mut c_void) -> Option<Retained<NSWindow>> {
     // SAFETY: CEF gives a live NSWindow or NSView, which its window keeps alive.

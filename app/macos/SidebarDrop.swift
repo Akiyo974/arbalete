@@ -49,6 +49,16 @@ extension AppModel {
         active ? Ink.selected : Ink.selectedBehind
     }
 
+    /// Its shadow, which would show through the dimmed row.
+    var selectedShadow: Color {
+        active ? Ink.selectedShadow : .clear
+    }
+
+    /// The sidebar's buttons, like Arc's: dimmed alike while another app is in front, measured.
+    var buttonInk: AnyShapeStyle {
+        active ? AnyShapeStyle(.primary) : AnyShapeStyle(Ink.buttonBehind)
+    }
+
     /// The tabs' titles, like Arc's: the theme's title color, or the sidebar's ink without colors.
     var titleInk: Color {
         guard let theme = space?.theme, let lead = theme.colors.first else { return Ink.primary }
@@ -101,8 +111,8 @@ extension AppModel {
         return NSItemProvider(object: String(item.id) as NSString)
     }
 
-    /// The pointer moves over a row: a split shows once it rests on a tab's middle; until then,
-    /// the drop lands before or after the tab, by `nearest`, the half the pointer is in.
+    /// The pointer moves over a row: a split shows once it rests on a tab; until then, the drop
+    /// lands where `nearest` says, like Arc's: after the tab in its bottom band, else before.
     func hover(_ target: DropTarget?, nearest: DropTarget? = nil) {
         // A row may still hear of a drag once it has ended.
         guard dragged != nil else {
@@ -160,6 +170,8 @@ extension AppModel {
         let wait = DispatchWorkItem { [weak self] in
             guard let self, NSEvent.pressedMouseButtons != 0 else { return }
             edgeWait = nil
+            // Like Arc's, held there, it switches again every `edgeDelay`.
+            edgeAt = nil
             run(leading ? "space/previous" : "space/next")
         }
         edgeWait = wait
@@ -260,9 +272,7 @@ private struct RowDrop: DropDelegate {
         let band = edgeBand - Measure.inset
         let x = info.location.x
         model.edge(x <= band ? true : x >= size.width - band ? false : nil)
-        model.hover(
-            target(at: info.location),
-            nearest: info.location.y < size.height / 2 ? .before(item.id) : .after(item.id))
+        model.hover(target(at: info.location), nearest: fallback(at: info.location))
         return DropProposal(operation: NSEvent.modifierFlags.contains(.option) ? .copy : .move)
     }
 
@@ -300,12 +310,14 @@ private struct RowDrop: DropDelegate {
         return true
     }
 
+    /// Like Arc's, measured: a band at the top inserts before; at the bottom, after a folder;
+    /// elsewhere, into a folder, or beside a tab in a split once it waited (splitDelay).
     private func target(at point: CGPoint) -> DropTarget? {
         let band = min(size.height / 4, 8)
         if point.y < band { return .before(item.id) }
-        if point.y > size.height - band { return .after(item.id) }
+        let bottom = point.y > size.height - band
         switch item {
-        case .folder(let id, _, _, _):
+        case .folder(let id, _, let open, let children) where !bottom || (open && !children.isEmpty):
             return model.dragged == id ? nil : .into(id)
         case .tab(let tab) where model.draggedTab && model.dragged != tab.id:
             return .split(tab.id, leading: point.x < size.width / 2)
@@ -315,8 +327,13 @@ private struct RowDrop: DropDelegate {
             let slot = (point.x / max(size.width, 1) * CGFloat(tabs.count)).rounded()
             return .join(id, min(tabs.count, max(0, Int(slot))))
         default:
-            return point.y < size.height / 2 ? .before(item.id) : .after(item.id)
+            return bottom ? .after(item.id) : .before(item.id)
         }
+    }
+
+    /// Where a drop lands until a split shows: after the row in its bottom band, else before.
+    private func fallback(at point: CGPoint) -> DropTarget {
+        point.y > size.height - min(size.height / 4, 8) ? .after(item.id) : .before(item.id)
     }
 }
 

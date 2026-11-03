@@ -91,6 +91,8 @@ func color(_ hex: String) -> Color {
 
 /// Arc's dark window without theme colors.
 private let defaultViolet = "#100a1c"
+/// Its light counterpart, measured on Arc's while it falls flat.
+private let defaultLavender = "#eeeafe"
 
 /// A theme's colors over the blur, like Arc's: the colors at 20% to 75% as the theme is more
 /// intense, over a wash as opaque up to half, white, or black at a third of that in a dark
@@ -101,13 +103,16 @@ struct Tint: View {
     let theme: Theme?
     /// Whether the app is in front, which shows the blur.
     var active = true
+    /// The system's appearance, an input so that the view follows its changes: SwiftUI draws a
+    /// view again only once its inputs change.
+    var systemIsDark = systemDark()
 
     var body: some View {
         if let theme, !theme.colors.isEmpty {
             let alpha = 0.2 + 0.55 * theme.intensity
             let under = min(alpha, 0.5)
             ZStack {
-                systemDark()
+                systemIsDark
                     ? Color.black.opacity(0.35 * under) : Color.white.opacity(under)
                 Self.colors(theme.colors)
                     .drawingGroup(colorMode: .extendedLinear)
@@ -118,9 +123,9 @@ struct Tint: View {
                         .opacity(theme.noise * 0.8 * (active ? 1 : 0.25))
                 }
             }
-        } else if isDark(theme) {
+        } else {
             // Three quarters over the blur, measured, and whole once it falls flat.
-            color(defaultViolet).opacity(active ? 0.75 : 1)
+            color(systemIsDark ? defaultViolet : defaultLavender).opacity(active ? 0.75 : 1)
         }
     }
 

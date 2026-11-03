@@ -56,18 +56,20 @@ final class SplitHandleView: NSView {
     private var cursor: NSCursor { stacked ? .resizeUpDown : .resizeLeftRight }
 
     override func mouseEntered(with event: NSEvent) {
-        pill.isHidden = false
+        // Between stacked pages, like Arc's, the grabber that rests there shows instead (the
+        // backdrop's LoadingLine).
+        pill.isHidden = stacked
         cursor.set()
     }
 
     override func mouseMoved(with event: NSEvent) { cursor.set() }
-    override func mouseExited(with event: NSEvent) { pill.isHidden = dragging }
+    override func mouseExited(with event: NSEvent) { pill.isHidden = stacked || dragging }
 
     override func mouseUp(with event: NSEvent) {
         if dragging { send("resized") }
         dragging = false
         let point = convert(event.locationInWindow, from: nil)
-        pill.isHidden = !bounds.contains(point)
+        pill.isHidden = stacked || !bounds.contains(point)
     }
 
     override func cursorUpdate(with event: NSEvent) { cursor.set() }

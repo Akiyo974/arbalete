@@ -34,7 +34,7 @@ final class PageDrop {
     private let edgePanel: ChildPanel
     private var watch: AnyCancellable?
     private var timer: Timer?
-    /// The docked sidebar, from the window's top left corner, if it shows.
+    /// The sidebar, docked or floating, from the window's top left corner, if it shows.
     var sidebar: NSRect?
     /// The split's pages shown, from the card's top left corner.
     var panes: [Pane] = []

@@ -225,7 +225,12 @@ final class CommandBar: ObservableObject {
     /// pages.
     var rows: [CommandRow] {
         let typed = text.trimmingCharacters(in: .whitespaces)
-        guard !typed.isEmpty else { return [] }
+        // Nothing typed, like Arc's: the sites visited most.
+        guard !typed.isEmpty else {
+            return (results?.pages ?? []).map {
+                .page(url: $0.url, title: $0.title.isEmpty ? $0.url : $0.title)
+            }
+        }
         let go: CommandRow
         if let completion {
             go = .go(url: completion.url, title: typed + completion.suffix, search: false)
@@ -391,6 +396,12 @@ struct ResultRow: View {
     let picked: Bool
     let label: String?
 
+    /// A page's site, as Arc shows it after its title.
+    private var site: String? {
+        guard case .page(let url, let title) = row, title != url else { return nil }
+        return domain(url)
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             Group {
@@ -403,27 +414,47 @@ struct ResultRow: View {
             }
             .frame(width: 24, height: 24)
             .clipShape(RoundedRectangle(cornerRadius: 4))
-            Text(row.title).lineLimit(1)
-                .font(.system(size: 13))
-                .foregroundStyle(Color.ink((0x000000, 0.80), (0xFFFFFF, 0.80)))
+            // Like Arc's, a page's site after its title.
+            (Text(row.title).foregroundStyle(picked ? Color.white : Color.ink((0x000000, 0.80), (0xFFFFFF, 0.80)))
+                + Text(site.map { " — \($0)" } ?? "")
+                .foregroundStyle(picked ? Color.white.opacity(0.6) : Color.ink((0x000000, 0.4), (0xFFFFFF, 0.4))))
+                .lineLimit(1)
+                .font(.system(size: 13, weight: .medium))
             Spacer(minLength: 8)
             if let label {
-                Text(label).font(.system(size: 13))
-                    .foregroundStyle(Color.ink((0x000000, 0.33), (0xFFFFFF, 0.33)))
+                Text(label).font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(picked ? Color.white : Color.ink((0x000000, 0.33), (0xFFFFFF, 0.33)))
             }
         }
         .padding(.leading, 12)
         .padding(.trailing, label == nil ? 12 : 20)
         .frame(height: resultRow)
-        // Inset 2 points within the row, rounded 6, like Arc's.
+        // Inset 2 points within the row, rounded 6, in Arc's indigo, measured.
         .background(
-            RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(picked ? 0.25 : 0))
+            RoundedRectangle(cornerRadius: 6).fill(color("#4549d3").opacity(picked ? 1 : 0))
                 .padding(2))
         .contentShape(Rectangle())
     }
 }
 
 /// The Command Bar's field: AppKit's, for its selection and its keys.
+/// Whether the click being handled is on `window`'s edge, which resizes it.
+@MainActor func onEdge(_ window: NSWindow) -> Bool {
+    guard NSApp.currentEvent?.type == .leftMouseDown else { return false }
+    let point = NSEvent.mouseLocation
+    return window.frame.insetBy(dx: -6, dy: -6).contains(point)
+        && !window.frame.insetBy(dx: 6, dy: 6).contains(point)
+}
+
+/// Like Arc's, a click out of the Command Bar closes it, but on the window's edge, which resizes
+/// the window and keeps the bar: in the sidebar too, which does not take the keyboard from it.
+@MainActor func closeCommandBar(
+    _ bar: CommandBar, _ overlay: Surface, _ window: NSWindow, _ event: NSEvent
+) {
+    guard overlay.isShown, event.window !== overlay.window, !onEdge(window) else { return }
+    bar.hide()
+}
+
 struct CommandField: NSViewRepresentable {
     @ObservedObject var bar: CommandBar
 
@@ -461,6 +492,23 @@ struct CommandField: NSViewRepresentable {
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {
+            // Like Arc's, resizing the window keeps the bar, which takes the keyboard back once
+            // the resize ends; a click anywhere else closes it.
+            if let field = notification.object as? NSTextField, let main = field.window?.parent,
+                onEdge(main)
+            {
+                var observer: NSObjectProtocol?
+                observer = NotificationCenter.default.addObserver(
+                    forName: NSWindow.didEndLiveResizeNotification, object: main, queue: .main
+                ) { [weak field] _ in
+                    if let observer { NotificationCenter.default.removeObserver(observer) }
+                    MainActor.assumeIsolated {
+                        field?.window?.makeKey()
+                        field?.window?.makeFirstResponder(field)
+                    }
+                }
+                return
+            }
             if bar.isShown { bar.hide() }
         }
 

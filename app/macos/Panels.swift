@@ -163,25 +163,50 @@ struct KeyField: NSViewRepresentable {
 struct PageToolbar: View {
     @ObservedObject var model: AppModel
 
+    private func tool(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
+        IconButton(symbol: symbol, label: label, size: 37, symbolSize: 14, action: action)
+            .frame(height: 28)
+    }
+
     var body: some View {
         if let tab = model.activeTab, tab.developer == true {
-            DeveloperBar(model: model, tab: tab)
+            DeveloperBar(model: model, url: tab.url)
         } else {
             plain
         }
     }
 
+    /// Like Arc's, measured: buttons 37 points apart from each end, the sidebar's toggle first
+    /// while it is not docked, the site controls and Split View last.
     private var plain: some View {
         let tab = model.activeTab
+        let page = model.state?.page
         return ZStack {
-            HStack(spacing: 2) {
-                NavButtons(model: model)
+            HStack(spacing: 0) {
+                if !model.sidebarDocked {
+                    tool("sidebar.left", "Toggle sidebar") { model.run("sidebar/toggle") }
+                }
+                tool("arrow.left", "Back") { model.run("back") }
+                    .disabled(!(page?.canGoBack ?? false))
+                tool("arrow.right", "Forward") { model.run("forward") }
+                    .disabled(!(page?.canGoForward ?? false))
+                // Like Arc's, it stops the page while it loads.
+                if page?.loading == true {
+                    tool("xmark", "Stop") { model.run("stop") }
+                } else {
+                    tool("arrow.clockwise", "Reload") { model.run("reload") }
+                }
                 Spacer()
                 if tab != nil {
                     ForEach(model.state?.extensions ?? []) { ext in
                         PinnedExtension(model: model, extension: ext, view: "toolbar")
                     }
-                    SiteControlsButton(model: model, view: "toolbar")
+                    SiteControlsButton(
+                        model: model, view: "toolbar", symbol: "slider.horizontal.2.square",
+                        symbolSize: 15
+                    )
+                    .frame(width: 37)
+                    tool("rectangle.split.2x1", "Add Split View") { model.run("pane/add") }
                 }
             }
             if let tab {
@@ -189,6 +214,7 @@ struct PageToolbar: View {
                     model.run("overlay/edit")
                 } label: {
                     Label(domain(tab.url), systemImage: "link")
+                        .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
                         .padding(.horizontal, 10)
                         .frame(height: 26)
@@ -198,38 +224,40 @@ struct PageToolbar: View {
                 .help(tab.url)
             }
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 2.25)
         .frame(maxHeight: .infinity)
-        // A hairline under the bar, over the page, like Arc's.
+        // A hairline under the bar, over the page, like Arc's, which shows no loading bar.
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.ink((0x000000, 0.05), (0xFFFFFF, 0.05))).frame(height: 1)
-        }
-        .overlay(alignment: .bottom) {
-            if let page = model.state?.page, page.loading {
-                ProgressView(value: page.progress).progressViewStyle(.linear).controlSize(.mini)
-            }
         }
     }
 }
 
-/// The bar above a page in developer mode, like Arc's, measured: indigo with faint diagonal
-/// stripes, the lock and the full address in a monospaced font, then buttons to copy it, open the
+/// The bar above a page in developer mode, like Arc's, measured: in the dark, indigo with faint
+/// diagonal stripes; in the light, white with its buttons in the accent. The lock, or an "i"
+/// without one, and the full address in a monospaced font, then buttons to copy it, open the
 /// developer tools, the site controls and Split View; in toolbar mode, the navigation buttons
-/// first.
+/// first. On a split's page, like Arc's, the page's own, with × to close it.
 struct DeveloperBar: View {
     @ObservedObject var model: AppModel
-    let tab: Tab
+    let url: String
+    /// On a split's page: it is focused before any action, and closed by ×.
+    var focus: () -> Void = {}
+    var close: (() -> Void)?
+
+    private var dark: Bool { isDark(model.space?.theme) }
 
     var body: some View {
         HStack(spacing: 2) {
             if model.state?.toolbar == true {
                 NavButtons(model: model)
             }
-            Image(systemName: tab.url.hasPrefix("https://") ? "lock.fill" : "lock.open.fill")
-                .font(.system(size: 13))
+            Image(systemName: url.hasPrefix("https://") ? "lock.fill" : "info")
+                .font(.system(size: 13, weight: .bold))
                 .frame(width: 24)
-            Text(tab.url)
+            Text(url)
                 .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(dark ? Color.white : Ink.primary)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .padding(.leading, 6)
@@ -248,11 +276,23 @@ struct DeveloperBar: View {
             }
             SiteControlsButton(model: model, view: "toolbar")
             tool("rectangle.split.2x1", "Add Split View") { model.run("pane/add") }
+            if let close {
+                IconButton(symbol: "xmark", label: "Close", size: 28, symbolSize: 15, action: close)
+            }
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(dark ? Color.white : model.accent)
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
+            if dark { stripes } else { color("#f8f8fd") }
+        }
+        .overlay(alignment: .bottom) {
+            if !dark { Rectangle().fill(.black.opacity(0.08)).frame(height: 1) }
+        }
+        .environment(\.colorScheme, dark ? .dark : .light)
+    }
+
+    private var stripes: some View {
             Canvas { context, size in
                 context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(color("#363ccc")))
                 // Stripes 12 points wide, every 24, leaning right.
@@ -267,16 +307,18 @@ struct DeveloperBar: View {
                     x += 24
                 }
             }
-        }
-        .environment(\.colorScheme, .dark)
     }
 
     private var separator: some View {
-        Rectangle().fill(.white.opacity(0.2)).frame(width: 1, height: 18).padding(.horizontal, 6)
+        Rectangle().fill(dark ? Color.white.opacity(0.2) : Color.black.opacity(0.1))
+            .frame(width: 1, height: 18).padding(.horizontal, 6)
     }
 
     private func tool(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
-        IconButton(symbol: symbol, label: label, size: 28, symbolSize: 15, action: action)
+        IconButton(symbol: symbol, label: label, size: 28, symbolSize: 15) {
+            focus()
+            action()
+        }
     }
 }
 
