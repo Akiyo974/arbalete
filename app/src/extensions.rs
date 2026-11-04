@@ -628,6 +628,9 @@ pub const SNAPSHOT: i32 = 3;
 /// The id of the message asking a page for the color at its top (crate::shell::page_top_color).
 pub const TOP_COLOR: i32 = 4;
 
+/// The id of the message darkening a page or not (crate::shell::darken), whose answer says nothing.
+pub const DARKEN: i32 = 5;
+
 /// The id of the message asking a page's session for its own target, apart from the
 /// bridge's, which start above it.
 const CONTENT_INFO: i32 = 1;

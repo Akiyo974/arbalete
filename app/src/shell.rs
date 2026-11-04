@@ -3541,10 +3541,14 @@ fn set_setting(setting: Setting, on: bool) {
         Setting::WarnBeforeQuit => settings.warn_before_quit = on,
         Setting::RestoreSession => settings.restore_session = on,
         Setting::SuspendTabs => settings.suspend_tabs = on,
+        Setting::DarkPages => settings.dark_pages = on,
     }
     SETTINGS.set(settings);
     save_settings();
     send_settings();
+    if setting == Setting::DarkPages {
+        darken_pages();
+    }
     if !on && setting == Setting::SuspendTabs {
         wake_frozen(|_| true);
     }
@@ -5157,11 +5161,40 @@ fn mute_page(tab: NodeId) {
     }
 }
 
+/// Darkens a page while macOS is dark, if it has no dark theme of its own, like Arc's, unless the
+/// settings say not to; or lets it show as it is.
+fn darken(browser: &Browser) {
+    #[cfg(target_os = "macos")]
+    let dark = app_settings().dark_pages && crate::mac::dark();
+    #[cfg(not(target_os = "macos"))]
+    let dark = false;
+    // Without `enabled`, the page shows as it would without the override.
+    let params = if dark {
+        json!({ "enabled": true })
+    } else {
+        json!({})
+    };
+    let message = json!({ "id": extensions::DARKEN, "method": "Emulation.setAutoDarkModeOverride", "params": params });
+    if let Some(host) = browser.host() {
+        host.send_dev_tools_message(Some(message.to_string().as_bytes()));
+    }
+}
+
+/// Darkens every page or not, as macOS turned dark or light or the settings changed.
+fn darken_pages() {
+    let browsers: Vec<_> =
+        PAGES.with_borrow(|pages| pages.values().map(|live| live.browser.clone()).collect());
+    for browser in browsers {
+        darken(&browser);
+    }
+}
+
 /// Makes a page usable once its browser exists: the extensions learn it, and it takes its tab's
 /// sound and, when shown, the card's corners.
 fn content_created(profile: ProfileId, browser: Option<&mut Browser>) {
     let Some(browser) = browser else { return };
     extensions::page_created(profile, browser);
+    darken(browser);
     #[cfg(target_os = "macos")]
     cover_revived(Some(browser), true);
     // Made in page(), it is not one of the pages yet, which mutes it once it is.
@@ -6404,6 +6437,7 @@ fn run_command(command: Command) {
         (Command::HideSettings, _) => close_settings(),
         (Command::SettingsReady, _) => send_settings(),
         (Command::SetSetting(setting, on), _) => set_setting(setting, on),
+        (Command::AppearanceChanged, _) => darken_pages(),
         (Command::KeepAwake(site, on), _) => keep_awake(site, on),
         (Command::DeveloperMode(site, on), _) => set_developer_mode(site, on),
         (

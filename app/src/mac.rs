@@ -1292,6 +1292,20 @@ pub fn pointer_y() -> Option<i32> {
         .then_some((height - point.y) as i32)
 }
 
+/// Whether macOS shows dark, as the app's appearance follows it.
+pub fn dark() -> bool {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return false;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    // SAFETY: AppKit's own appearance, and its name, like NSAppearanceNameDarkAqua.
+    let name: Option<Retained<NSString>> = unsafe {
+        let appearance: Option<Retained<AnyObject>> = msg_send![&*app, effectiveAppearance];
+        appearance.and_then(|appearance| msg_send![&*appearance, name])
+    };
+    name.is_some_and(|name| name.to_string().contains("Dark"))
+}
+
 /// Whether a mouse button is down, as while a click gives a page the focus.
 pub fn mouse_down() -> bool {
     NSEvent::pressedMouseButtons() != 0

@@ -99,12 +99,14 @@ final class AppModel: ObservableObject {
             self?.optionHeld = event.modifierFlags.contains(.option)
             return event
         }
-        // A theme in automatic appearance follows the system's: the views read it again.
+        // A theme in automatic appearance follows the system's: the views read it again, and the
+        // pages are darkened or not.
         appearance = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.state = self.state
                 self.paintWindow()
+                self.run("appearance")
             }
         }
     }

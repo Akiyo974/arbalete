@@ -22,6 +22,9 @@ pub struct Settings {
     pub suspend_tabs: bool,
     /// The sites never suspended, by host (and port), like `mail.google.com`.
     pub awake_sites: Vec<String>,
+    /// While macOS is dark, the pages without a dark theme of their own are darkened, like Arc's
+    /// (Chromium's auto dark mode).
+    pub dark_pages: bool,
     /// The sidebar's width, in points, which dragging its edge changes.
     pub sidebar_width: i32,
     /// The sites turned in or out of developer mode, by host (and port), unlike their default
@@ -37,6 +40,7 @@ impl Default for Settings {
             show_toolbar: false,
             suspend_tabs: true,
             awake_sites: Vec::new(),
+            dark_pages: true,
             sidebar_width: 260,
             developer_sites: BTreeMap::new(),
         }
@@ -75,13 +79,14 @@ mod tests {
             show_toolbar: true,
             suspend_tabs: false,
             awake_sites: vec!["mail.google.com".into()],
+            dark_pages: false,
             sidebar_width: 320,
             developer_sites: BTreeMap::from([("example.com".into(), true)]),
         };
         save(&settings, &path).unwrap();
         assert_eq!(load(&path), settings);
         fs::write(&path, r#"{ "warnBeforeQuit": true }"#).unwrap();
-        assert!(load(&path).restore_session && load(&path).suspend_tabs);
+        assert!(load(&path).restore_session && load(&path).suspend_tabs && load(&path).dark_pages);
         assert_eq!(load(&path).sidebar_width, 260);
         fs::write(&path, "not json").unwrap();
         assert_eq!(load(&path), Settings::default());

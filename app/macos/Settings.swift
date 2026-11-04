@@ -11,6 +11,7 @@ struct SettingsDetail: Decodable {
         var restoreSession: Bool
         var suspendTabs: Bool
         var awakeSites: [String]
+        var darkPages: Bool
     }
     struct Choice: Decodable, Identifiable, Hashable {
         var id: String
@@ -254,6 +255,10 @@ private struct General: View {
                 Toggle(isOn: binding(general.restoreSession, "restore-session")) {
                     Text("Restore the previous session")
                     Text("Reopens the “Today” tabs left open at the last quit. Pinned tabs and favorites always stay.")
+                }
+                Toggle(isOn: binding(general.darkPages, "dark-pages")) {
+                    Text("Darken pages in dark mode")
+                    Text("While macOS is dark, the sites without a dark theme of their own show dark too.")
                 }
                 Toggle(isOn: binding(general.suspendTabs, "suspend-tabs")) {
                     Text("Save memory with tabs left aside")
