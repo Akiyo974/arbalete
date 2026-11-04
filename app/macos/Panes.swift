@@ -122,6 +122,40 @@ final class PageContainer: NSView {
     if let keyable { object_setClass(window, keyable) }
 }
 
+/// Lets the pages drawn in our containers take the clicks: before taking one, a page asks its
+/// window's content view what is under the pointer, and drops the click unless it is the page,
+/// which a container puts beside the content view rather than in it. A page the window finds
+/// under the pointer takes the click.
+@MainActor private let letPagesTakeClicks: Void = {
+    guard let page = NSClassFromString("RenderWidgetHostViewCocoa") else { return }
+    let selector = NSSelectorFromString("shouldIgnoreMouseEvent:")
+    guard let method = class_getInstanceMethod(page, selector) else { return }
+    typealias ShouldIgnore = @convention(c) (NSView, Selector, NSEvent) -> Bool
+    let inherited = unsafeBitCast(method_getImplementation(method), to: ShouldIgnore.self)
+    let shouldIgnore: @convention(block) (NSView, NSEvent) -> Bool = { view, event in
+        if view.window === event.window, let frame = view.window?.contentView?.superview,
+            frame.hitTest(event.locationInWindow) === view,
+            view.enclosingContainer != nil
+        {
+            return false
+        }
+        return inherited(view, selector, event)
+    }
+    method_setImplementation(method, imp_implementationWithBlock(shouldIgnore))
+}()
+
+extension NSView {
+    /// The page's container this view is in, if any.
+    fileprivate var enclosingContainer: PageContainer? {
+        var view = superview
+        while let current = view {
+            if let container = current as? PageContainer { return container }
+            view = current.superview
+        }
+        return nil
+    }
+}
+
 /// The pages a window shows, in their containers, with the bar above a page alone and the focused
 /// page's outline, made as it needs them.
 @MainActor
@@ -156,6 +190,15 @@ final class PagePlacer {
         toolbar.wantsLayer = true
         toolbar.layer?.cornerRadius = paneRadius
         toolbar.layer?.masksToBounds = true
+        // AppKit does not make the card's window key on a click, which Chromium then takes for a
+        // first one in a window in the background and drops: it is key before the page gets it.
+        clicks = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) {
+            [weak self] event in
+            if let card = self?.card, event.window === card, !card.isKeyWindow {
+                card.makeKey()
+            }
+            return event
+        }
     }
 
     /// A container for a tab's page, made hidden in the window until it shows: CEF makes the
@@ -183,6 +226,7 @@ final class PagePlacer {
         card = window.childWindows?.first { !($0 is NSPanel) && at($0) }
         if let card {
             letTakeKeyboard(card)
+            letPagesTakeClicks
             keyObserver.map(NotificationCenter.default.removeObserver)
             keyObserver = NotificationCenter.default.addObserver(
                 forName: NSWindow.didBecomeKeyNotification, object: card, queue: .main
@@ -195,6 +239,8 @@ final class PagePlacer {
 
     /// Watches the card's window take the keyboard (lowerCard).
     private var keyObserver: NSObjectProtocol?
+    /// Gives the card's window the keyboard as a click in a page starts (init).
+    private var clicks: Any?
 
     /// Puts the card's window back under the panels above it, like the revealed sidebar or a drag's
     /// room, as AppKit brings it to the front once a click in a page makes it key.
@@ -305,6 +351,7 @@ final class PagePlacer {
 
     func close() {
         keyObserver.map(NotificationCenter.default.removeObserver)
+        if let clicks { NSEvent.removeMonitor(clicks) }
         toolbar.removeFromSuperview()
         outline.removeFromSuperview()
     }
