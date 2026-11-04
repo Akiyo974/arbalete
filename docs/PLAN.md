@@ -529,11 +529,15 @@ from Arc rely on them. Items that belong to a phase above stay there.
 ### Phase 14 — Pages in native containers (macOS)
 Decided in [0002](decisions/0002-native-page-containers.md), after a spike (branch `spike/native-containers`):
 each page becomes a CEF browser drawn in a native container, its bar above it, and AppKit and SwiftUI lay the
-window out instead of CEF views. Each step ships alone, the CEF views path staying until its last user moves.
+window out instead of CEF views. Each step ships alone, once it does all its part did before; the CEF views
+path stays for what has not moved yet.
 
-1. **The page shown alone**, in a container with its bar: first the open questions of 0002 (clicks, keyboard and
-   focus; Chromium's `observer_list` checks), then the page, its bar in toolbar and developer modes, loading,
-   sleep and wake, captures and full screen.
+1. **The page shown alone**, in a container with its bar, on its own branch until it does all the CEF views path
+   does; the split, developer tools and Peek keep CEF views until their own step:
+   1. containers in the card's window, where the bars stand already, sized to the card: each page a CEF
+      browser drawn in its container, shown and hidden as the app selects it;
+   2. the open questions of 0002: clicks, keyboard and focus, and Chromium's `observer_list` checks;
+   3. the bar in toolbar and developer modes, loading, sleep and wake, captures and full screen.
 2. **Split View**: the pages in containers side by side or stacked, their handles, the focused page's outline,
    and a drag's room and replace outline as native views among them.
 3. **Developer tools** docked beside or under the page, and resized against it.
@@ -541,6 +545,8 @@ window out instead of CEF views. Each step ships alone, the CEF views path stayi
    rather than child windows; the sidebar too, once nothing it floats over is a window of its own.
 5. **Extension popups**, then removing what the CEF views path leaves: the card's views, `lay_out_split`, the
    inspector's stage, the frames sent for bars, and the child windows' reordering.
+6. **The window**: a native window holding the sidebar and the containers, instead of CEF's window and the
+   card's; then the other windows CEF draws (Little Arbalete, developer tools on their own, permissions).
 
 ### Later
 - **Linux and Windows**, last and not planned for now: CI on both (system libraries CEF needs, loading `libcef`
