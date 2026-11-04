@@ -46,6 +46,13 @@ final class PageDrop {
     var panes: [Pane] = [] {
         didSet { if previewed == "pane/preview/none" { stable = panes } }
     }
+    /// The empty page the app opened among the split's pages for a drag, where the drag shows
+    /// the room it would take.
+    var emptyPane: Pane? {
+        didSet {
+            view.room = emptyPane.map(frame)
+        }
+    }
     /// The pages as they stood before an empty one opened among them for a drag, which the drag
     /// keeps finding its places by: the pages move to make room meanwhile.
     private var stable: [Pane] = []
@@ -77,6 +84,13 @@ final class PageDrop {
     }
 
     /// Like Arc's, the page shown alone gives a tab dragged over it the room it would take.
+    /// A pane's frame in the drop's view, from where the app placed the card.
+    private func frame(_ pane: Pane) -> NSRect {
+        NSRect(
+            x: pane.cardX + pane.x - (sidebar?.maxX ?? 0), y: pane.cardY + pane.y,
+            width: pane.width, height: pane.height)
+    }
+
     /// Over a split, like Arc's, an empty page opens among its pages where the tab would go.
     private func preview(_ target: PageDropTarget?) {
         let page: String
@@ -191,9 +205,7 @@ final class PageDrop {
         if panes.count > 1 {
             guard !panes.contains(where: { $0.tab == dragged }) else { return nil }
             let stacked = panes[0].x == panes[1].x
-            let frames = panes.map {
-                NSRect(x: $0.x + cardMargin, y: $0.y + cardMargin, width: $0.width, height: $0.height)
-            }
+            let frames = panes.map(frame)
             for (index, frame) in frames.enumerated() {
                 guard frame.contains(point) else { continue }
                 // Like Arc's: its first quarter along the split puts the tab before it, its last
@@ -209,19 +221,9 @@ final class PageDrop {
                 guard panes.count < 4 else { return nil }
                 let before = share <= 0.25
                 let at = index + (before ? 0 : 1)
-                // The empty page the app opens there, the pages sharing the room evenly with it.
-                let room = frames.reduce(frames[0]) { $0.union($1) }
-                let count = CGFloat(panes.count + 1)
-                var slot = room
-                if stacked {
-                    slot.size.height = (room.height - splitGap * (count - 1)) / count
-                    slot.origin.y = room.minY + CGFloat(at) * (slot.height + splitGap)
-                } else {
-                    slot.size.width = (room.width - splitGap * (count - 1)) / count
-                    slot.origin.x = room.minX + CGFloat(at) * (slot.width + splitGap)
-                }
+                // The app opens an empty page there, which it tells the place of (emptyPane).
                 return PageDropTarget(
-                    tab: panes[index].tab, before: before, stacked: stacked, preview: slot,
+                    tab: panes[index].tab, before: before, stacked: stacked, preview: .zero,
                     index: at)
             }
             return nil
@@ -301,6 +303,8 @@ private final class DropView: NSView {
     /// What the drag shows over the page.
     var card: () -> NSImage = { NSImage() }
     var tint = NSColor.controlAccentColor
+    /// Where the empty page the app opened for the drag stands, over a split.
+    var room: NSRect? { didSet { needsDisplay = true } }
     private var target: PageDropTarget?
     private let shape = DragShape()
 
@@ -354,8 +358,11 @@ private final class DropView: NSView {
             page.stroke()
             return
         }
+        // Over a split, the empty page the app opened; over a page alone, the half it gave up.
+        let place = target.index == nil ? target.preview : room
+        guard let place else { return }
         let page = NSBezierPath(
-            roundedRect: target.preview.insetBy(dx: 0.75, dy: 0.75), xRadius: 10, yRadius: 10)
+            roundedRect: place.insetBy(dx: 0.75, dy: 0.75), xRadius: 10, yRadius: 10)
         NSColor.white.withAlphaComponent(0.04).setFill()
         page.fill()
         NSColor.white.withAlphaComponent(0.35).setStroke()

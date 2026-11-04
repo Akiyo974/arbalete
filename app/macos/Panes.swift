@@ -265,11 +265,15 @@ public func placePanes(
 ) {
     MainActor.assumeIsolated {
         let data = Data(String(cString: panes).utf8)
-        let panes = (try? JSONDecoder().decode([Pane].self, from: data)) ?? []
+        let all = (try? JSONDecoder().decode([Pane].self, from: data)) ?? []
         // The card's view, which its window keeps alive.
         let card = card.map { Unmanaged<NSView>.fromOpaque($0).takeUnretainedValue() }
+        // The empty page a drag over the split opens, tab -1, has no bar.
+        let empty = all.first { $0.tab == -1 }
+        let panes = all.filter { $0.tab != -1 }
         nativeWindows[id]?.paneBars.place(panes, in: card)
         let split = panes.filter { !$0.toolbar }
+        nativeWindows[id]?.pageDrop.emptyPane = empty
         nativeWindows[id]?.pageDrop.panes = split
         if let model = nativeWindows[id]?.model, model.panes != split { model.panes = split }
     }

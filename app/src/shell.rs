@@ -5341,6 +5341,23 @@ fn send_panes() {
         // A page alone has the bar above it in toolbar or developer mode, a view of the card like a
         // split's page's, which the sidebar passes over, like Arc's.
         let mut panes = panes;
+        // The empty page standing where a dragged tab would open, known by its tab, -1, which
+        // the interface draws.
+        let slot = win().drop_slot.borrow().clone();
+        let split_view = win().split_view.with_borrow(Clone::clone);
+        if let (Some(_), Some(slot), Some(split_view)) =
+            (win().pane_preview.get(), slot, split_view)
+        {
+            let (frame, origin) = (slot.bounds(), split_view.bounds());
+            panes.push(json!({
+                "tab": -1, "split": null,
+                "x": origin.x + frame.x, "y": origin.y + frame.y,
+                "width": frame.width, "height": frame.height,
+                "bar": 0, "url": "", "back": false, "forward": false, "loading": false,
+                "focused": false, "color": null, "developer": false, "toolbar": false,
+                "cardX": card.x, "cardY": card.y,
+            }));
+        }
         if tabs.is_empty() && page_toolbar() {
             panes.push(json!({
                 "tab": focused, "split": null,
