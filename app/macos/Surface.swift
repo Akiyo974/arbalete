@@ -9,6 +9,12 @@ import SwiftUI
 final class ChildPanel: NSPanel, NSWindowDelegate {
     /// Called when another window takes the keyboard from it.
     var resigned: () -> Void = {}
+    /// Where it shows, in its parent's points from its content's top left corner.
+    private var placed: NSRect?
+    /// Places it again as its parent changes size, like into full screen: a child window keeps its
+    /// place from the parent's bottom left corner, and the app may lay the window out before it
+    /// takes its last size.
+    private var resized: NSObjectProtocol?
 
     init(view: NSView) {
         super.init(
@@ -59,16 +65,34 @@ final class ChildPanel: NSPanel, NSWindowDelegate {
             }
             return
         }
-        // In the window's coordinates, from its bottom left corner.
-        let height = content.frame.height
-        let rect = NSRect(
-            x: frame.minX, y: height - frame.maxY, width: frame.width, height: frame.height)
-        setFrame(parent.convertToScreen(rect), display: true)
+        placed = frame
+        if resized == nil || self.parent !== parent {
+            resized.map(NotificationCenter.default.removeObserver)
+            resized = NotificationCenter.default.addObserver(
+                forName: NSWindow.didResizeNotification, object: parent, queue: .main
+            ) { [weak self, weak parent] _ in
+                MainActor.assumeIsolated {
+                    guard let self, let parent, self.isVisible, self.parent === parent else { return }
+                    self.follow(parent)
+                }
+            }
+        }
+        follow(parent)
         // Above the other child windows, like the page's, which CEF may add or order since.
         if self.parent !== parent || (raise && parent.childWindows?.last != self) {
             parent.removeChildWindow(self)
             parent.addChildWindow(self, ordered: .above)
         }
+    }
+
+    /// Takes its place in `parent` as it stands now.
+    private func follow(_ parent: NSWindow) {
+        guard let frame = placed, let content = parent.contentView else { return }
+        // In the window's coordinates, from its bottom left corner.
+        let height = content.frame.height
+        let rect = NSRect(
+            x: frame.minX, y: height - frame.maxY, width: frame.width, height: frame.height)
+        setFrame(parent.convertToScreen(rect), display: true)
     }
 }
 
