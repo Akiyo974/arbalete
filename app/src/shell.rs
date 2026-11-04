@@ -1146,6 +1146,7 @@ fn sync_page_toolbar() {
         if let Some(card) = card_frame() {
             card.layout();
         }
+        send_panes();
     }
 }
 
@@ -2801,15 +2802,16 @@ fn place_rect(tab: NodeId) -> Option<Rect> {
     if place.is_drawn() == 0 {
         return None;
     }
-    let mut origin = Point { x: 0, y: 0 };
-    place.convert_point_to_window(Some(&mut origin));
-    let size = place.bounds();
-    Some(Rect {
-        x: origin.x,
-        y: origin.y,
-        width: size.width,
-        height: size.height,
-    })
+    // Each view's bounds from its parent's corner, up to the card's own view.
+    let mut rect = place.bounds();
+    let mut parent = place.parent_view();
+    while let Some(view) = parent {
+        let bounds = view.bounds();
+        rect.x += bounds.x;
+        rect.y += bounds.y;
+        parent = view.parent_view();
+    }
+    Some(rect)
 }
 
 /// Shows the veil a drag picks the part of the shown page to capture on, like Arc's.
