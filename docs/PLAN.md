@@ -532,20 +532,21 @@ each page becomes a CEF browser drawn in a native container, its bar above it, a
 window out instead of CEF views. Each step ships alone, once it does all its part did before; the CEF views
 path stays for what has not moved yet.
 
-1. **The page shown alone**, in a container with its bar, on its own branch until it does all the CEF views path
-   does; the split, developer tools and Peek keep CEF views until their own step:
-   1. containers in the card's window, where the bars stand already, sized to the card: each page a CEF
-      browser drawn in its container, shown and hidden as the app selects it;
+1. **The tabs' pages**, alone and in Split View, in containers: a CEF browser cannot move between CEF views and
+   a native container, and each tab's page moves between the card, a split's slots and windows, so they all
+   move at once, on their own branch until they do all the CEF views path does:
+   1. containers in the card's window, where the bars stand already: each page a CEF browser drawn in its
+      container, shown and hidden as the app selects it, moved between windows;
    2. the open questions of 0002: clicks, keyboard and focus, and Chromium's `observer_list` checks;
-   3. the bar in toolbar and developer modes, loading, sleep and wake, captures and full screen.
-2. **Split View**: the pages in containers side by side or stacked, their handles, the focused page's outline,
-   and a drag's room and replace outline as native views among them.
-3. **Developer tools** docked beside or under the page, and resized against it.
-4. **Peek and the panels above the page** (Command Bar, site controls, capture), as views of the main window
+   3. Split View: containers side by side or stacked, their handles, the focused page's outline, and a drag's
+      room and replace outline as native views among them;
+   4. the bar in toolbar and developer modes, loading, sleep and wake, captures and full screen.
+2. **Developer tools** docked beside or under the page, and resized against it.
+3. **Peek and the panels above the page** (Command Bar, site controls, capture), as views of the main window
    rather than child windows; the sidebar too, once nothing it floats over is a window of its own.
-5. **Extension popups**, then removing what the CEF views path leaves: the card's views, `lay_out_split`, the
+4. **Extension popups**, then removing what the CEF views path leaves: the card's views, `lay_out_split`, the
    inspector's stage, the frames sent for bars, and the child windows' reordering.
-6. **The window**: a native window holding the sidebar and the containers, instead of CEF's window and the
+5. **The window**: a native window holding the sidebar and the containers, instead of CEF's window and the
    card's; then the other windows CEF draws (Little Arbalete, developer tools on their own, permissions).
 
 ### Later
