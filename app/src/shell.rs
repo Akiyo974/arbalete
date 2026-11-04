@@ -2825,11 +2825,14 @@ fn show_capture_veil() {
 struct Capturing {
     tab: NodeId,
     area: Option<(i32, i32, i32, i32)>,
+    /// How wide the page shows, in CSS pixels, once it said: the picture's part is cut by it.
+    viewport: f64,
     _observer: Option<Registration>,
 }
 
-/// Copies a picture of the shown page, or of a part of it, like Arc's captures: its scroll offset
-/// first for a part, which Chromium measures from the page's top, then the picture.
+/// Copies a picture of the shown page, or of a part of it, like Arc's captures: for a part, how
+/// wide the page shows first, then a picture of what shows, which the part is cut from. Asked for
+/// the part alone, Chromium would resize the page while it shoots it, which shows.
 fn capture(area: Option<(i32, i32, i32, i32)>) {
     let Some(tab) = win().shown.get() else { return };
     let Some(host) = content().and_then(|browser| browser.host()) else {
@@ -2839,6 +2842,7 @@ fn capture(area: Option<(i32, i32, i32, i32)>) {
     CAPTURING.set(Some(Capturing {
         tab,
         area,
+        viewport: 0.0,
         _observer: observer,
     }));
     let ask = match area {
@@ -2873,41 +2877,28 @@ fn capture_answered(message: &str) {
         return;
     };
     if answer["id"] == LAYOUT_ID {
-        let (Some((x, y, width, height)), Some(host)) = (
-            area,
-            PAGES.with_borrow(|pages| pages.get(&tab)?.browser.host()),
-        ) else {
+        let Some(host) = PAGES.with_borrow(|pages| pages.get(&tab)?.browser.host()) else {
             return;
         };
-        let viewport = &answer["result"]["cssVisualViewport"];
-        let (left, top) = (
-            viewport["pageX"].as_f64().unwrap_or(0.0),
-            viewport["pageY"].as_f64().unwrap_or(0.0),
-        );
-        let ask = json!({
-            "id": CAPTURE_ID,
-            "method": "Page.captureScreenshot",
-            "params": {
-                "format": "png",
-                "clip": {
-                    "x": left + f64::from(x),
-                    "y": top + f64::from(y),
-                    "width": width,
-                    "height": height,
-                    "scale": 1,
-                },
-            },
+        let viewport = answer["result"]["cssVisualViewport"]["clientWidth"]
+            .as_f64()
+            .unwrap_or(0.0);
+        CAPTURING.with_borrow_mut(|capturing| {
+            if let Some(capturing) = capturing {
+                capturing.viewport = viewport;
+            }
         });
+        let ask = json!({ "id": CAPTURE_ID, "method": "Page.captureScreenshot", "params": { "format": "png" } });
         host.send_dev_tools_message(Some(ask.to_string().as_bytes()));
         return;
     }
-    CAPTURING.set(None);
+    let viewport = CAPTURING.take().map_or(0.0, |capturing| capturing.viewport);
     let Some(picture) = answer["result"]["data"].as_str() else {
         return;
     };
     #[cfg(target_os = "macos")]
     {
-        crate::mac::copy_png(picture);
+        crate::native::copy_png(picture, area.filter(|_| viewport > 0.0), viewport);
         if let Some(frame) = page_frame() {
             crate::native::note(
                 win().id,
@@ -2917,6 +2908,8 @@ fn capture_answered(message: &str) {
             );
         }
     }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (picture, area, viewport);
 }
 
 // Brings a page's answers to a capture under way.

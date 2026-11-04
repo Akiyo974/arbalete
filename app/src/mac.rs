@@ -407,6 +407,11 @@ define_class!(
         fn print(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::Print);
         }
+
+        #[unsafe(method(arbaleteCaptureArea:))]
+        fn capture_area(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::CaptureArea);
+        }
     }
 
     unsafe impl CrAppControlProtocol for ArbaleteApplication {
@@ -679,6 +684,13 @@ pub fn setup_menu() {
                     ns_string!("Print…"),
                     sel!(arbaletePrint:),
                     ns_string!("p"),
+                ),
+                // ⇧⌘2, like Arc's.
+                shift_item(
+                    mtm,
+                    ns_string!("Capture Part of the Page"),
+                    sel!(arbaleteCaptureArea:),
+                    ns_string!("2"),
                 ),
             ],
         ),
@@ -1076,7 +1088,6 @@ fn escape_item(mtm: MainThreadMarker, title: &NSString, action: Sel) -> Retained
     item
 }
 
-/// A menu item sending `action` with ⌘⌥ and `key`.
 /// A menu item whose shortcut is ⌃⇧ and `key`, like Arc's Split View items.
 fn control_shift_item(
     mtm: MainThreadMarker,
@@ -1089,6 +1100,19 @@ fn control_shift_item(
     item
 }
 
+/// A menu item whose shortcut is ⇧⌘ and `key`, for a key ⇧ changes, like a digit.
+fn shift_item(
+    mtm: MainThreadMarker,
+    title: &NSString,
+    action: Sel,
+    key: &NSString,
+) -> Retained<NSMenuItem> {
+    let item = item(mtm, title, action, key);
+    item.setKeyEquivalentModifierMask(NSEventModifierFlags::Command | NSEventModifierFlags::Shift);
+    item
+}
+
+/// A menu item sending `action` with ⌘⌥ and `key`.
 fn option_item(
     mtm: MainThreadMarker,
     title: &NSString,
@@ -1278,20 +1302,6 @@ pub fn copy(url: &str) {
     let pasteboard = NSPasteboard::generalPasteboard();
     pasteboard.clearContents();
     pasteboard.setString_forType(&NSString::from_str(url), unsafe { NSPasteboardTypeString });
-}
-
-/// Puts a PNG image, in base64, on the clipboard, like a page's capture.
-pub fn copy_png(base64: &str) {
-    let Some(data) = NSData::initWithBase64EncodedString_options(
-        NSData::alloc(),
-        &NSString::from_str(base64),
-        NSDataBase64DecodingOptions::empty(),
-    ) else {
-        return;
-    };
-    let pasteboard = NSPasteboard::generalPasteboard();
-    pasteboard.clearContents();
-    pasteboard.setData_forType(Some(&data), unsafe { objc2_app_kit::NSPasteboardTypePNG });
 }
 
 /// Rounds the corners of the card's window, which draws the page, and outlines it. `view` is

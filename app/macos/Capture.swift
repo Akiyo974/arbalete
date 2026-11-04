@@ -173,3 +173,28 @@ public func showNote(_ id: UInt32, _ text: UnsafePointer<CChar>, _ x: Double, _ 
         nativeWindows[id]?.capture.tell(text, at: NSPoint(x: x, y: y))
     }
 }
+
+/// Puts a PNG picture, in base64, on the clipboard: only the part at `x`, `y`, `width` and
+/// `height` of it, in CSS pixels of a page `viewport` wide, unless `viewport` is 0.
+@_cdecl("arbalete_ui_copy_png")
+public func copyPNG(
+    _ base64: UnsafePointer<CChar>, _ x: Double, _ y: Double, _ width: Double, _ height: Double,
+    _ viewport: Double
+) {
+    guard let data = Data(base64Encoded: String(cString: base64)),
+        var image = NSBitmapImageRep(data: data)?.cgImage
+    else { return }
+    if viewport > 0 {
+        // The picture's pixels per CSS pixel.
+        let scale = Double(image.width) / viewport
+        let part = CGRect(x: x * scale, y: y * scale, width: width * scale, height: height * scale)
+            .integral
+        guard let cut = image.cropping(to: part) else { return }
+        image = cut
+    }
+    guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+    else { return }
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    pasteboard.setData(png, forType: .png)
+}

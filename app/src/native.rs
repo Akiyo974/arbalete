@@ -41,6 +41,14 @@ unsafe extern "C" {
     fn arbalete_ui_peek(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
     fn arbalete_ui_capture(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
     fn arbalete_ui_note(window: u32, text: *const c_char, x: f64, y: f64);
+    fn arbalete_ui_copy_png(
+        base64: *const c_char,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        viewport: f64,
+    );
     fn arbalete_ui_card(
         window: u32,
         shown: bool,
@@ -242,6 +250,24 @@ pub fn note(window: u32, text: &str, x: i32, y: i32) {
     let text = CString::new(text).unwrap_or_default();
     // SAFETY: a C string, which the call reads before returning.
     unsafe { arbalete_ui_note(window, text.as_ptr(), x.into(), y.into()) };
+}
+
+/// Puts a PNG picture, in base64, on the clipboard, like a page's capture: only the part `area`
+/// of it if given, in CSS pixels of a page `viewport` wide, which the picture shows the width of.
+pub fn copy_png(base64: &str, area: Option<(i32, i32, i32, i32)>, viewport: f64) {
+    let base64 = CString::new(base64).unwrap_or_default();
+    let (x, y, width, height) = area.unwrap_or_default();
+    // SAFETY: a C string, which the call reads before returning, and plain values.
+    unsafe {
+        arbalete_ui_copy_png(
+            base64.as_ptr(),
+            x.into(),
+            y.into(),
+            width.into(),
+            height.into(),
+            if area.is_some() { viewport } else { 0.0 },
+        )
+    };
 }
 
 /// Tells where the card is, in the window's points from its top left corner, and whether it shows
