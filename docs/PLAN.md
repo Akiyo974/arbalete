@@ -54,7 +54,10 @@ Decided in [0001 — Web engine](decisions/0001-web-engine.md), after a spike on
 - **Chromium through CEF**, driven from Rust with the `cef` crate. Only Chromium runs Chrome extensions, and CEF
   gives every OS the same engine.
 - **Alloy-style browsers in CEF Views windows**: one window holds the sidebar, the tabs, Split View and overlays.
-  CEF's Chrome style supports extensions fully but allows only one page per window.
+  CEF's Chrome style supports extensions fully but allows only one page per window. On macOS, the pages move
+  into native containers, decided in [0002 — Pages in native containers](decisions/0002-native-page-containers.md):
+  each page a CEF browser drawn in a view of the interface, under its bar, the interface laying out the window
+  (phase 14).
 - **An extension compatibility layer** fills what Alloy style lacks: Arbalete hosts extension popups and answers
   `tabs.query`, `windows.*`, `tabs.create` and `tabs.update` through a shim injected with the DevTools protocol.
 - **Fallback**: a maintained CEF patch allowing several Chrome-style pages per window.
@@ -522,6 +525,22 @@ from Arc rely on them. Items that belong to a phase above stay there.
   weight, line height) and icons' strokes, from screenshots overlaid on Arc's, then fixed.
 - Done when an overlay of each screen shows no difference left. Arbalete still draws its own icons and copies
   no asset.
+
+### Phase 14 — Pages in native containers (macOS)
+Decided in [0002](decisions/0002-native-page-containers.md), after a spike (branch `spike/native-containers`):
+each page becomes a CEF browser drawn in a native container, its bar above it, and AppKit and SwiftUI lay the
+window out instead of CEF views. Each step ships alone, the CEF views path staying until its last user moves.
+
+1. **The page shown alone**, in a container with its bar: first the open questions of 0002 (clicks, keyboard and
+   focus; Chromium's `observer_list` checks), then the page, its bar in toolbar and developer modes, loading,
+   sleep and wake, captures and full screen.
+2. **Split View**: the pages in containers side by side or stacked, their handles, the focused page's outline,
+   and a drag's room and replace outline as native views among them.
+3. **Developer tools** docked beside or under the page, and resized against it.
+4. **Peek and the panels above the page** (Command Bar, site controls, capture), as views of the main window
+   rather than child windows; the sidebar too, once nothing it floats over is a window of its own.
+5. **Extension popups**, then removing what the CEF views path leaves: the card's views, `lay_out_split`, the
+   inspector's stage, the frames sent for bars, and the child windows' reordering.
 
 ### Later
 - **Linux and Windows**, last and not planned for now: CI on both (system libraries CEF needs, loading `libcef`
