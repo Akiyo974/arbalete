@@ -32,7 +32,11 @@ unsafe extern "C" {
     fn arbalete_ui_settings_focused() -> bool;
     fn arbalete_ui_make_default_browser();
     fn arbalete_ui_split(window: u32, stacked: bool, frames: *const f64, count: usize);
-    fn arbalete_ui_panes(window: u32, card: *mut std::ffi::c_void, panes: *const c_char);
+    fn arbalete_ui_panes(window: u32, panes: *const c_char) -> *mut std::ffi::c_void;
+    fn arbalete_ui_page_view(window: u32, tab: i64) -> *mut std::ffi::c_void;
+    fn arbalete_ui_page_closed(view: *mut std::ffi::c_void);
+    fn arbalete_ui_hand_pages_over(from: u32, to: u32);
+    fn arbalete_ui_focus_page(tab: i64);
     fn arbalete_ui_is_default_browser() -> bool;
     fn arbalete_ui_peek(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
     fn arbalete_ui_capture(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
@@ -161,12 +165,41 @@ pub fn split_handles(window: u32, stacked: bool, frames: &[cef::Rect]) {
     unsafe { arbalete_ui_split(window, stacked, values.as_ptr(), frames.len()) };
 }
 
-/// Shows the bars of a split's pages and the focused one's outline in the card's view, `card`, as
-/// `panes` (JSON) lays them out from its top left corner, or takes them away with none.
-pub fn panes(window: u32, card: Option<*mut std::ffi::c_void>, panes: &str) {
+/// Shows the pages of a window as `panes` (JSON) lays them out: where its card is and where each
+/// page shows in it, with its bar. Returns the card's content view, once the card shows.
+pub fn panes(window: u32, panes: &str) -> Option<*mut std::ffi::c_void> {
     let panes = CString::new(panes).unwrap_or_default();
-    // SAFETY: a C string, which the call reads before returning, and the card's live NSView.
-    unsafe { arbalete_ui_panes(window, card.unwrap_or(std::ptr::null_mut()), panes.as_ptr()) };
+    // SAFETY: a C string, which the call reads before returning.
+    let card = unsafe { arbalete_ui_panes(window, panes.as_ptr()) };
+    (!card.is_null()).then_some(card)
+}
+
+/// The view a tab's page is drawn in, hidden in the window `window` until it shows, which CEF
+/// makes the page's browser in.
+pub fn page_view(window: u32, tab: i64) -> Option<*mut std::ffi::c_void> {
+    // SAFETY: plain values; the view lives until page_closed.
+    let view = unsafe { arbalete_ui_page_view(window, tab) };
+    (!view.is_null()).then_some(view)
+}
+
+/// Takes a page's container away, its browser, whose view is `view`, closing: the view goes with
+/// it, which destroys the browser.
+pub fn page_closed(view: *mut std::ffi::c_void) {
+    // SAFETY: CEF's view of a browser closing, which the call only compares.
+    unsafe { arbalete_ui_page_closed(view) };
+}
+
+/// Moves the pages' containers out of the window `from`, which closes, into the window `to`,
+/// hidden.
+pub fn hand_pages_over(from: u32, to: u32) {
+    // SAFETY: plain values.
+    unsafe { arbalete_ui_hand_pages_over(from, to) };
+}
+
+/// Gives a tab's page's window the keyboard, if it shows.
+pub fn focus_page(tab: i64) {
+    // SAFETY: a plain value.
+    unsafe { arbalete_ui_focus_page(tab) };
 }
 
 /// Shows Peek's scrim and controls around its card at `frame`, in the window's points from its

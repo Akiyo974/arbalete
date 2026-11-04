@@ -535,7 +535,7 @@ final class NativeWindow {
     let themePicker: ThemePickerModel
     let importModel: ImportModel
     let splitHandles: SplitHandles
-    let paneBars: PaneBars
+    let pages: PagePlacer
     let pageDrop: PageDrop
     let peek: PeekChrome
     let capture: CaptureChrome
@@ -609,7 +609,7 @@ final class NativeWindow {
         importSurface.takesKeyboard = true
         surfaces["import"] = importSurface
         splitHandles = SplitHandles(in: window, model: app)
-        paneBars = PaneBars(model: app)
+        pages = PagePlacer(in: window, model: app)
         pageDrop = PageDrop(in: window, model: app)
         peek = PeekChrome(in: window, model: app)
         capture = CaptureChrome(in: window, model: app)
@@ -622,7 +622,7 @@ final class NativeWindow {
         sidebar.close()
         surfaces.values.forEach { $0.close() }
         splitHandles.close()
-        paneBars.close()
+        pages.close()
         pageDrop.close()
         peek.close()
         capture.close()

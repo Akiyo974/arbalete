@@ -222,6 +222,8 @@ thread_local! {
     /// Whether the split shown lays its pages one above the other, and each page's slot's
     /// length along it (SlotDelegate).
     static SLOT_LENGTHS: RefCell<(bool, Vec<i32>)> = const { RefCell::new((false, Vec::new())) };
+    /// A page's place moved, which its container follows soon (SendPanes).
+    static PANES_DUE: Cell<bool> = const { Cell::new(false) };
     /// The sidebar's width as a drag of its edge began, while it goes on.
     static SIDEBAR_DRAG: Cell<Option<i32>> = const { Cell::new(None) };
     /// The extensions' bridge's browser (make_bridge).
@@ -250,8 +252,8 @@ struct Win {
     incognito: Cell<Option<SpaceId>>,
     /// Opened from another window, it shows the Command Bar once in front, like Arc's.
     fresh: Cell<bool>,
-    /// The content view of its card's window, once it has shown a page, which a picture of the
-    /// page covers while another window shows it.
+    /// The content view of its card's window, once the card has shown (send_panes), which a
+    /// picture of the page covers while another window shows it.
     card_view: Cell<Option<*mut std::ffi::c_void>>,
     window: RefCell<Option<Window>>,
     /// Beside the card, at the window's left edge. It must not reach under the card: a web view
@@ -271,9 +273,9 @@ struct Win {
     room: RefCell<Option<Rect>>,
     /// The tabs' pages, one shown at a time, or a split.
     stage: RefCell<Option<Panel>>,
-    /// The bars over the pages last sent to the native interface, and where (send_panes).
+    /// Where the pages show, as last sent to the native interface (send_panes).
     #[cfg(target_os = "macos")]
-    panes_sent: RefCell<Option<(Option<*mut std::ffi::c_void>, String)>>,
+    panes_sent: RefCell<Option<String>>,
     /// The tab whose page the window shows.
     shown: Cell<Option<NodeId>>,
     /// Shown above the page, to open tabs.
@@ -570,16 +572,23 @@ fn hand_pages_over(id: u32) {
     });
     let Some(other) = other else { return };
     let pages: Vec<_> =
-        PAGES.with_borrow(|pages| pages.values().map(|live| live.view.clone()).collect());
-    for view in pages {
-        let here = view
+        PAGES.with_borrow(|pages| pages.values().map(|live| live.place.clone()).collect());
+    for place in pages {
+        let here = place
             .parent_view()
             .is_some_and(|parent| parent.is_same(Some(&mut View::from(&card))) == 1);
         if here {
-            view.set_visible(0);
-            card.remove_child_view(Some(&mut View::from(&view)));
-            other.add_child_view(Some(&mut View::from(&view)));
+            place.set_visible(0);
+            card.remove_child_view(Some(&mut View::from(&place)));
+            other.add_child_view(Some(&mut View::from(&place)));
         }
+    }
+    // Their containers too, out of the window closing with them.
+    #[cfg(target_os = "macos")]
+    if let Some(to) =
+        WINDOWS.with_borrow(|windows| windows.iter().find(|win| win.id != id).map(|win| win.id))
+    {
+        crate::native::hand_pages_over(id, to);
     }
     if let Some(win) = window_by_id(id)
         && let Some(tab) = win.shown.take()
@@ -1081,8 +1090,8 @@ fn send_state() {
         let NodeKind::Tab(tab) = &sidebar.node(space.selected?)?.kind else {
             return None;
         };
-        let page = PAGES
-            .with_borrow(|pages| Some(pages.get(&space.selected?)?.view.browser()?.identifier()));
+        let page =
+            PAGES.with_borrow(|pages| Some(pages.get(&space.selected?)?.browser.identifier()));
         let tab = extensions::ActiveTab {
             page,
             url: tab.url.clone(),
@@ -1893,6 +1902,7 @@ fn place_card() {
     let Some(size) = size else { return };
     if fills_window() {
         card.set_visible(0);
+        send_panes();
         return;
     }
     if split_shown().is_some() {
@@ -1928,6 +1938,7 @@ fn place_card() {
     }
     place_split_handles();
     send_empty_card();
+    send_panes();
     float_beside_empty_card();
 }
 
@@ -1996,12 +2007,10 @@ fn relayout_library() {
     update_drag_regions();
 }
 
-/// The card's window, once a content view's browser is created: every content view draws in it.
+/// The card's window's content view, once the card has shown (send_panes).
 #[cfg(target_os = "macos")]
 fn card_window() -> Option<*mut std::ffi::c_void> {
-    let view = content()
-        .or_else(|| PAGES.with_borrow(|pages| Some(pages.values().next()?.view.clone())))?;
-    Some(view.browser()?.host()?.window_handle())
+    win().card_view.get()
 }
 
 /// The panel holding the content views, under the bar above the page.
@@ -2297,10 +2306,8 @@ fn show_inspector(panel: &'static str, then: Option<InspectorAction>) {
 
 /// Opens a page's developer tools, docked, on `panel` if given, doing `then` once ready.
 fn open_inspector(tab: NodeId, panel: Option<&str>, then: Option<InspectorAction>) {
-    let (Some(body), Some(host)) = (
-        card_body(),
-        content().and_then(|view| view.browser()?.host()),
-    ) else {
+    let (Some(body), Some(host)) = (card_body(), content().and_then(|browser| browser.host()))
+    else {
         return;
     };
     let url = match panel {
@@ -2344,7 +2351,7 @@ fn act_in_inspector(tab: NodeId, inspector: &Inspector, action: InspectorAction)
                 "method": "DOM.getNodeForLocation",
                 "params": { "x": x, "y": y, "includeUserAgentShadowDOM": false },
             });
-            let host = PAGES.with_borrow(|pages| pages.get(&tab)?.view.browser()?.host());
+            let host = PAGES.with_borrow(|pages| pages.get(&tab)?.browser.host());
             if let Some(host) = host {
                 host.send_dev_tools_message(Some(ask.to_string().as_bytes()));
             }
@@ -2421,6 +2428,7 @@ fn place_stage() {
     body.layout();
     fit_stage(&win());
     frame.layout();
+    send_panes();
 }
 
 /// Fits a window's stage frame to the room its docked developer tools leave the page, if any.
@@ -2469,7 +2477,7 @@ fn sync_inspectors() {
         }
         let view = &inspector.frontend;
         if shown == Some(tab) {
-            move_page(view, &body);
+            move_page(View::from(view), &body);
             body.reorder_child_view(Some(&mut View::from(view)), 0);
             view.set_visible(1);
         } else if view
@@ -2504,7 +2512,7 @@ fn inspector_asked(tab: NodeId, kind: &str, data: &str) {
     };
     match kind {
         "send" => {
-            let host = PAGES.with_borrow(|pages| pages.get(&tab)?.view.browser()?.host());
+            let host = PAGES.with_borrow(|pages| pages.get(&tab)?.browser.host());
             if let Some(host) = host {
                 host.send_dev_tools_message(Some(data.as_bytes()));
             }
@@ -2770,16 +2778,29 @@ fn is_app_message(message: &str) -> bool {
 
 /// Where the shown page lies in the window, in points from its top left corner.
 fn page_frame() -> Option<Rect> {
-    let view = content()?;
+    let room = place_rect(win().shown.get()?)?;
     let card = win()
         .card
         .with_borrow(|card| card.as_ref().map(OverlayController::bounds))?;
-    let mut origin = Point { x: 0, y: 0 };
-    view.convert_point_to_window(Some(&mut origin));
-    let size = view.bounds();
     Some(Rect {
-        x: card.x + origin.x,
-        y: card.y + origin.y,
+        x: card.x + room.x,
+        y: card.y + room.y,
+        ..room
+    })
+}
+
+/// Where a tab's page shows in the card, from its top left corner, if it does.
+fn place_rect(tab: NodeId) -> Option<Rect> {
+    let place = PAGES.with_borrow(|pages| Some(pages.get(&tab)?.place.clone()))?;
+    if place.is_drawn() == 0 {
+        return None;
+    }
+    let mut origin = Point { x: 0, y: 0 };
+    place.convert_point_to_window(Some(&mut origin));
+    let size = place.bounds();
+    Some(Rect {
+        x: origin.x,
+        y: origin.y,
         width: size.width,
         height: size.height,
     })
@@ -2803,7 +2824,7 @@ struct Capturing {
 /// first for a part, which Chromium measures from the page's top, then the picture.
 fn capture(area: Option<(i32, i32, i32, i32)>) {
     let Some(tab) = win().shown.get() else { return };
-    let Some(host) = content().and_then(|view| view.browser()?.host()) else {
+    let Some(host) = content().and_then(|browser| browser.host()) else {
         return;
     };
     let observer = host.add_dev_tools_message_observer(Some(&mut CaptureObserver::new()));
@@ -2846,7 +2867,7 @@ fn capture_answered(message: &str) {
     if answer["id"] == LAYOUT_ID {
         let (Some((x, y, width, height)), Some(host)) = (
             area,
-            PAGES.with_borrow(|pages| pages.get(&tab)?.view.browser()?.host()),
+            PAGES.with_borrow(|pages| pages.get(&tab)?.browser.host()),
         ) else {
             return;
         };
@@ -3645,8 +3666,8 @@ fn hide_find(browser: Option<&Browser>) {
     if let Some(host) = browser.and_then(Browser::host) {
         host.stop_finding(0);
     }
-    if let Some(view) = content() {
-        view.request_focus();
+    if let Some(tab) = win().shown.get() {
+        focus_page(tab);
     }
 }
 
@@ -4659,7 +4680,11 @@ fn reopen_tab(rank: usize) {
 /// A tab's live page, in its profile's web data.
 struct Live {
     profile: ProfileId,
-    view: BrowserView,
+    /// Drawn in a native container of the interface, rather than in a CEF view (decision 0002).
+    browser: Browser,
+    /// Where the page shows in the card, an empty view that the container is placed over
+    /// (send_panes).
+    place: Panel,
     /// Since when it is hidden, in milliseconds since the epoch.
     hidden_since: Option<i64>,
     /// Frozen by Chromium: its scripts and timers stop until it shows again.
@@ -4721,7 +4746,7 @@ fn suspend_hidden_pages() {
                 let hidden = now - live.hidden_since?;
                 let due = hidden >= unload_after;
                 (due || (hidden >= freeze_after && !live.frozen))
-                    .then(|| (*tab, live.view.clone(), live.frozen && due))
+                    .then(|| (*tab, live.browser.clone(), live.frozen && due))
             })
             .partition(|(_, _, unload)| !unload)
     });
@@ -4735,8 +4760,8 @@ fn suspend_hidden_pages() {
         || [...document.querySelectorAll("video, audio")].some((media) => !media.paused && !media.ended)"#;
     let params = serde_json::json!({ "expression": expression, "returnByValue": true });
     let message = serde_json::json!({ "id": extensions::PLAYING, "method": "Runtime.evaluate", "params": params });
-    for (_, view, _) in ask {
-        if let Some(host) = view.browser().and_then(|browser| browser.host()) {
+    for (_, browser, _) in ask {
+        if let Some(host) = browser.host() {
             host.send_dev_tools_message(Some(message.to_string().as_bytes()));
         }
     }
@@ -4747,7 +4772,7 @@ fn suspend_hidden_pages() {
 fn snapshot_shown() {
     let params = serde_json::json!({ "format": "jpeg", "quality": 70 });
     let message = serde_json::json!({ "id": extensions::SNAPSHOT, "method": "Page.captureScreenshot", "params": params });
-    if let Some(host) = content().and_then(|view| view.browser()?.host()) {
+    if let Some(host) = content().and_then(|browser| browser.host()) {
         host.send_dev_tools_message(Some(message.to_string().as_bytes()));
     }
 }
@@ -4797,7 +4822,7 @@ pub fn page_top_color(page: i32, color: &str) {
     let tab = PAGES.with_borrow(|pages| {
         pages
             .iter()
-            .find_map(|(tab, live)| (live.view.browser()?.identifier() == page).then_some(*tab))
+            .find_map(|(tab, live)| (live.browser.identifier() == page).then_some(*tab))
     });
     let (Some(tab), Some(hex)) = (tab, css_hex(color)) else {
         return;
@@ -4824,7 +4849,7 @@ pub fn page_snapshot(page: i32, jpeg: &str) {
     let tab = PAGES.with_borrow(|pages| {
         pages
             .iter()
-            .find_map(|(tab, live)| (live.view.browser()?.identifier() == page).then_some(*tab))
+            .find_map(|(tab, live)| (live.browser.identifier() == page).then_some(*tab))
     });
     if let Some(tab) = tab {
         SNAPSHOTS.with_borrow_mut(|snapshots| snapshots.insert(tab, jpeg.to_owned()));
@@ -4854,7 +4879,7 @@ fn wake_frozen(wake: impl Fn(&str) -> bool) {
             .filter(|(tab, live)| live.frozen && tab_url(**tab).is_some_and(|url| wake(&url)))
             .map(|(tab, live)| {
                 live.frozen = false;
-                (*tab, live.view.browser().and_then(|browser| browser.host()))
+                (*tab, live.browser.host())
             })
             .collect()
     });
@@ -4870,7 +4895,7 @@ fn wake_frozen(wake: impl Fn(&str) -> bool) {
 pub fn page_playing(page: i32, playing: bool) {
     let found = PAGES.with_borrow(|pages| {
         pages.iter().find_map(|(tab, live)| {
-            let browser = live.view.browser()?;
+            let browser = live.browser.clone();
             (browser.identifier() == page).then(|| (*tab, live.hidden_since, browser.host()))
         })
     });
@@ -4901,21 +4926,20 @@ fn set_frozen(host: Option<&BrowserHost>, frozen: bool) {
 
 /// Loads a url in the shown page.
 fn load(url: &str) {
-    if let Some(frame) = content().and_then(|view| view.browser()?.main_frame()) {
+    if let Some(frame) = content().and_then(|browser| browser.main_frame()) {
         frame.load_url(Some(&CefString::from(url)));
     }
 }
 
 /// The page the window shows.
-fn content() -> Option<BrowserView> {
+fn content() -> Option<Browser> {
     let tab = win().shown.get()?;
-    PAGES.with_borrow(|pages| Some(pages.get(&tab)?.view.clone()))
+    PAGES.with_borrow(|pages| Some(pages.get(&tab)?.browser.clone()))
 }
 
 /// Whether a browser is the shown page's.
 fn is_shown(browser: Option<&mut Browser>) -> bool {
-    let (Some(browser), Some(mut shown)) = (browser, content().and_then(|view| view.browser()))
-    else {
+    let (Some(browser), Some(mut shown)) = (browser, content()) else {
         return false;
     };
     browser.is_same(Some(&mut shown)) == 1
@@ -4927,11 +4951,7 @@ fn page_tab(browser: &Browser) -> Option<NodeId> {
     PAGES.with_borrow(|pages| {
         pages
             .iter()
-            .find(|(_, live)| {
-                live.view
-                    .browser()
-                    .is_some_and(|page| page.identifier() == id)
-            })
+            .find(|(_, live)| live.browser.identifier() == id)
             .map(|(tab, _)| *tab)
     })
 }
@@ -4977,19 +4997,19 @@ fn show_selected() {
             (tabs, Some(sidebar.split_layout(row)))
         }
     });
-    let views: Option<Vec<_>> = tabs.iter().map(|&tab| page(tab)).collect();
-    let Some(views) = views else { return };
+    let places: Option<Vec<_>> = tabs.iter().map(|&tab| page(tab)).collect();
+    let Some(places) = places else { return };
     match layout {
-        Some(layout) => show_split(tab, &tabs, &views, layout),
-        None => show_content(tab, &views[0]),
+        Some(layout) => show_split(tab, &tabs, &places, layout),
+        None => show_content(tab, &places[0]),
     }
 }
 
 /// A tab's page, opened the first time, hidden, once its profile's web data is ready: until
-/// then, none.
-fn page(tab: NodeId) -> Option<BrowserView> {
-    if let Some(view) = PAGES.with_borrow(|pages| Some(pages.get(&tab)?.view.clone())) {
-        return Some(view);
+/// then, none. Returns where it shows in the card.
+fn page(tab: NodeId) -> Option<Panel> {
+    if let Some(place) = PAGES.with_borrow(|pages| Some(pages.get(&tab)?.place.clone())) {
+        return Some(place);
     }
     let (profile, url) = STATE.with_borrow_mut(|state| {
         let profile = state.sidebar.profile_of(tab)?;
@@ -5001,33 +5021,35 @@ fn page(tab: NodeId) -> Option<BrowserView> {
             if SNAPSHOTS.with_borrow(|snapshots| snapshots.contains_key(&tab)) {
                 REVIVED.with_borrow_mut(|revived| revived.insert(tab));
             }
+            MAKING.set(Some(tab));
+            let browser = make_page(tab, profile, start, &mut context);
+            MAKING.set(None);
+            let browser = browser?;
             // Any size, but not an empty one, which CEF would replace by its own: the layouts
             // share the room between the pages by their weights alone.
-            let view = browser_view(
-                ContentClient::new(profile, false),
-                start,
-                || 1,
-                Some(&mut context),
-            );
-            view.set_visible(0);
-            MAKING.set(Some(tab));
+            let place = panel_create(Some(&mut PagePlaceDelegate::new())).expect("page's place");
+            place.set_visible(0);
             if let Some(card) = card_panel() {
-                card.add_child_view(Some(&mut View::from(&view)));
+                card.add_child_view(Some(&mut View::from(&place)));
             }
-            MAKING.set(None);
+            if let Some(host) = browser.host() {
+                host.was_hidden(1);
+            }
             PAGES.with_borrow_mut(|pages| {
                 pages.insert(
                     tab,
                     Live {
                         profile,
-                        view: view.clone(),
+                        browser,
+                        place: place.clone(),
                         hidden_since: None,
                         frozen: false,
                         capturing: false,
                     },
                 )
             });
-            Some(view)
+            mute_page(tab);
+            Some(place)
         }
         // The tab shows once its profile's web data is ready.
         Some(None) => None,
@@ -5038,11 +5060,82 @@ fn page(tab: NodeId) -> Option<BrowserView> {
     }
 }
 
+/// Makes a tab's page's browser at `url`, drawn in the view the native interface holds for it.
+fn make_page(
+    tab: NodeId,
+    profile: ProfileId,
+    url: &str,
+    context: &mut RequestContext,
+) -> Option<Browser> {
+    #[cfg(target_os = "macos")]
+    let info = WindowInfo {
+        parent_view: crate::native::page_view(win().id, tab_number(tab))?,
+        // Any size: the container gives the page its own.
+        bounds: Rect {
+            x: 0,
+            y: 0,
+            width: 800,
+            height: 600,
+        },
+        runtime_style: RuntimeStyle::ALLOY,
+        ..Default::default()
+    };
+    #[cfg(not(target_os = "macos"))]
+    let info = {
+        let _ = tab;
+        WindowInfo {
+            runtime_style: RuntimeStyle::ALLOY,
+            ..Default::default()
+        }
+    };
+    browser_host_create_browser_sync(
+        Some(&info),
+        Some(&mut ContentClient::new(profile, false)),
+        Some(&CefString::from(url)),
+        Some(&BrowserSettings::default()),
+        None,
+        Some(context),
+    )
+}
+
+/// The number the native interface knows a tab by.
+fn tab_number(tab: NodeId) -> i64 {
+    serde_json::to_value(tab)
+        .ok()
+        .and_then(|number| number.as_i64())
+        .unwrap_or(-1)
+}
+
+/// Gives a tab's page the keyboard, and its window, if it shows.
+fn focus_page(tab: NodeId) {
+    let Some(host) = PAGES.with_borrow(|pages| pages.get(&tab)?.browser.host()) else {
+        return;
+    };
+    #[cfg(target_os = "macos")]
+    crate::native::focus_page(tab_number(tab));
+    host.set_focus(1);
+}
+
+/// Shows or hides a tab's page where the card lays it out; Chromium learns it, which stops
+/// drawing a hidden page.
+fn show_page(tab: NodeId, shown: bool) {
+    let Some((place, host)) = PAGES.with_borrow(|pages| {
+        let live = pages.get(&tab)?;
+        Some((live.place.clone(), live.browser.host()))
+    }) else {
+        return;
+    };
+    place.set_visible(shown.into());
+    if let Some(host) = host {
+        host.was_hidden((!shown).into());
+    }
+}
+
 /// Mutes a tab's page as the tab says, or gives it its sound back.
 fn mute_page(tab: NodeId) {
     let muted =
         STATE.with_borrow_mut(|state| state.sidebar.tab_mut(tab).is_some_and(|tab| tab.muted));
-    let host = PAGES.with_borrow(|pages| pages.get(&tab)?.view.browser()?.host());
+    let host = PAGES.with_borrow(|pages| pages.get(&tab)?.browser.host());
     if let Some(host) = host {
         host.set_audio_muted(muted.into());
     }
@@ -5055,44 +5148,36 @@ fn content_created(profile: ProfileId, browser: Option<&mut Browser>) {
     extensions::page_created(profile, browser);
     #[cfg(target_os = "macos")]
     cover_revived(Some(browser), true);
+    // Made in page(), it is not one of the pages yet, which mutes it once it is.
     let Some(tab) = page_tab(browser) else { return };
     mute_page(tab);
-    let shown = win().shown.get() == Some(tab);
-    #[cfg(target_os = "macos")]
-    if let Some(host) = browser.host() {
-        if win().split.borrow().0.contains(&tab) {
-            crate::mac::round_split(host.window_handle());
-        } else if shown {
-            crate::mac::round_card(host.window_handle());
-        }
-    }
-    if shown {
+    if win().shown.get() == Some(tab) {
         send_page_state();
     }
 }
 
-/// Puts a tab's page in the window instead of the shown one, if any.
-fn show_content(tab: NodeId, view: &BrowserView) {
+/// Puts a tab's page, at `place`, in the window instead of the shown one, if any.
+fn show_content(tab: NodeId, place: &Panel) {
     if win().shown.get() == Some(tab) && win().split.borrow().0.is_empty() {
         return;
     }
     hide_content();
     take_page(tab);
     if let Some(card) = card_panel() {
-        move_page(view, &card);
+        move_page(View::from(place), &card);
     }
     win().shown.set(Some(tab));
-    wake_page(tab, view);
+    wake_page(tab);
     sync_inspectors();
     if let Some(panel) = card_panel() {
         panel.layout();
     }
-    shown_on_card(view);
+    shown_on_card(tab);
 }
 
-/// Shows a split's pages, `views` for its `tabs`, as `layout` lays them out, `focused`'s with the
-/// keyboard, like Arc's Split View: each its own card, with room between them.
-fn show_split(focused: NodeId, tabs: &[NodeId], views: &[BrowserView], layout: SplitLayout) {
+/// Shows a split's pages, at `places` for its `tabs`, as `layout` lays them out, `focused`'s with
+/// the keyboard, like Arc's Split View: each its own card, with room between them.
+fn show_split(focused: NodeId, tabs: &[NodeId], places: &[Panel], layout: SplitLayout) {
     let same = *win().split.borrow() == (tabs.to_vec(), Some(layout.clone()));
     if !same {
         hide_content();
@@ -5107,10 +5192,10 @@ fn show_split(focused: NodeId, tabs: &[NodeId], views: &[BrowserView], layout: S
         }
         split.remove_all_child_views();
         win().pane_preview.set(None);
-        for ((&tab, view), slot) in tabs.iter().zip(views).zip(&slots) {
+        for ((&tab, place), slot) in tabs.iter().zip(places).zip(&slots) {
             take_page(tab);
-            move_page(view, slot);
-            wake_page(tab, view);
+            move_page(View::from(place), slot);
+            wake_page(tab);
             split.add_child_view(Some(&mut View::from(slot)));
         }
         split.set_visible(1);
@@ -5124,22 +5209,10 @@ fn show_split(focused: NodeId, tabs: &[NodeId], views: &[BrowserView], layout: S
         }
         *win().split.borrow_mut() = (tabs.to_vec(), Some(layout));
         lay_out_split();
-        #[cfg(target_os = "macos")]
-        if let Some(host) = views[0].browser().and_then(|browser| browser.host()) {
-            crate::mac::round_split(host.window_handle());
-        }
     }
     win().shown.set(Some(focused));
     sync_inspectors();
-    if let Some(view) = tabs
-        .iter()
-        .position(|&tab| tab == focused)
-        .map(|i| &views[i])
-    {
-        view.request_focus();
-        shown_on_card(view);
-    }
-    send_panes();
+    shown_on_card(focused);
 }
 
 /// Where the split shown puts its pages, in the window, each under its bar: as the card lays
@@ -5291,8 +5364,8 @@ fn preview_pane(index: Option<usize>) {
     lay_out_split();
 }
 
-/// Tells the native interface where the split's pages are and how each stands, for their bars
-/// and the focused one's outline; none without a split shown.
+/// Tells the native interface where the card is and where its pages show, a page alone or a
+/// split's, and how each stands, for their containers, bars and the focused one's outline.
 fn send_panes() {
     #[cfg(target_os = "macos")]
     {
@@ -5306,11 +5379,11 @@ fn send_panes() {
             .card
             .with_borrow(|card| card.as_ref().map(OverlayController::bounds))
             .unwrap_or_default();
-        let panes: Vec<_> = tabs
+        let mut panes: Vec<_> = tabs
             .iter()
             .zip(split_rects())
             .map(|(&tab, rect)| {
-                let browser = PAGES.with_borrow(|pages| pages.get(&tab)?.view.browser());
+                let browser = PAGES.with_borrow(|pages| Some(pages.get(&tab)?.browser.clone()));
                 let url = STATE
                     .with_borrow_mut(|state| state.sidebar.tab_mut(tab).map(|tab| tab.url.clone()));
                 let can = |back: bool| {
@@ -5333,14 +5406,23 @@ fn send_panes() {
                     "focused": focused == Some(tab),
                     "color": TOP_COLORS.with_borrow(|colors| colors.get(&tab).cloned()),
                     "developer": developer,
-                    "toolbar": false,
+                    "toolbar": false, "alone": false,
                     "cardX": card.x, "cardY": card.y,
                 })
             })
             .collect();
-        // A page alone has the bar above it in toolbar or developer mode, a view of the card like a
-        // split's page's, which the sidebar passes over, like Arc's.
-        let mut panes = panes;
+        // A page alone, where the card lays it out.
+        if let Some(tab) = focused.filter(|_| tabs.is_empty())
+            && let Some(rect) = place_rect(tab)
+        {
+            panes.push(json!({
+                "tab": tab, "split": null,
+                "x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height,
+                "bar": 0, "url": "", "back": false, "forward": false, "loading": false,
+                "focused": true, "color": null, "developer": false, "toolbar": false,
+                "alone": true, "cardX": card.x, "cardY": card.y,
+            }));
+        }
         // The empty page standing where a dragged tab would open, known by its tab, -1, which
         // the interface draws.
         let slot = win().drop_slot.borrow().clone();
@@ -5355,9 +5437,11 @@ fn send_panes() {
                 "width": frame.width, "height": frame.height,
                 "bar": 0, "url": "", "back": false, "forward": false, "loading": false,
                 "focused": false, "color": null, "developer": false, "toolbar": false,
-                "cardX": card.x, "cardY": card.y,
+                "alone": false, "cardX": card.x, "cardY": card.y,
             }));
         }
+        // A page alone has the bar above it in toolbar or developer mode, a view of the card like
+        // a split's page's, which the sidebar passes over, like Arc's.
         if tabs.is_empty() && page_toolbar() {
             panes.push(json!({
                 "tab": focused, "split": null,
@@ -5366,16 +5450,35 @@ fn send_panes() {
                 "back": false, "forward": false, "loading": false, "focused": true,
                 // Like Arc's, the bar takes the color at the page's top.
                 "color": focused.and_then(|tab| TOP_COLORS.with_borrow(|colors| colors.get(&tab).cloned())),
-                "developer": false, "toolbar": true, "cardX": card.x, "cardY": card.y,
+                "developer": false, "toolbar": true, "alone": false,
+                "cardX": card.x, "cardY": card.y,
             }));
         }
+        let shows = win()
+            .card
+            .with_borrow(|card| card.as_ref().is_some_and(|card| card.is_visible() == 1))
+            && !fills_window();
+        let frame = shows.then_some([card.x, card.y, card.width, card.height]);
         // Only once they change: placing the bars again would end a click on them.
-        let sent = (win().card_view.get(), json!(panes).to_string());
+        let sent = json!({ "card": frame, "panes": panes }).to_string();
         if win().panes_sent.borrow().as_ref() == Some(&sent) {
             return;
         }
-        crate::native::panes(win().id, sent.0, &sent.1);
-        win().panes_sent.replace(Some(sent));
+        let view = crate::native::panes(win().id, &sent);
+        if let Some(view) = view {
+            win().card_view.set(Some(view));
+            // A split's room between its pages shows the window; a page alone has the card's
+            // corners.
+            if tabs.is_empty() {
+                crate::mac::round_card(view);
+            } else {
+                crate::mac::round_split(view);
+            }
+        }
+        // Until the card's window is found, as it shows.
+        if view.is_some() || frame.is_none() {
+            win().panes_sent.replace(Some(sent));
+        }
     }
 }
 
@@ -5606,16 +5709,17 @@ fn share_panes(index: usize, part: f64) {
     }
 }
 
-/// Moves a page into `parent`, from wherever it is, without reloading it.
-fn move_page(view: &BrowserView, parent: &Panel) {
+/// Moves a view, like a page's place, into `parent`, from wherever it is, without reloading the
+/// page.
+fn move_page(mut view: View, parent: &Panel) {
     let here = view
         .parent_view()
         .is_some_and(|p| p.is_same(Some(&mut View::from(parent))) == 1);
     if !here {
         if let Some(from) = view.parent_view().and_then(|p| p.as_panel()) {
-            from.remove_child_view(Some(&mut View::from(view)));
+            from.remove_child_view(Some(&mut view));
         }
-        parent.add_child_view(Some(&mut View::from(view)));
+        parent.add_child_view(Some(&mut view));
     }
 }
 
@@ -5648,39 +5752,30 @@ fn take_page(tab: NodeId) {
 }
 
 /// Lets a page shown run again, if it was frozen or asleep while hidden.
-fn wake_page(tab: NodeId, view: &BrowserView) {
+fn wake_page(tab: NodeId) {
     let frozen = PAGES.with_borrow_mut(|pages| {
         let live = pages.get_mut(&tab)?;
         live.hidden_since = None;
-        Some(std::mem::take(&mut live.frozen))
+        Some((std::mem::take(&mut live.frozen), live.browser.host()))
     });
     ASLEEP.with_borrow_mut(|asleep| asleep.remove(&tab));
-    if frozen == Some(true) {
-        set_frozen(
-            view.browser().and_then(|browser| browser.host()).as_ref(),
-            false,
-        );
+    if let Some((true, host)) = frozen {
+        set_frozen(host.as_ref(), false);
     }
-    view.set_visible(1);
+    show_page(tab, true);
 }
 
-/// The shown page, `view`, takes the card's corners, and the toolbar its state.
-fn shown_on_card(view: &BrowserView) {
+/// The shown page, `tab`'s, takes the keyboard, its container the card, and the toolbar its state.
+fn shown_on_card(tab: NodeId) {
     send_empty_card();
-    // The browser's window is the card's.
-    #[cfg(target_os = "macos")]
-    if let Some(host) = view.browser().and_then(|browser| browser.host()) {
-        if split_shown().is_some() {
-            crate::mac::round_split(host.window_handle());
-        } else {
-            crate::mac::round_card(host.window_handle());
-        }
-        win()
-            .card_view
-            .set(crate::mac::window_content(host.window_handle()));
+    send_panes();
+    // Not while the Command Bar shows over it, which keeps the keyboard.
+    let overlay = win()
+        .overlay
+        .with_borrow(|overlay| overlay.as_ref().is_some_and(|o| o.is_visible() == 1));
+    if !overlay {
+        focus_page(tab);
     }
-    #[cfg(not(target_os = "macos"))]
-    let _ = view;
     send_page_state();
 }
 
@@ -5701,7 +5796,7 @@ fn space_tint(tab: NodeId) -> u32 {
 
 /// Tells the UI how the shown page stands: its progress and history are its own.
 fn send_page_state() {
-    let browser = content().and_then(|view| view.browser());
+    let browser = content();
     let loading = browser
         .as_ref()
         .is_none_or(|browser| browser.is_loading() == 1);
@@ -5720,15 +5815,17 @@ fn send_page_state() {
 /// Hides the shown page, which keeps running. Without one, the card shows its own color, an empty
 /// Space's panel.
 fn hide_content() {
-    if let Some(shown) = content() {
-        shown.set_visible(0);
+    if let Some(shown) = win().shown.get() {
+        show_page(shown, false);
     }
     let (split, _) = std::mem::take(&mut *win().split.borrow_mut());
     if !split.is_empty() {
+        for &tab in &split {
+            show_page(tab, false);
+        }
         PAGES.with_borrow_mut(|pages| {
             for tab in &split {
                 if let Some(live) = pages.get_mut(tab) {
-                    live.view.set_visible(0);
                     live.hidden_since.get_or_insert_with(now);
                 }
             }
@@ -5785,8 +5882,8 @@ fn prune_pages() {
     });
 }
 
-/// Closes a tab's page, if it has one: the tab opens again at its url. Its view then leaves the
-/// card (PageLifeSpan's do_close).
+/// Closes a tab's page, if it has one: the tab opens again at its url. Its container then goes
+/// (BrowserLifeSpan's do_close).
 fn close_page(tab: NodeId) {
     close_inspector(tab);
     let Some(live) = PAGES.with_borrow_mut(|pages| pages.remove(&tab)) else {
@@ -5795,8 +5892,15 @@ fn close_page(tab: NodeId) {
     if win().shown.get() == Some(tab) {
         win().shown.set(None);
     }
-    live.view.set_visible(0);
-    if let Some(host) = live.view.browser().and_then(|browser| browser.host()) {
+    live.place.set_visible(0);
+    if let Some(parent) = live
+        .place
+        .parent_view()
+        .and_then(|parent| parent.as_panel())
+    {
+        parent.remove_child_view(Some(&mut View::from(&live.place)));
+    }
+    if let Some(host) = live.browser.host() {
         host.close_browser(1);
     }
 }
@@ -5807,11 +5911,27 @@ wrap_task! {
     }
 
     impl Task {
-        /// Takes a closing page's view out of its window's card, which destroys its browser.
+        /// Takes a closing view, like developer tools', out of the card, which destroys its
+        /// browser.
         fn execute(&self) {
             if let Some(card) = self.view.parent_view().and_then(|parent| parent.as_panel()) {
                 card.remove_child_view(Some(&mut View::from(&self.view)));
             }
+        }
+    }
+}
+
+wrap_task! {
+    struct RemoveContainer {
+        view: usize,
+    }
+
+    impl Task {
+        /// Takes a closing page's view out of the interface with its container, which destroys
+        /// its browser.
+        fn execute(&self) {
+            #[cfg(target_os = "macos")]
+            crate::native::page_closed(self.view as *mut std::ffi::c_void);
         }
     }
 }
@@ -6042,7 +6162,7 @@ pub fn run(command: Command) {
 }
 
 fn run_command(command: Command) {
-    let browser = content().and_then(|view| view.browser());
+    let browser = content();
     match (command, browser) {
         (Command::Ready, _) => {
             send_state();
@@ -6830,7 +6950,7 @@ wrap_window_delegate! {
             }
             CLOSING.set(true);
             let hosts: Vec<_> = PAGES.with_borrow(|pages| {
-                pages.values().filter_map(|live| live.view.browser()?.host()).collect()
+                pages.values().filter_map(|live| live.browser.host()).collect()
             });
             let mut closed = 1;
             for host in hosts {
@@ -7188,6 +7308,38 @@ wrap_panel_delegate! {
     }
 
     impl PanelDelegate {}
+}
+
+// Where a tab's page shows in the card: any size, but not an empty one, which CEF would replace by
+// its own, as the layouts share the room by weights. Its container follows it.
+wrap_panel_delegate! {
+    struct PagePlaceDelegate {}
+
+    impl ViewDelegate {
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            Size { width: 1, height: 1 }
+        }
+
+        fn on_layout_changed(&self, _view: Option<&mut View>, _new_bounds: Option<&Rect>) {
+            if !PANES_DUE.replace(true) {
+                post_task(ThreadId::UI, Some(&mut SendPanes::new()));
+            }
+        }
+    }
+
+    impl PanelDelegate {}
+}
+
+wrap_task! {
+    struct SendPanes {}
+
+    impl Task {
+        /// Tells the native interface where each window's pages show, as they moved.
+        fn execute(&self) {
+            PANES_DUE.set(false);
+            in_each_window(send_panes);
+        }
+    }
 }
 
 wrap_panel_delegate! {
@@ -8002,16 +8154,18 @@ wrap_life_span_handler! {
             }
         }
 
-        /// A page closing with its tab leaves the card, which CEF would otherwise close with it;
-        /// the window closing takes its pages with it.
+        /// A page closing leaves its container, which CEF would otherwise close the window of.
         fn do_close(&self, browser: Option<&mut Browser>) -> i32 {
-            if self.profile.is_none() || CLOSING.get() {
+            if self.profile.is_none() {
                 return 0;
             }
-            let Some(view) = browser_view_get_for_browser(browser) else {
+            let Some(host) = browser.and_then(|browser| browser.host()) else {
                 return 0;
             };
-            post_task(ThreadId::UI, Some(&mut RemovePage::new(view)));
+            post_task(
+                ThreadId::UI,
+                Some(&mut RemoveContainer::new(host.window_handle() as usize)),
+            );
             1
         }
 

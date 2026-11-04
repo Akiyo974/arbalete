@@ -1355,14 +1355,6 @@ fn corners(view: *mut c_void, bottom: bool) {
     let _: () = unsafe { msg_send![&*layer, setMaskedCorners: mask] };
 }
 
-/// The content view of the window a view, which CEF gives, is in.
-pub fn window_content(view: *mut c_void) -> Option<*mut c_void> {
-    // SAFETY: CEF gives a live NSView, which its window keeps alive.
-    let view = unsafe { view.cast::<NSView>().as_ref() }?;
-    let content = view.window()?.contentView()?;
-    Some(Retained::as_ptr(&content).cast_mut().cast())
-}
-
 /// How much of a Space's leading color dims a picture standing for a page shown in another window
 /// (cover_page).
 const PLACEHOLDER_TINT: f64 = 0.45;
@@ -1496,7 +1488,13 @@ pub fn shift(view: *mut c_void, x: f64) {
     let Some(view) = (unsafe { view.cast::<NSView>().as_ref() }) else {
         return;
     };
-    let Some(content) = view.window().and_then(|window| window.contentView()) else {
+    // The view holding the content view, which holds the pages' containers too.
+    let Some(content) = view
+        .window()
+        .and_then(|window| window.contentView())
+        // SAFETY: on the main thread, where AppKit lays its views out.
+        .map(|content| unsafe { content.superview() }.unwrap_or(content))
+    else {
         return;
     };
     content.setWantsLayer(true);

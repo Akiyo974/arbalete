@@ -1,7 +1,7 @@
-// The bars at the top of a split's pages and the focused page's outline, like Arc's Split View,
-// or the bar above a page alone: the app places them over each page (send_panes in
-// app/src/shell.rs). They are views of the card's window, above the pages it holds, so they move
-// with them in one go, and the sidebar passes over them, like Arc's.
+// The tabs' pages in native containers, each a split's page's bar over a view CEF draws the page
+// in, the bar above a page alone and the focused page's outline, like Arc's Split View: the app
+// tells where each page shows (send_panes in app/src/shell.rs). They are views of the card's
+// window, so a bar and its page move in one go, and the sidebar passes over them, like Arc's.
 
 import AppKit
 import SwiftUI
@@ -27,6 +27,8 @@ struct Pane: Decodable, Equatable {
     var developer: Bool
     /// The bar above a page alone, in toolbar or developer mode, rather than a split's page.
     var toolbar: Bool
+    /// A page shown alone, rather than in a split.
+    var alone: Bool
     /// The card's top left corner, from the window's.
     var cardX: Double
     var cardY: Double
@@ -37,8 +39,7 @@ private let outlineWidth: CGFloat = 2
 /// The card's, like Arc's (CARD_RADIUS in app/src/mac.rs).
 private let paneRadius: CGFloat = 6
 
-/// A bar's view: the card's window never becomes the key one, so every click in it is a first
-/// one, which the bar's buttons take at once.
+/// A bar's view: every click in it is taken at once, the card's window being key or not.
 private final class BarHost: NSHostingView<PaneBar> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
@@ -48,11 +49,89 @@ private final class Outline: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-/// The bars and the outline of the split a window shows, made as it needs them.
+/// The view CEF draws a page in: it adds its own view in it, which it keeps the size of.
+private final class PageHost: NSView {
+    override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        subview.frame = bounds
+        subview.autoresizingMask = [.width, .height]
+    }
+}
+
+/// A tab's page, as a native container: a split's page's bar on top, the page under it, one
+/// block that AppKit lays out, like Arc's.
 @MainActor
-final class PaneBars {
+final class PageContainer: NSView {
+    fileprivate let host = PageHost()
+    fileprivate let bar: BarHost
+    fileprivate var barHeight: CGFloat = 0 {
+        didSet { if barHeight != oldValue { arrange() } }
+    }
+
+    init(model: AppModel) {
+        bar = BarHost(rootView: PaneBar(model: model, pane: nil))
+        bar.sizingOptions = []
+        super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        wantsLayer = true
+        layer?.cornerRadius = paneRadius
+        layer?.masksToBounds = true
+        isHidden = true
+        addSubview(host)
+        addSubview(bar)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var isFlipped: Bool { true }
+
+    /// Whether CEF's view of its page is `view`.
+    func holds(_ view: AnyObject) -> Bool {
+        host.subviews.contains { $0 === view }
+    }
+
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        arrange()
+    }
+
+    /// The bar on top, the page under it, as AppKit sizes the container.
+    private func arrange() {
+        bar.isHidden = barHeight == 0
+        bar.frame = NSRect(x: 0, y: 0, width: bounds.width, height: barHeight)
+        host.frame = NSRect(
+            x: 0, y: barHeight, width: bounds.width, height: max(0, bounds.height - barHeight))
+    }
+}
+
+/// The tabs' pages' containers, by tab, wherever they show: a page shows in one window at a time.
+@MainActor var pageContainers: [Int: PageContainer] = [:]
+
+/// Lets a CEF window, like the card's, take the keyboard: CEF keeps it from it, the views it held
+/// taking the keyboard through the window above, but a page drawn in it needs it.
+@MainActor private func letTakeKeyboard(_ window: NSWindow) {
+    guard !window.canBecomeKey, let base = object_getClass(window) else { return }
+    let name = "Arbalete" + NSStringFromClass(base)
+    var keyable: AnyClass? = NSClassFromString(name)
+    if keyable == nil, let made = objc_allocateClassPair(base, name, 0) {
+        let canBecomeKey: @convention(block) (AnyObject) -> Bool = { _ in true }
+        class_addMethod(
+            made, #selector(getter: NSWindow.canBecomeKey),
+            imp_implementationWithBlock(canBecomeKey), "c@:")
+        objc_registerClassPair(made)
+        keyable = made
+    }
+    if let keyable { object_setClass(window, keyable) }
+}
+
+/// The pages a window shows, in their containers, with the bar above a page alone and the focused
+/// page's outline, made as it needs them.
+@MainActor
+final class PagePlacer {
     private let model: AppModel
-    private var bars: [BarHost] = []
+    private weak var window: NSWindow?
+    /// The card's window, which CEF makes: found by its frame, as CEF gives no handle to it.
+    private weak var card: NSWindow?
+    /// The bar above a page alone, in toolbar or developer mode.
+    private let toolbar: BarHost
     private let outline: Outline = {
         let view = Outline()
         view.wantsLayer = true
@@ -60,121 +139,139 @@ final class PaneBars {
         view.layer?.borderWidth = outlineWidth
         return view
     }()
+    /// The tabs whose pages it shows.
+    private var shown: [Int] = []
 
-    /// The card's view the bars were last placed over.
-    private weak var card: NSView?
-
-    init(model: AppModel) {
+    init(in window: NSWindow, model: AppModel) {
+        self.window = window
         self.model = model
+        toolbar = BarHost(rootView: PaneBar(model: model, pane: nil))
+        toolbar.sizingOptions = []
+        toolbar.wantsLayer = true
+        toolbar.layer?.cornerRadius = paneRadius
+        toolbar.layer?.masksToBounds = true
     }
 
-    /// Lays `panes` out in `card`, the card's view, or takes them away without it.
-    func place(_ panes: [Pane], in card: NSView?) {
-        while bars.count < panes.count {
-            let host = BarHost(rootView: PaneBar(model: model, pane: nil))
-            host.sizingOptions = []
-            host.wantsLayer = true
-            host.layer?.cornerRadius = paneRadius
-            host.layer?.masksToBounds = true
-            bars.append(host)
+    /// A container for a tab's page, made hidden in the window until it shows: CEF makes the
+    /// page's browser in its view.
+    func container(for tab: Int) -> PageContainer? {
+        if let container = pageContainers[tab] { return container }
+        guard let holder = window?.contentView?.superview else { return nil }
+        let container = PageContainer(model: model)
+        holder.addSubview(container)
+        pageContainers[tab] = container
+        return container
+    }
+
+    /// The card's window, whose frame is `frame` in the window's points from its top left corner.
+    private func cardWindow(at frame: NSRect) -> NSWindow? {
+        guard let window else { return nil }
+        func at(_ child: NSWindow) -> Bool {
+            let x = child.frame.minX - window.frame.minX
+            let y = window.frame.maxY - child.frame.maxY
+            return abs(x - frame.minX) < 2 && abs(y - frame.minY) < 2
+                && abs(child.frame.width - frame.width) < 2
+                && abs(child.frame.height - frame.height) < 2
         }
-        guard let card else {
-            close()
-            return
+        if let card, card.parent === window, at(card) { return card }
+        card = window.childWindows?.first { !($0 is NSPanel) && at($0) }
+        if let card { letTakeKeyboard(card) }
+        return card
+    }
+
+    /// Lays `panes` out in the card at `frame`, or hides them all without it. Returns the card's
+    /// content view.
+    func place(_ panes: [Pane], card frame: NSRect?) -> NSView? {
+        let cardWindow = frame.flatMap(cardWindow(at:))
+        guard let cardWindow, let content = cardWindow.contentView,
+            let container = content.superview
+        else {
+            hide(except: [])
+            toolbar.removeFromSuperview()
+            outline.removeFromSuperview()
+            return nil
         }
-        self.card = card
-        // Rects from the card's top left corner, in its own coordinates.
-        func frame(_ x: Double, _ y: Double, _ width: Double, _ height: Double) -> NSRect {
-            NSRect(
-                x: x, y: card.isFlipped ? y : card.bounds.height - y - height, width: width,
+        // Rects from the card's top left corner, in its content view's coordinates, then in the
+        // view above it that holds ours: over Chromium's content view rather than in it, whose hit
+        // test would hand the pages and bars clicks at the wrong place.
+        func placed(_ x: Double, _ y: Double, _ width: Double, _ height: Double) -> NSRect {
+            let rect = NSRect(
+                x: x, y: content.isFlipped ? y : content.bounds.height - y - height, width: width,
                 height: height)
+            return container.convert(rect, from: content)
         }
-        // In the card's window, over Chromium's content view rather than in it: its hit test
-        // would hand the bars clicks at the wrong place.
-        let container = card.window?.contentView?.superview ?? card
-        func placed(_ rect: NSRect) -> NSRect { container.convert(rect, from: card) }
-        // Above the pages, which CEF may add or order since.
-        let covered = container.subviews.last.map(ours) == false
         func raise(_ view: NSView) {
-            if view.superview !== container || covered {
+            if view.superview !== container || container.subviews.last !== view {
                 container.addSubview(view, positioned: .above, relativeTo: nil)
             }
         }
-        for (index, host) in bars.enumerated() {
-            guard index < panes.count else {
-                host.removeFromSuperview()
-                continue
+        let pages = panes.filter { !$0.toolbar && $0.tab >= 0 }
+        let toolbarPane = panes.first(where: \.toolbar)
+        for pane in pages {
+            guard let page = pageContainers[pane.tab] else { continue }
+            if page.superview !== container { container.addSubview(page) }
+            page.frame = placed(pane.x, pane.y, pane.width, pane.height)
+            page.barHeight = pane.bar
+            if pane.bar > 0 {
+                page.bar.rootView = PaneBar(model: model, pane: pane)
+                page.bar.layer?.backgroundColor =
+                    NSColor(color(pane.color ?? model.cardColor)).cgColor
             }
-            let pane = panes[index]
-            host.rootView = PaneBar(model: model, pane: pane)
-            host.layer?.backgroundColor = NSColor(color(pane.color ?? model.cardColor)).cgColor
-            // Rounded like the card at its top only: the page goes on below. Its top is where y
-            // is least when the bar counts down from it, whatever the card does.
-            host.layer?.maskedCorners =
-                host.isFlipped
+            // Under the bar above it, the page's top corners are square.
+            page.layer?.maskedCorners =
+                toolbarPane == nil
+                ? [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner,
+                    .layerMaxXMaxYCorner]
+                : [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+            page.isHidden = false
+        }
+        hide(except: pages.map(\.tab))
+        if let pane = toolbarPane {
+            toolbar.rootView = PaneBar(model: model, pane: pane)
+            toolbar.layer?.backgroundColor = NSColor(color(pane.color ?? model.cardColor)).cgColor
+            toolbar.layer?.maskedCorners =
+                toolbar.isFlipped
                 ? [.layerMinXMinYCorner, .layerMaxXMinYCorner]
                 : [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
-            host.frame = placed(frame(pane.x, pane.y, pane.width, pane.bar))
-            raise(host)
+            toolbar.frame = placed(pane.x, pane.y, pane.width, pane.bar)
+            raise(toolbar)
+        } else {
+            toolbar.removeFromSuperview()
         }
-        cutCorners(of: panes.map { frame($0.x, $0.y, $0.width, $0.height) }, in: card)
         // Around the focused page, once at least two show.
-        if panes.count > 1, let focused = panes.first(where: \.focused) {
+        if pages.count > 1, let focused = pages.first(where: \.focused) {
             outline.layer?.borderColor = NSColor(model.focusColor).cgColor
-            outline.frame = placed(frame(focused.x, focused.y, focused.width, focused.height))
+            outline.frame = placed(focused.x, focused.y, focused.width, focused.height)
             raise(outline)
         } else {
             outline.removeFromSuperview()
         }
+        return content
     }
 
-    /// Cuts the pages' bottom corners, at `frames`, out of what CEF draws under them: it fills
-    /// each page's room with the page's color, which would show past its rounded corners.
-    private func cutCorners(of frames: [NSRect], in card: NSView) {
-        guard
-            let compositor = card.subviews.first(where: {
-                $0.className == "ViewsCompositorSuperview"
-            }), let layer = compositor.layer
-        else { return }
-        guard !frames.isEmpty else {
-            layer.mask = nil
-            return
+    /// Hides the pages it showed but `tabs`', which another window may show since.
+    private func hide(except tabs: [Int]) {
+        for tab in shown where !tabs.contains(tab) {
+            guard let page = pageContainers[tab], page.window === card || page.window === window
+            else { continue }
+            page.isHidden = true
         }
-        let mask = layer.mask as? CAShapeLayer ?? CAShapeLayer()
-        mask.fillRule = .evenOdd
-        let path = CGMutablePath()
-        path.addRect(layer.bounds)
-        // The bottom is where y is least, unless the view counts down from its top.
-        let flipped = compositor.isFlipped
-        for frame in frames.map({ compositor.convert($0, from: card) }) {
-            let y = flipped ? frame.maxY : frame.minY
-            let inward: CGFloat = flipped ? -1 : 1
-            for (x, sideways) in [(frame.minX, CGFloat(1)), (frame.maxX, -1)] {
-                // From the corner, along the bottom, round the arc, and back down the side.
-                path.move(to: CGPoint(x: x, y: y))
-                path.addLine(to: CGPoint(x: x + sideways * paneRadius, y: y))
-                path.addArc(
-                    tangent1End: CGPoint(x: x, y: y),
-                    tangent2End: CGPoint(x: x, y: y + inward * paneRadius), radius: paneRadius)
-                path.addLine(to: CGPoint(x: x, y: y + inward * paneRadius))
-                path.closeSubpath()
-            }
-        }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        mask.frame = layer.bounds
-        mask.path = path
-        layer.mask = mask
-        CATransaction.commit()
+        shown = tabs
     }
 
-    private func ours(_ view: NSView) -> Bool {
-        view === outline || bars.contains { $0 === view }
+    /// Moves the containers in its window into `other`'s, hidden, its window closing.
+    func handOver(to other: PagePlacer) {
+        guard let holder = other.window?.contentView?.superview else { return }
+        for page in pageContainers.values
+        where page.window != nil && (page.window === window || page.window === card) {
+            page.isHidden = true
+            holder.addSubview(page)
+        }
+        shown = []
     }
 
     func close() {
-        if let card { cutCorners(of: [], in: card) }
-        bars.forEach { $0.removeFromSuperview() }
+        toolbar.removeFromSuperview()
         outline.removeFromSuperview()
     }
 }
@@ -259,22 +356,77 @@ struct PaneBar: View {
     }
 }
 
+/// What the app sends of a window's pages: where its card is, in the window's points from its top
+/// left corner, if it shows, and where each page shows in it.
+private struct Panes: Decodable {
+    var card: [Double]?
+    var panes: [Pane]
+}
+
+/// Shows the pages of the window `id` as `panes` (JSON) lays them out, and returns the card's
+/// content view, once the card shows.
 @_cdecl("arbalete_ui_panes")
-public func placePanes(
-    _ id: UInt32, _ card: UnsafeMutableRawPointer?, _ panes: UnsafePointer<CChar>
-) {
+public func placePanes(_ id: UInt32, _ panes: UnsafePointer<CChar>) -> UnsafeMutableRawPointer? {
     MainActor.assumeIsolated {
         let data = Data(String(cString: panes).utf8)
-        let all = (try? JSONDecoder().decode([Pane].self, from: data)) ?? []
-        // The card's view, which its window keeps alive.
-        let card = card.map { Unmanaged<NSView>.fromOpaque($0).takeUnretainedValue() }
-        // The empty page a drag over the split opens, tab -1, has no bar.
-        let empty = all.first { $0.tab == -1 }
-        let panes = all.filter { $0.tab != -1 }
-        nativeWindows[id]?.paneBars.place(panes, in: card)
-        let split = panes.filter { !$0.toolbar }
-        nativeWindows[id]?.pageDrop.emptyPane = empty
-        nativeWindows[id]?.pageDrop.panes = split
-        if let model = nativeWindows[id]?.model, model.panes != split { model.panes = split }
+        guard let sent = try? JSONDecoder().decode(Panes.self, from: data),
+            let native = nativeWindows[id]
+        else { return nil }
+        let card = sent.card.flatMap {
+            $0.count == 4 ? NSRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil
+        }
+        // The empty page a drag over the split opens, tab -1, has no page.
+        let empty = sent.panes.first { $0.tab == -1 }
+        let content = native.pages.place(sent.panes.filter { $0.tab != -1 }, card: card)
+        let split = sent.panes.filter { $0.tab != -1 && !$0.toolbar && !$0.alone }
+        native.pageDrop.emptyPane = empty
+        native.pageDrop.panes = split
+        if native.model.panes != split { native.model.panes = split }
+        return content.map { Unmanaged.passUnretained($0).toOpaque() }
+    }
+}
+
+/// The view a tab's page is drawn in, in the window `id`, hidden until it shows: CEF makes the
+/// page's browser in it.
+@_cdecl("arbalete_ui_page_view")
+public func pageView(_ id: UInt32, _ tab: Int64) -> UnsafeMutableRawPointer? {
+    MainActor.assumeIsolated {
+        guard let container = nativeWindows[id]?.pages.container(for: Int(tab)) else {
+            return nil
+        }
+        return Unmanaged.passUnretained(container.host).toOpaque()
+    }
+}
+
+/// Takes away the container holding `view`, CEF's view of a page closing: the view goes with it,
+/// which destroys the page's browser.
+@_cdecl("arbalete_ui_page_closed")
+public func pageClosed(_ view: UnsafeMutableRawPointer?) {
+    MainActor.assumeIsolated {
+        guard let view else { return }
+        let closing = Unmanaged<AnyObject>.fromOpaque(view).takeUnretainedValue()
+        guard let (tab, container) = pageContainers.first(where: { $0.value.holds(closing) })
+        else { return }
+        pageContainers.removeValue(forKey: tab)
+        container.removeFromSuperview()
+    }
+}
+
+/// Moves the pages' containers out of the window `from`, which closes, into the window `to`,
+/// hidden.
+@_cdecl("arbalete_ui_hand_pages_over")
+public func handPagesOver(_ from: UInt32, _ to: UInt32) {
+    MainActor.assumeIsolated {
+        guard let from = nativeWindows[from], let to = nativeWindows[to] else { return }
+        from.pages.handOver(to: to.pages)
+    }
+}
+
+/// Gives a tab's page's window the keyboard, the page taking it.
+@_cdecl("arbalete_ui_focus_page")
+public func focusPage(_ tab: Int64) {
+    MainActor.assumeIsolated {
+        guard let page = pageContainers[Int(tab)], !page.isHidden else { return }
+        page.window?.makeKey()
     }
 }
