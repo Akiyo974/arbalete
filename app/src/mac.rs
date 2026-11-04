@@ -1304,10 +1304,10 @@ pub fn copy(url: &str) {
     pasteboard.setString_forType(&NSString::from_str(url), unsafe { NSPasteboardTypeString });
 }
 
-/// Rounds the corners of the card's window, which draws the page, and outlines it. `view` is
-/// its content view, whose layer holds what the window's compositor draws.
-pub fn round_card(view: *mut c_void) {
-    round(view, CARD_RADIUS);
+/// Rounds the corners of the card's window, which draws the page, and outlines it, or squares
+/// them. `view` is its content view, whose layer holds what the window's compositor draws.
+pub fn round_card(view: *mut c_void, rounded: bool) {
+    round(view, if rounded { CARD_RADIUS } else { 0.0 });
     corners(view, false);
     for page in pages(view) {
         round(page, 0.0);
@@ -1438,6 +1438,15 @@ pub fn uncover_page(view: *mut c_void) {
             subview.removeFromSuperview();
         }
     }
+}
+
+/// Whether the window `handle` is, or is in, shows in full screen.
+pub fn full_screen(handle: *mut c_void) -> bool {
+    ns_window(handle).is_some_and(|window| {
+        window
+            .styleMask()
+            .contains(objc2_app_kit::NSWindowStyleMask::FullScreen)
+    })
 }
 
 /// Makes a window invisible and lets clicks through it, while a sheet it holds, like Chromium's

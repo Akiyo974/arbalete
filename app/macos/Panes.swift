@@ -29,6 +29,8 @@ struct Pane: Decodable, Equatable {
     var toolbar: Bool
     /// A page shown alone, rather than in a split.
     var alone: Bool
+    /// Square, the card filling the room: a page alone in full screen, like Arc's.
+    var square: Bool
     /// The card's top left corner, from the window's.
     var cardX: Double
     var cardY: Double
@@ -302,6 +304,7 @@ final class PagePlacer {
                 ? [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner,
                     .layerMaxXMaxYCorner]
                 : [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+            page.layer?.cornerRadius = pane.square ? 0 : paneRadius
             page.isHidden = false
         }
         hide(except: pages.map(\.tab))
@@ -312,6 +315,7 @@ final class PagePlacer {
                 toolbar.isFlipped
                 ? [.layerMinXMinYCorner, .layerMaxXMinYCorner]
                 : [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+            toolbar.layer?.cornerRadius = pane.square ? 0 : paneRadius
             toolbar.frame = placed(pane.x, pane.y, pane.width, pane.bar)
             raise(toolbar)
         } else {

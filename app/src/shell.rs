@@ -637,17 +637,19 @@ impl SidebarMode {
     /// Where the card and the revealed sidebar stand in this mode, in a window of `size`. While
     /// the sidebar is docked, the revealed one's place is the docked one's, which it docks into.
     fn layout(self, size: &Size) -> Layout {
+        // Like Arc's, a page alone in full screen fills the room, without margins.
+        let margin = if square_card() { 0 } else { CARD_MARGIN };
         let left = match self {
             // Like Arc's, the docked sidebar's own margin parts its content from the page.
             SidebarMode::Shown => docked_width(),
             SidebarMode::Floating => sidebar_width(),
-            SidebarMode::Hidden | SidebarMode::Revealed => CARD_MARGIN,
+            SidebarMode::Hidden | SidebarMode::Revealed => margin,
         };
         let card = Rect {
             x: left,
-            y: CARD_MARGIN,
-            width: size.width - left - CARD_MARGIN,
-            height: size.height - 2 * CARD_MARGIN,
+            y: margin,
+            width: size.width - left - margin,
+            height: size.height - 2 * margin,
         };
         let reveal = match self {
             SidebarMode::Shown => Rect {
@@ -681,6 +683,19 @@ impl SidebarMode {
             0
         }
     }
+}
+
+/// Whether the card is square, without margins: a page alone in full screen, like Arc's.
+fn square_card() -> bool {
+    #[cfg(target_os = "macos")]
+    return win().shown.get().is_some()
+        && win().split.borrow().0.is_empty()
+        && win()
+            .window
+            .with_borrow(|window| window.as_ref().map(|w| w.window_handle()))
+            .is_some_and(crate::mac::full_screen);
+    #[cfg(not(target_os = "macos"))]
+    false
 }
 
 /// The docked sidebar's width: wider for the library, the window's for its Spaces.
@@ -5170,6 +5185,8 @@ fn show_content(tab: NodeId, place: &Panel) {
     win().shown.set(Some(tab));
     wake_page(tab);
     sync_inspectors();
+    // Square in full screen, now that a page shows alone.
+    place_card();
     if let Some(panel) = card_panel() {
         panel.layout();
     }
@@ -5407,7 +5424,7 @@ fn send_panes() {
                     "focused": focused == Some(tab),
                     "color": TOP_COLORS.with_borrow(|colors| colors.get(&tab).cloned()),
                     "developer": developer,
-                    "toolbar": false, "alone": false,
+                    "toolbar": false, "alone": false, "square": false,
                     "cardX": card.x, "cardY": card.y,
                 })
             })
@@ -5421,7 +5438,7 @@ fn send_panes() {
                 "x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height,
                 "bar": 0, "url": "", "back": false, "forward": false, "loading": false,
                 "focused": true, "color": null, "developer": false, "toolbar": false,
-                "alone": true, "cardX": card.x, "cardY": card.y,
+                "alone": true, "square": square_card(), "cardX": card.x, "cardY": card.y,
             }));
         }
         // The empty page standing where a dragged tab would open, known by its tab, -1, which
@@ -5438,7 +5455,7 @@ fn send_panes() {
                 "width": frame.width, "height": frame.height,
                 "bar": 0, "url": "", "back": false, "forward": false, "loading": false,
                 "focused": false, "color": null, "developer": false, "toolbar": false,
-                "alone": false, "cardX": card.x, "cardY": card.y,
+                "alone": false, "square": false, "cardX": card.x, "cardY": card.y,
             }));
         }
         // A page alone has the bar above it in toolbar or developer mode, a view of the card like
@@ -5451,7 +5468,7 @@ fn send_panes() {
                 "back": false, "forward": false, "loading": false, "focused": true,
                 // Like Arc's, the bar takes the color at the page's top.
                 "color": focused.and_then(|tab| TOP_COLORS.with_borrow(|colors| colors.get(&tab).cloned())),
-                "developer": false, "toolbar": true, "alone": false,
+                "developer": false, "toolbar": true, "alone": false, "square": square_card(),
                 "cardX": card.x, "cardY": card.y,
             }));
         }
@@ -5471,7 +5488,7 @@ fn send_panes() {
             // A split's room between its pages shows the window; a page alone has the card's
             // corners.
             if tabs.is_empty() {
-                crate::mac::round_card(view);
+                crate::mac::round_card(view, !square_card());
             } else {
                 crate::mac::round_split(view);
             }
