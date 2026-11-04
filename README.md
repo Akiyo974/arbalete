@@ -48,9 +48,13 @@ ARBALETE_SIGN_IDENTITY = "Arbalete Dev"
 
 ## Logo
 
-The app icon is [assets/icon.svg](assets/icon.svg), with a single-color version in
-[assets/icon-mono.svg](assets/icon-mono.svg). The macOS icon, `app/resources/mac/arbalete.icns`, is rendered
-from it (16 to 1024 px) with `iconutil`. The proposals it was chosen from are in [assets/logo-history](assets/logo-history).
+The logo is a bolt seen from behind: three vanes, one color each. The app icon is
+[assets/icon.svg](assets/icon.svg), with [icon-light.svg](assets/icon-light.svg) for light backgrounds and
+[icon-mono.svg](assets/icon-mono.svg) for single-color use. The mark alone is [mark.svg](assets/mark.svg) on dark
+backgrounds and [mark-light.svg](assets/mark-light.svg) on light ones; [favicon.svg](assets/favicon.svg) follows the
+system theme, and [loader.svg](assets/loader.svg) animates it. The macOS icon, `app/resources/mac/arbalete.icns`, is
+rendered from icon.svg (16 to 1024 px) with `iconutil`. The proposals it was chosen from are in
+[assets/logo-history](assets/logo-history).
 
 ## Contributing
 

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="6 4.5 88 88" role="img" aria-label="Arbalete">
+  <title>Arbalete</title>
+  <!-- Mark for light backgrounds: three vanes with a dark outline. -->
+  <g transform="translate(0 6)">
+    <path d="M50 50 L50 19" stroke="#14122A" stroke-width="29" stroke-linecap="round"/><path d="M50 50 L76.8 65.5" stroke="#14122A" stroke-width="29" stroke-linecap="round"/><path d="M50 50 L23.2 65.5" stroke="#14122A" stroke-width="29" stroke-linecap="round"/>
+    <path d="M50 50 L50 19" stroke="#F04848" stroke-width="17" stroke-linecap="round"/><path d="M50 50 L76.8 65.5" stroke="#8E45F0" stroke-width="17" stroke-linecap="round"/><path d="M50 50 L23.2 65.5" stroke="#2F6BF0" stroke-width="17" stroke-linecap="round"/>
+    <circle cx="50" cy="50" r="5.5" fill="#14122A"/>
+  </g>
+</svg>

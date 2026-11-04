@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Arbalete">
+  <title>Arbalete</title>
+  <defs>
+    <linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="100" y1="924" x2="924" y2="100"><stop offset="0" stop-color="#2A2342"/><stop offset="1" stop-color="#14111F"/></linearGradient>
+    <linearGradient id="m" gradientUnits="userSpaceOnUse" x1="182" y1="720" x2="866" y2="420"><stop offset="0.00" stop-color="#FF4F4F"/><stop offset="0.33" stop-color="#FF5FA2"/><stop offset="0.67" stop-color="#A35BFF"/><stop offset="1.00" stop-color="#3D7BFF"/></linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <!-- The mark, outlined in white like a sticker: a wide, open A whose crossbar is the bolt, rising 9°. -->
+  <g transform="translate(512 500) scale(0.6) translate(-481 -545)">
+    <path d="M236 840 L418 320 Q512 110 606 320 L788 840" fill="none" stroke="#FFFFFF" stroke-width="230" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M40 622 L910 622" transform="rotate(-9 512 622)" fill="none" stroke="#FFFFFF" stroke-width="184" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M902 548 L976 622 L902 696 Z" transform="rotate(-9 512 622)" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="144" stroke-linejoin="round"/>
+    <path d="M156 622 L86 548 L-14 548 L28 622 L-14 696 L86 696 Z" transform="rotate(-9 512 622)" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="120" stroke-linejoin="round"/>
+    <path d="M236 840 L418 320 Q512 110 606 320 L788 840" fill="none" stroke="url(#m)" stroke-width="150" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M40 622 L910 622" transform="rotate(-9 512 622)" fill="none" stroke="url(#m)" stroke-width="104" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M902 548 L976 622 L902 696 Z" transform="rotate(-9 512 622)" fill="url(#m)" stroke="url(#m)" stroke-width="64" stroke-linejoin="round"/>
+    <path d="M156 622 L86 548 L-14 548 L28 622 L-14 696 L86 696 Z" transform="rotate(-9 512 622)" fill="url(#m)" stroke="url(#m)" stroke-width="40" stroke-linejoin="round"/>
+  </g>
+</svg>

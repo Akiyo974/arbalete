@@ -50,3 +50,15 @@ two tops were tried, pointed and [round](5-open-a/4-open-round-top.svg).
 
 Kept: the **pointed top**. That is the final [icon.svg](../icon.svg), with [icon-mono.svg](../icon-mono.svg) for
 single-color use.
+
+## 6. Vanes
+
+The open A was dropped for a new idea: a bolt seen from behind, three vanes, one color per Space. Explored on the
+website's design canvas: five fresh directions, four ways to draw the vanes, a target behind them, and a white
+outline. The previous final icon is kept as [5-final-icon.svg](5-open-a/5-final-icon.svg) and
+[5-final-icon-mono.svg](5-open-a/5-final-icon-mono.svg).
+
+Kept: **C1, straight vanes with a white outline** on a night square. Curved vanes (C4) live on as the loader.
+Files: [icon.svg](../icon.svg), [icon-light.svg](../icon-light.svg), [icon-mono.svg](../icon-mono.svg),
+[mark.svg](../mark.svg), [mark-light.svg](../mark-light.svg), [favicon.svg](../favicon.svg),
+[loader.svg](../loader.svg).

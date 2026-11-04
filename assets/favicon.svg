@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="4 1 92 92">
+  <!-- Favicon: thick vanes with an ink outline on light, white on dark (follows the system theme). -->
+  <style>.o{stroke:#14122A}.a{stroke:#F04848}.b{stroke:#8E45F0}.c{stroke:#2F6BF0}@media (prefers-color-scheme: dark){.o{stroke:#FFFFFF}.a{stroke:#FF5A5A}.b{stroke:#A35BFF}.c{stroke:#3D7BFF}}</style>
+  <g transform="translate(0 6)">
+    <path d="M50 50 L50 19" class="o" stroke-width="36" stroke-linecap="round"/><path d="M50 50 L76.8 65.5" class="o" stroke-width="36" stroke-linecap="round"/><path d="M50 50 L23.2 65.5" class="o" stroke-width="36" stroke-linecap="round"/>
+    <path d="M50 50 L50 19" class="a" stroke-width="22" stroke-linecap="round"/><path d="M50 50 L76.8 65.5" class="b" stroke-width="22" stroke-linecap="round"/><path d="M50 50 L23.2 65.5" class="c" stroke-width="22" stroke-linecap="round"/>
+  </g>
+</svg>
