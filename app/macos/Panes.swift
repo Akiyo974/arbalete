@@ -52,7 +52,7 @@ private final class Outline: NSView {
 }
 
 /// The view CEF draws a page in: it adds its own view in it, which it keeps the size of.
-private final class PageHost: NSView {
+final class PageHost: NSView {
     override func didAddSubview(_ subview: NSView) {
         super.didAddSubview(subview)
         subview.frame = bounds
@@ -208,10 +208,10 @@ private final class ToolsWindow: NSWindow, NSWindowDelegate {
 /// The tabs' pages' containers, by tab, wherever they show: a page shows in one window at a time.
 @MainActor var pageContainers: [Int: PageContainer] = [:]
 
-/// Lets the pages drawn in our containers take the clicks: before taking one, a page asks its
-/// window's content view what is under the pointer, and drops the click unless it is the page,
-/// which a container puts beside the content view rather than in it. A page the window finds
-/// under the pointer takes the click.
+/// Lets the pages drawn in our views take the clicks: before taking one, a page asks its window's
+/// content view what is under the pointer, and drops the click unless it is the page, which our
+/// views put beside the content view rather than in it. A page the window finds under the pointer
+/// takes the click, a tab's, its developer tools' or Peek's.
 @MainActor private let letPagesTakeClicks: Void = {
     guard let page = NSClassFromString("RenderWidgetHostViewCocoa") else { return }
     let selector = NSSelectorFromString("shouldIgnoreMouseEvent:")
@@ -221,7 +221,7 @@ private final class ToolsWindow: NSWindow, NSWindowDelegate {
     let shouldIgnore: @convention(block) (NSView, NSEvent) -> Bool = { view, event in
         if view.window === event.window, let frame = view.window?.contentView?.superview,
             frame.hitTest(event.locationInWindow) === view,
-            view.enclosingContainer != nil
+            view.enclosing(PageHost.self) != nil
         {
             return false
         }
@@ -231,11 +231,11 @@ private final class ToolsWindow: NSWindow, NSWindowDelegate {
 }()
 
 extension NSView {
-    /// The page's container this view is in, if any.
-    fileprivate var enclosingContainer: PageContainer? {
+    /// The view of type `type` this view is in, if any.
+    fileprivate func enclosing<View: NSView>(_ type: View.Type) -> View? {
         var view = superview
         while let current = view {
-            if let container = current as? PageContainer { return container }
+            if let found = current as? View { return found }
             view = current.superview
         }
         return nil
@@ -310,7 +310,7 @@ final class PagePlacer {
             guard [3, 4].contains(event.buttonNumber), let window = self?.window,
                 event.window === window,
                 let container = window.contentView?.superview?.hitTest(event.locationInWindow)?
-                    .enclosingContainer,
+                    .enclosing(PageContainer.self),
                 let tab = pageContainers.first(where: { $0.value === container })?.key
             else { return event }
             model.run("select/\(tab)")

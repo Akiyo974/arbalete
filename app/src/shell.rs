@@ -183,6 +183,8 @@ thread_local! {
     static SNAPSHOTS: RefCell<HashMap<NodeId, String>> = RefCell::default();
     /// The link Peek shows over the window, if it shows one.
     static PEEK: RefCell<Option<Peek>> = RefCell::default();
+    /// Peek's page closing, and the window it showed in.
+    static PEEK_CLOSING: Cell<Option<(i32, u32)>> = const { Cell::new(None) };
     /// The color at the top of each tab's page, as #rrggbb, which tints its bar in a split.
     static TOP_COLORS: RefCell<HashMap<NodeId, String>> = RefCell::default();
     /// The tabs whose unloaded page opens again, covered by its picture once it is made.
@@ -5343,8 +5345,7 @@ fn send_panes() {
 /// Peek, like Arc's: a link shown over the window in a card, which its controls close or keep in
 /// a tab or a split.
 struct Peek {
-    controller: OverlayController,
-    view: BrowserView,
+    browser: Browser,
 }
 
 /// Peek's card in a window of `size`, like Arc's: 80% of its width, centered, 12 points from its
@@ -5366,24 +5367,46 @@ fn peek(url: &str) {
         return;
     };
     let frame = peek_frame(&window.size());
-    // Its scrim and controls first: the card's window goes above them.
+    // Its card first, which the page is drawn in, with its scrim and controls.
     #[cfg(target_os = "macos")]
-    crate::native::peek(win().id, Some(frame.clone()));
+    crate::native::peek(win().id, Some(frame));
+    #[cfg(target_os = "macos")]
+    let info = WindowInfo {
+        parent_view: match crate::native::peek_view(win().id) {
+            Some(view) => view,
+            None => return,
+        },
+        // Any size: the card gives the page its own.
+        bounds: Rect {
+            x: 0,
+            y: 0,
+            width: 800,
+            height: 600,
+        },
+        runtime_style: RuntimeStyle::ALLOY,
+        ..Default::default()
+    };
+    #[cfg(not(target_os = "macos"))]
+    let info = WindowInfo {
+        runtime_style: RuntimeStyle::ALLOY,
+        ..Default::default()
+    };
     let profile = displayed_profile();
     let mut context = profile_context(profile);
-    let view = browser_view(
-        ContentClient::new(profile, true),
-        url,
-        no_width,
+    let Some(browser) = browser_host_create_browser_sync(
+        Some(&info),
+        Some(&mut ContentClient::new(profile, true)),
+        Some(&CefString::from(url)),
+        Some(&BrowserSettings::default()),
+        None,
         context.as_mut(),
-    );
-    let controller = window
-        .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
-        .expect("peek");
-    controller.set_bounds(Some(&frame));
-    controller.set_visible(1);
-    view.request_focus();
-    PEEK.set(Some(Peek { controller, view }));
+    ) else {
+        return;
+    };
+    if let Some(host) = browser.host() {
+        host.set_focus(1);
+    }
+    PEEK.set(Some(Peek { browser }));
 }
 
 /// Peek follows the window's size.
@@ -5394,17 +5417,12 @@ fn place_peek() {
     let Some(frame) = size.as_ref().map(peek_frame) else {
         return;
     };
-    let shown = PEEK.with_borrow(|peek| {
-        peek.as_ref()
-            .map(|peek| peek.controller.set_bounds(Some(&frame)))
-            .is_some()
-    });
     #[cfg(target_os = "macos")]
-    if shown {
+    if peek_shown() {
         crate::native::peek(win().id, Some(frame));
     }
     #[cfg(not(target_os = "macos"))]
-    let _ = shown;
+    let _ = frame;
 }
 
 /// Whether Peek shows a link.
@@ -5412,30 +5430,23 @@ pub fn peek_shown() -> bool {
     PEEK.with_borrow(Option::is_some)
 }
 
-/// Whether `browser` is Peek's page.
-fn is_peek(browser: &Browser) -> bool {
-    PEEK.with_borrow(|peek| {
-        peek.as_ref()
-            .and_then(|peek| peek.view.browser())
-            .is_some_and(|mut page| browser.is_same(Some(&mut page)) == 1)
-    })
-}
-
 /// Closes Peek, its page with it.
 fn close_peek() {
     let Some(peek) = PEEK.take() else { return };
     #[cfg(target_os = "macos")]
     crate::native::peek(win().id, None);
-    if let Some(host) = peek.view.browser().and_then(|browser| browser.host()) {
+    // Its card's view goes as it closes (BrowserLifeSpan's do_close), which CEF would otherwise
+    // close the window of.
+    PEEK_CLOSING.set(Some((peek.browser.identifier(), win().id)));
+    if let Some(host) = peek.browser.host() {
         host.close_browser(1);
     }
-    peek.controller.destroy();
 }
 
 /// Opens Peek's page in a tab of its own, or beside the selected tab in a split, and closes it.
 fn keep_peek(split: bool) {
     let url = PEEK.with_borrow(|peek| {
-        let frame = peek.as_ref()?.view.browser()?.main_frame()?;
+        let frame = peek.as_ref()?.browser.main_frame()?;
         Some(CefString::from(&frame.url()).to_string())
     });
     close_peek();
@@ -5773,6 +5784,22 @@ wrap_task! {
         fn execute(&self) {
             #[cfg(target_os = "macos")]
             crate::native::page_closed(self.view as *mut std::ffi::c_void);
+        }
+    }
+}
+
+wrap_task! {
+    struct RemovePeek {
+        window: u32,
+    }
+
+    impl Task {
+        /// Takes Peek's closing page's view out of its card, which destroys its browser.
+        fn execute(&self) {
+            #[cfg(target_os = "macos")]
+            crate::native::peek_closed(self.window);
+            #[cfg(not(target_os = "macos"))]
+            let _ = self.window;
         }
     }
 }
@@ -6905,12 +6932,6 @@ wrap_life_span_handler! {
     impl LifeSpanHandler {
         fn on_after_created(&self, browser: Option<&mut Browser>) {
             OPEN_BROWSERS.set(OPEN_BROWSERS.get() + 1);
-            #[cfg(target_os = "macos")]
-            if let Some(browser) = browser.as_deref().filter(|browser| is_peek(browser))
-                && let Some(host) = browser.host()
-            {
-                crate::mac::round_peek(host.window_handle());
-            }
             if let Some(browser) = browser {
                 STRAYS.with_borrow_mut(|strays| strays.push(browser.clone()));
             }
@@ -7954,7 +7975,14 @@ wrap_life_span_handler! {
         /// A page closing leaves its container, which CEF would otherwise close the window of.
         fn do_close(&self, browser: Option<&mut Browser>) -> i32 {
             if self.profile.is_none() {
-                return 0;
+                // Peek's page leaves its card; a Little Arbalete window's closes it.
+                let Some((id, window)) = PEEK_CLOSING.get() else { return 0 };
+                if browser.is_none_or(|browser| browser.identifier() != id) {
+                    return 0;
+                }
+                PEEK_CLOSING.set(None);
+                post_task(ThreadId::UI, Some(&mut RemovePeek::new(window)));
+                return 1;
             }
             let Some(host) = browser.and_then(|browser| browser.host()) else {
                 return 0;

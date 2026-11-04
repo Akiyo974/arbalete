@@ -5,6 +5,8 @@
 import AppKit
 import SwiftUI
 
+/// Peek's card's corners, like Arc's.
+private let peekRadius: CGFloat = 10
 /// How far Peek's controls stand from its card.
 private let controlsGap: CGFloat = 8
 private let peekControl: CGFloat = 32
@@ -13,6 +15,9 @@ private let peekControl: CGFloat = 32
 final class PeekChrome {
     private let parent: NSWindow
     private let scrim: Overlay
+    /// Its card, which its page is drawn in.
+    private let card: Overlay
+    let page = PageHost()
     private let controls: Overlay
 
     init(in parent: NSWindow, model: AppModel) {
@@ -22,6 +27,13 @@ final class PeekChrome {
         // Over the whole window, as it changes size too.
         dim.autoresizingMask = [.width, .height]
         scrim = Overlay(view: dim)
+        let rounded = NSView()
+        rounded.wantsLayer = true
+        rounded.layer?.cornerRadius = peekRadius
+        rounded.layer?.masksToBounds = true
+        page.autoresizingMask = [.width, .height]
+        rounded.addSubview(page)
+        card = Overlay(view: rounded)
         let host = NSHostingView(rootView: PeekControls(model: model))
         host.sizingOptions = []
         controls = Overlay(view: host)
@@ -32,10 +44,13 @@ final class PeekChrome {
     func place(_ card: NSRect?) {
         guard let card, let content = parent.contentView else {
             controls.place(in: parent, nil)
+            self.card.place(in: parent, nil)
             scrim.place(in: parent, nil)
             return
         }
         scrim.place(in: parent, content.bounds)
+        self.card.place(in: parent, card)
+        page.frame = self.card.view.bounds
         controls.place(
             in: parent,
             NSRect(
@@ -43,8 +58,14 @@ final class PeekChrome {
                 height: peekControl * 3 + controlsGap * 2))
     }
 
+    /// Takes its page's view away, its browser closing, which destroys it.
+    func pageClosed() {
+        page.subviews.forEach { $0.removeFromSuperview() }
+    }
+
     func close() {
         controls.close()
+        card.close()
         scrim.close()
     }
 }
@@ -105,6 +126,23 @@ public func placeCard(
         if model.card != card { model.card = card }
         if model.cardEmpty != empty { model.cardEmpty = empty }
     }
+}
+
+/// The view Peek's page is drawn in, in the window `id`: CEF makes the page's browser in it.
+@_cdecl("arbalete_ui_peek_view")
+public func peekView(_ id: UInt32) -> UnsafeMutableRawPointer? {
+    // As an address: a pointer may not leave the main actor's closure.
+    let address: UInt = MainActor.assumeIsolated {
+        guard let page = nativeWindows[id]?.peek.page else { return 0 }
+        return UInt(bitPattern: Unmanaged.passUnretained(page).toOpaque())
+    }
+    return UnsafeMutableRawPointer(bitPattern: address)
+}
+
+/// Takes Peek's closing page's view away in the window `id`.
+@_cdecl("arbalete_ui_peek_closed")
+public func peekClosed(_ id: UInt32) {
+    MainActor.assumeIsolated { nativeWindows[id]?.peek.pageClosed() }
 }
 
 @_cdecl("arbalete_ui_peek")

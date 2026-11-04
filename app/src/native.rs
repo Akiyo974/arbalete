@@ -43,6 +43,8 @@ unsafe extern "C" {
     fn arbalete_ui_tools_closed(view: *mut std::ffi::c_void);
     fn arbalete_ui_is_default_browser() -> bool;
     fn arbalete_ui_peek(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
+    fn arbalete_ui_peek_view(window: u32) -> *mut std::ffi::c_void;
+    fn arbalete_ui_peek_closed(window: u32);
     fn arbalete_ui_capture(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
     fn arbalete_ui_note(window: u32, text: *const c_char, x: f64, y: f64);
     fn arbalete_ui_copy_png(
@@ -255,6 +257,20 @@ pub fn peek(window: u32, frame: Option<cef::Rect>) {
             frame.height.into(),
         )
     };
+}
+
+/// The view Peek's page is drawn in, in the window `window`, while Peek shows: CEF makes the
+/// page's browser in it.
+pub fn peek_view(window: u32) -> Option<*mut std::ffi::c_void> {
+    // SAFETY: a plain value; the view lives until peek_closed.
+    let view = unsafe { arbalete_ui_peek_view(window) };
+    (!view.is_null()).then_some(view)
+}
+
+/// Takes Peek's page's view out of the window `window`, its browser closing, which destroys it.
+pub fn peek_closed(window: u32) {
+    // SAFETY: a plain value.
+    unsafe { arbalete_ui_peek_closed(window) };
 }
 
 /// Shows the veil a drag picks the part of the page to capture on, over the page at `frame`, in

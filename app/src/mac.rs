@@ -1311,15 +1311,6 @@ pub fn round_card(view: *mut c_void, rounded: bool) {
     corners(view, false);
 }
 
-/// Peek's card's corners, like Arc's.
-const PEEK_RADIUS: f64 = 10.0;
-
-/// Rounds Peek's page, view `view`, on all its corners.
-pub fn round_peek(view: *mut c_void) {
-    round(view, PEEK_RADIUS);
-    corners(view, false);
-}
-
 /// Squares the card of a split, view `view`, whose room between the pages shows the window: the
 /// pages' containers round their own corners.
 pub fn round_split(view: *mut c_void) {
