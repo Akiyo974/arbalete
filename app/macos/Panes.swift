@@ -41,7 +41,7 @@ private let outlineWidth: CGFloat = 2
 /// The card's, like Arc's (CARD_RADIUS in app/src/mac.rs).
 private let paneRadius: CGFloat = 6
 
-/// A bar's view: every click in it is taken at once, the card's window being key or not.
+/// A bar's view: every click in it is taken at once, its window being key or not.
 private final class BarHost: NSHostingView<PaneBar> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
@@ -208,23 +208,6 @@ private final class ToolsWindow: NSWindow, NSWindowDelegate {
 /// The tabs' pages' containers, by tab, wherever they show: a page shows in one window at a time.
 @MainActor var pageContainers: [Int: PageContainer] = [:]
 
-/// Lets a CEF window, like the card's, take the keyboard: CEF keeps it from it, the views it held
-/// taking the keyboard through the window above, but a page drawn in it needs it.
-@MainActor private func letTakeKeyboard(_ window: NSWindow) {
-    guard !window.canBecomeKey, let base = object_getClass(window) else { return }
-    let name = "Arbalete" + NSStringFromClass(base)
-    var keyable: AnyClass? = NSClassFromString(name)
-    if keyable == nil, let made = objc_allocateClassPair(base, name, 0) {
-        let canBecomeKey: @convention(block) (AnyObject) -> Bool = { _ in true }
-        class_addMethod(
-            made, #selector(getter: NSWindow.canBecomeKey),
-            imp_implementationWithBlock(canBecomeKey), "c@:")
-        objc_registerClassPair(made)
-        keyable = made
-    }
-    if let keyable { object_setClass(window, keyable) }
-}
-
 /// Lets the pages drawn in our containers take the clicks: before taking one, a page asks its
 /// window's content view what is under the pointer, and drops the click unless it is the page,
 /// which a container puts beside the content view rather than in it. A page the window finds
@@ -259,14 +242,33 @@ extension NSView {
     }
 }
 
+/// A view counting down from its top, which lets the clicks outside its subviews through to
+/// what is under it, like the window's margins, which move it.
+private final class Layer: NSView {
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let view = super.hitTest(point)
+        return view === self ? nil : view
+    }
+}
+
 /// The pages a window shows, in their containers, with the bar above a page alone and the focused
 /// page's outline, made as it needs them.
 @MainActor
 final class PagePlacer {
     private let model: AppModel
     private weak var window: NSWindow?
-    /// The card's window, which CEF makes: found by its frame, as CEF gives no handle to it.
-    private weak var card: NSWindow?
+    /// The card's window, which CEF makes and lays out: found by its frame, as CEF gives no handle
+    /// to it, and kept out of sight, the card showing in the window instead.
+    private weak var cefCard: NSWindow?
+    /// The card, in the window above its content view, which the app rounds; the pages'
+    /// containers on its stage, which the library shifts (shift in app/src/mac.rs).
+    private let card = Layer()
+    private let stage = Layer()
+    /// Over the window's content view, filling the window: the card is placed in it from the
+    /// window's top left corner, as the app counts, however the window changes size after.
+    private let layer = Layer()
     /// The bar above a page alone, in toolbar or developer mode.
     private let toolbar: BarHost
     private let outline: Outline = {
@@ -278,7 +280,7 @@ final class PagePlacer {
     }()
     /// The tabs whose pages it shows.
     private var shown: [Int] = []
-    /// The view of the card's window that holds the pages, once found, and the card's top left
+    /// The card's stage, which holds the pages, while the card shows, and the card's top left
     /// corner, in the window's points from its own.
     private(set) weak var holder: NSView?
     private(set) var cardOrigin: NSPoint = .zero
@@ -293,30 +295,63 @@ final class PagePlacer {
         toolbar.wantsLayer = true
         toolbar.layer?.cornerRadius = paneRadius
         toolbar.layer?.masksToBounds = true
-        // AppKit does not make the card's window key on a click, which Chromium then takes for a
-        // first one in a window in the background and drops: it is key before the page gets it.
-        clicks = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) {
+        card.wantsLayer = true
+        card.isHidden = true
+        layer.autoresizingMask = [.width, .height]
+        layer.addSubview(card)
+        stage.frame = card.bounds
+        stage.autoresizingMask = [.width, .height]
+        card.addSubview(stage)
+        letPagesTakeClicks
+        // Like Chrome's, the mouse's back and forward buttons move the page under the pointer.
+        mouseButtons = NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown) {
             [weak self] event in
-            if let card = self?.card, event.window === card, !card.isKeyWindow {
-                card.makeKey()
-            }
-            return event
+            guard [3, 4].contains(event.buttonNumber), let window = self?.window,
+                event.window === window,
+                let container = window.contentView?.superview?.hitTest(event.locationInWindow)?
+                    .enclosingContainer,
+                let tab = pageContainers.first(where: { $0.value === container })?.key
+            else { return event }
+            model.run("select/\(tab)")
+            model.run(event.buttonNumber == 3 ? "back" : "forward")
+            return nil
         }
     }
 
-    /// A container for a tab's page, made hidden in the window until it shows: CEF makes the
-    /// page's browser in its view.
+    /// The pages last laid out, and the card's frame.
+    private var last: (panes: [Pane], frame: NSRect?)?
+    /// Moves the page under the pointer back or forward (init).
+    private var mouseButtons: Any?
+
+    /// Puts the card in the window, above its content view: over Chromium's content view rather
+    /// than in it, whose hit test would hand the pages and bars clicks at the wrong place.
+    private func mount() -> Bool {
+        guard let content = window?.contentView, let frame = content.superview else { return false }
+        if layer.superview !== frame {
+            frame.addSubview(layer, positioned: .above, relativeTo: content)
+        }
+        // The view holding the content view, which AppKit sizes first as the window changes size.
+        if layer.frame != frame.bounds { layer.frame = frame.bounds }
+        return true
+    }
+
+    /// A container for a tab's page, made hidden on the card until it shows: CEF makes the page's
+    /// browser in its view.
     func container(for tab: Int) -> PageContainer? {
         if let container = pageContainers[tab] { return container }
-        guard let holder = window?.contentView?.superview else { return nil }
+        guard mount() else { return nil }
         let container = PageContainer(model: model)
-        holder.addSubview(container)
+        container.isHidden = true
+        stage.addSubview(container)
         pageContainers[tab] = container
+        // Laid out before it was made, as a window opens: it shows where it was laid out.
+        if shown.contains(tab), let last { _ = place(last.panes, card: last.frame) }
         return container
     }
 
-    /// The card's window, whose frame is `frame` in the window's points from its top left corner.
-    private func cardWindow(at frame: NSRect) -> NSWindow? {
+    /// CEF's card's window, found by its frame, `frame` in the window's points from its top left
+    /// corner.
+    private func cefCard(at frame: NSRect) -> NSWindow? {
         guard let window else { return nil }
         func at(_ child: NSWindow) -> Bool {
             let x = child.frame.minX - window.frame.minX
@@ -325,73 +360,50 @@ final class PagePlacer {
                 && abs(child.frame.width - frame.width) < 2
                 && abs(child.frame.height - frame.height) < 2
         }
-        if let card, card.parent === window, at(card) { return card }
-        card = window.childWindows?.first { !($0 is NSPanel) && at($0) }
-        if let card {
-            letTakeKeyboard(card)
-            letPagesTakeClicks
-            keyObserver.map(NotificationCenter.default.removeObserver)
-            keyObserver = NotificationCenter.default.addObserver(
-                forName: NSWindow.didBecomeKeyNotification, object: card, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.lowerCard() }
-            }
-        }
-        return card
+        // Found once, it stays, whose frame may lag behind as the window changes size.
+        if let cefCard, cefCard.parent === window { return cefCard }
+        cefCard = window.childWindows?.first { !($0 is NSPanel) && at($0) }
+        return cefCard
     }
 
-    /// Watches the card's window take the keyboard (lowerCard).
-    private var keyObserver: NSObjectProtocol?
-    /// Gives the card's window the keyboard as a click in a page starts (init).
-    private var clicks: Any?
-
-    /// Puts the card's window back under the panels above it, like the revealed sidebar or a drag's
-    /// room, as AppKit brings it to the front once a click in a page makes it key.
-    private func lowerCard() {
-        guard let window else { return }
-        DispatchQueue.main.async {
-            for panel in window.childWindows ?? [] where panel is NSPanel && panel.isVisible {
-                window.removeChildWindow(panel)
-                window.addChildWindow(panel, ordered: .above)
-            }
-        }
-    }
-
-    /// Lays `panes` out in the card at `frame`, or hides them all without it. Returns the card's
-    /// content view.
+    /// Lays `panes` out in the card at `frame`, or hides them all without it. Returns the card,
+    /// once CEF's card's window is found.
     func place(_ panes: [Pane], card frame: NSRect?) -> NSView? {
-        let cardWindow = frame.flatMap(cardWindow(at:))
+        // Out of sight, as the app hides, CEF tells the card is too: it keeps its layout, which
+        // nothing would place again as the window shows.
+        if frame == nil, window?.isVisible == false, !card.isHidden { return card }
+        last = (panes, frame)
+        let cefCard = frame.flatMap(cefCard(at:))
         defer { didPlace() }
-        guard let frame, let cardWindow, let content = cardWindow.contentView,
-            let container = content.superview
-        else {
+        guard let frame, let cefCard, mount() else {
             hide(except: [])
             toolbar.removeFromSuperview()
             outline.removeFromSuperview()
+            card.isHidden = true
             holder = nil
             return nil
         }
-        holder = container
+        // Laid out still, but out of sight and out of the way of the clicks.
+        cefCard.alphaValue = 0
+        cefCard.ignoresMouseEvents = true
+        card.frame = frame
+        card.isHidden = false
+        holder = stage
         cardOrigin = frame.origin
-        // Rects from the card's top left corner, in its content view's coordinates, then in the
-        // view above it that holds ours: over Chromium's content view rather than in it, whose hit
-        // test would hand the pages and bars clicks at the wrong place.
+        // From the card's top left corner, as the stage counts.
         func placed(_ x: Double, _ y: Double, _ width: Double, _ height: Double) -> NSRect {
-            let rect = NSRect(
-                x: x, y: content.isFlipped ? y : content.bounds.height - y - height, width: width,
-                height: height)
-            return container.convert(rect, from: content)
+            NSRect(x: x, y: y, width: width, height: height)
         }
         func raise(_ view: NSView) {
-            if view.superview !== container || container.subviews.last !== view {
-                container.addSubview(view, positioned: .above, relativeTo: nil)
+            if view.superview !== stage || stage.subviews.last !== view {
+                stage.addSubview(view, positioned: .above, relativeTo: nil)
             }
         }
         let pages = panes.filter { !$0.toolbar && $0.tab >= 0 }
         let toolbarPane = panes.first(where: \.toolbar)
         for pane in pages {
             guard let page = pageContainers[pane.tab] else { continue }
-            if page.superview !== container { container.addSubview(page) }
+            if page.superview !== stage { stage.addSubview(page) }
             page.frame = placed(pane.x, pane.y, pane.width, pane.height)
             page.barHeight = pane.bar
             if pane.bar > 0 {
@@ -430,14 +442,13 @@ final class PagePlacer {
         } else {
             outline.removeFromSuperview()
         }
-        return content
+        return card
     }
 
     /// Hides the pages it showed but `tabs`', which another window may show since.
     private func hide(except tabs: [Int]) {
         for tab in shown where !tabs.contains(tab) {
-            guard let page = pageContainers[tab], page.window === card || page.window === window
-            else { continue }
+            guard let page = pageContainers[tab], page.window === window else { continue }
             page.isHidden = true
         }
         shown = tabs
@@ -445,18 +456,16 @@ final class PagePlacer {
 
     /// Moves the containers in its window into `other`'s, hidden, its window closing.
     func handOver(to other: PagePlacer) {
-        guard let holder = other.window?.contentView?.superview else { return }
-        for page in pageContainers.values
-        where page.window != nil && (page.window === window || page.window === card) {
+        guard other.mount() else { return }
+        for page in pageContainers.values where page.window != nil && page.window === window {
             page.isHidden = true
-            holder.addSubview(page)
+            other.stage.addSubview(page)
         }
         shown = []
     }
 
     func close() {
-        keyObserver.map(NotificationCenter.default.removeObserver)
-        if let clicks { NSEvent.removeMonitor(clicks) }
+        if let mouseButtons { NSEvent.removeMonitor(mouseButtons) }
         toolbar.removeFromSuperview()
         outline.removeFromSuperview()
     }

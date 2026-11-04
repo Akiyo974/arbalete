@@ -1,6 +1,6 @@
 // The handles between a split's pages, which resize them, like Arc's Split View: the app places
 // them in the room between the pages (place_split_handles in app/src/shell.rs). They are views of
-// the card's window, above the pages' containers.
+// the card's stage, above the pages' containers.
 
 import AppKit
 
@@ -133,14 +133,14 @@ final class SplitHandles {
         arrange()
     }
 
-    /// Lays the handles out in the card's window, above the pages, once it is found.
+    /// Lays the handles out on the card's stage, above the pages, while the card shows.
     func arrange() {
         while views.count < frames.count {
             let view = SplitHandleView(frame: .zero)
             view.send = { [weak model] path in model?.run(path) }
             views.append(view)
         }
-        guard let holder = pages.holder, let content = holder.window?.contentView else {
+        guard let holder = pages.holder else {
             views.forEach { $0.removeFromSuperview() }
             return
         }
@@ -149,15 +149,11 @@ final class SplitHandles {
                 view.removeFromSuperview()
                 continue
             }
-            let frame = frames[index].insetBy(dx: stacked ? 0 : -reach, dy: stacked ? -reach : 0)
-                .offsetBy(dx: -pages.cardOrigin.x, dy: -pages.cardOrigin.y)
-            let rect = NSRect(
-                x: frame.minX,
-                y: content.isFlipped ? frame.minY : content.bounds.height - frame.maxY,
-                width: frame.width, height: frame.height)
             view.index = index
             view.stacked = stacked
-            view.frame = holder.convert(rect, from: content)
+            // From the card's top left corner, as its stage counts.
+            view.frame = frames[index].insetBy(dx: stacked ? 0 : -reach, dy: stacked ? -reach : 0)
+                .offsetBy(dx: -pages.cardOrigin.x, dy: -pages.cardOrigin.y)
             view.needsLayout = true
             // Raised only below a page: raising it would end a drag of it.
             let order = holder.subviews

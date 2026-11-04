@@ -1304,14 +1304,11 @@ pub fn copy(url: &str) {
     pasteboard.setString_forType(&NSString::from_str(url), unsafe { NSPasteboardTypeString });
 }
 
-/// Rounds the corners of the card's window, which draws the page, and outlines it, or squares
-/// them. `view` is its content view, whose layer holds what the window's compositor draws.
+/// Rounds the corners of the card, view `view`, which holds the pages, and outlines it, or
+/// squares them.
 pub fn round_card(view: *mut c_void, rounded: bool) {
     round(view, if rounded { CARD_RADIUS } else { 0.0 });
     corners(view, false);
-    for page in pages(view) {
-        round(page, 0.0);
-    }
 }
 
 /// Peek's card's corners, like Arc's.
@@ -1323,28 +1320,10 @@ pub fn round_peek(view: *mut c_void) {
     corners(view, false);
 }
 
-/// Rounds each page of a split, which share the card's window, view `view`: their bottom
-/// corners, under their bars; the card itself, whose room between them shows the window, is
-/// not.
+/// Squares the card of a split, view `view`, whose room between the pages shows the window: the
+/// pages' containers round their own corners.
 pub fn round_split(view: *mut c_void) {
     round(view, 0.0);
-    for page in pages(view) {
-        round(page, CARD_RADIUS);
-        corners(page, true);
-    }
-}
-
-/// The pages' views in the card's window, view `view`.
-fn pages(view: *mut c_void) -> Vec<*mut c_void> {
-    // SAFETY: CEF gives the card's NSView, which its window keeps alive.
-    let Some(card) = (unsafe { view.cast::<NSView>().as_ref() }) else {
-        return Vec::new();
-    };
-    card.subviews()
-        .iter()
-        .filter(|page| page.class().name().to_str() == Ok("WebContentsViewCocoa"))
-        .map(|page| Retained::as_ptr(&page).cast_mut().cast())
-        .collect()
 }
 
 /// Rounds a page's view's bottom corners only, or all four.
@@ -1481,8 +1460,12 @@ fn round(view: *mut c_void, radius: f64) {
     let Some(view) = (unsafe { view.cast::<NSView>().as_ref() }) else {
         return;
     };
-    // The corners show the window below.
-    if let Some(window) = view.window() {
+    // The corners of a window of its own, like Peek's, show the window below.
+    if let Some(window) = view.window()
+        && window
+            .contentView()
+            .is_some_and(|content| &*content == view)
+    {
         window.setOpaque(false);
         window.setBackgroundColor(Some(&NSColor::clearColor()));
     }
@@ -1500,20 +1483,14 @@ fn round(view: *mut c_void, radius: f64) {
     }
 }
 
-/// Moves a window's content `x` points right of where it rests, at once, clipped by the window:
-/// the window itself stays in place. `view` is any view in the window, like the card's page.
+/// Moves the card's stage, which holds the pages, `x` points right of where it rests, at once,
+/// clipped by the card, view `view`, which stays in place.
 pub fn shift(view: *mut c_void, x: f64) {
-    // SAFETY: CEF gives the window's NSView, which the window keeps alive.
+    // SAFETY: the interface gives the card, which its window keeps alive.
     let Some(view) = (unsafe { view.cast::<NSView>().as_ref() }) else {
         return;
     };
-    // The view holding the content view, which holds the pages' containers too.
-    let Some(content) = view
-        .window()
-        .and_then(|window| window.contentView())
-        // SAFETY: on the main thread, where AppKit lays its views out.
-        .map(|content| unsafe { content.superview() }.unwrap_or(content))
-    else {
+    let Some(content) = view.subviews().firstObject() else {
         return;
     };
     content.setWantsLayer(true);

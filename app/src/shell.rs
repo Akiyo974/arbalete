@@ -252,8 +252,8 @@ struct Win {
     incognito: Cell<Option<SpaceId>>,
     /// Opened from another window, it shows the Command Bar once in front, like Arc's.
     fresh: Cell<bool>,
-    /// The content view of its card's window, once the card has shown (send_panes), which a
-    /// picture of the page covers while another window shows it.
+    /// The native card holding its pages, once the card has shown (send_panes), which a picture of
+    /// the page covers while another window shows it.
     card_view: Cell<Option<*mut std::ffi::c_void>>,
     window: RefCell<Option<Window>>,
     /// Beside the card, at the window's left edge. It must not reach under the card: a web view
@@ -1974,7 +1974,7 @@ fn float_beside_empty_card() {
 
 /// Moves the card `offset` points right of where it rests beside the docked sidebar, which pages
 /// towards the library; the sidebar gets its own width back first. The compositor moves the
-/// card's window content, clipped by the window: the page keeps its size.
+/// card's stage, clipped by the card: the page keeps its size.
 fn shift_card(offset: u32) {
     if win().sidebar_mode.get() != SidebarMode::Shown {
         return;
@@ -2026,7 +2026,7 @@ fn relayout_library() {
     update_drag_regions();
 }
 
-/// The card's window's content view, once the card has shown (send_panes).
+/// The native card holding the pages, once the card has shown (send_panes).
 #[cfg(target_os = "macos")]
 fn card_window() -> Option<*mut std::ffi::c_void> {
     win().card_view.get()
