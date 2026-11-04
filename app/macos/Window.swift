@@ -183,20 +183,30 @@ struct BackdropTint: View {
     }
 }
 
-/// The sidebar, in a child window of the main one, whose own views Chromium keeps every click
-/// from: docked, it shows the backdrop through, and its transparent corner the window's buttons,
-/// which clicks there reach; floating above the page, it blurs the page under it.
+/// Takes a click at once, the window being key or not, like Arc's sidebar.
+private final class FirstClickHost<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// The sidebar's top left corner in its window, by window, which its views' frames count from
+/// (inMainWindow in Sidebar.swift).
+@MainActor var sidebarOrigins: [ObjectIdentifier: CGPoint] = [:]
+
+/// The sidebar, a view of the window over the card: docked, it shows the backdrop through, and
+/// the window's buttons above it; floating above the page, it blurs the page under it.
 @MainActor
 final class SidebarHost {
     private let window: NSWindow
     private let model: AppModel
-    private let panel = ChildPanel(view: NSView())
+    /// The view it shows in, over the card, once the window has one.
+    var parent: () -> NSView? = { nil }
+    /// Casts its shadow while it floats, which its rounded container would clip.
+    private let holder = NSView()
     private let container = NSView()
     private let effect = NSVisualEffectView()
-    /// Barely there, so that clicks on the docked sidebar's transparent parts reach it, rather
-    /// than the main window under it: below the toolbar, and the toolbar past the window's
-    /// buttons, which keep theirs.
-    private let catchers = [NSView(), NSView()]
+    /// Barely there, so that clicks on the sidebar's transparent parts stay in it, rather than
+    /// reach Chromium's views under it.
+    private let catcher = NSView()
     /// While the sidebar hides, its edge of the window shows it again on hover.
     private let edge = Tracking()
     /// While it is docked, the margin between its content and the page resizes it, like Arc's:
@@ -209,23 +219,30 @@ final class SidebarHost {
     init(window: NSWindow, model: AppModel) {
         self.window = window
         self.model = model
+        holder.wantsLayer = true
+        holder.isHidden = true
+        holder.autoresizingMask = [.height]
+        holder.layer?.shadowColor = NSColor.black.cgColor
+        holder.layer?.shadowRadius = 12
+        holder.layer?.shadowOffset = .zero
         container.wantsLayer = true
+        container.autoresizingMask = [.width, .height]
+        holder.addSubview(container)
         effect.material = .sidebar
-        effect.blendingMode = .behindWindow
+        effect.blendingMode = .withinWindow
         effect.state = .active
         effect.autoresizingMask = [.width, .height]
-        let host = NSHostingView(rootView: SidebarView(model: model))
+        let host = FirstClickHost(rootView: SidebarView(model: model))
+        // Up to the window's top, its buttons in its own row: no room kept for a title bar.
+        host.safeAreaRegions = []
         // Its frame follows the sidebar's width, which its edge sets: no size of its own.
         host.sizingOptions = []
         host.autoresizingMask = [.width, .height]
         let leave = Tracking()
         leave.autoresizingMask = [.width, .height]
         container.addSubview(leave)
-        for catcher in catchers {
-            catcher.wantsLayer = true
-            catcher.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.004).cgColor
-            container.addSubview(catcher)
-        }
+        catcher.autoresizingMask = [.width, .height]
+        container.addSubview(catcher)
         container.addSubview(effect)
         container.addSubview(host)
         leave.exited = { [weak self] in
@@ -238,7 +255,7 @@ final class SidebarHost {
         resize.send = { model.run($0) }
         resize.ended = { [weak self] in
             // Hidden by the drag, it goes once the drag ends.
-            guard let self, self.panel.alphaValue == 0 else { return }
+            guard let self, self.holder.alphaValue == 0 else { return }
             self.place(nil, floating: false, revealed: false)
         }
         // Like Arc's, read in its code: the theme's color, half seen.
@@ -246,8 +263,8 @@ final class SidebarHost {
         // Right clicks never reach the views under the pointer that want them, the rows and
         // Spaces whose menus they open, only their release does: this hands it over.
         rightClicks = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseUp]) { [weak self] event in
-            guard let self, event.window === self.panel,
-                let root = self.panel.contentView?.superview ?? self.panel.contentView,
+            guard let self, event.window === self.window,
+                let root = self.window.contentView?.superview,
                 let catcher = root.hitTest(event.locationInWindow) as? RightClick.Catcher
             else { return event }
             catcher.action()
@@ -260,22 +277,23 @@ final class SidebarHost {
         }
     }
 
-    /// Closes it, its window closing.
+    /// Takes it out of its window, which closes.
     func close() {
         if let rightClicks { NSEvent.removeMonitor(rightClicks) }
         rightClicks = nil
-        panel.close()
+        holder.removeFromSuperview()
+        sidebarOrigins[ObjectIdentifier(window)] = nil
     }
 
     /// Shows the sidebar at `frame`, from the window's top left corner, or hides it.
     func place(_ frame: NSRect?, floating: Bool, revealed: Bool) {
         // Like Arc's, a drag of its edge hides it past its least width and shows it again: while
-        // the drag goes on, it only fades, as a window out of sight would lose the drag.
-        if frame == nil, resize.dragging, panel.isVisible {
-            panel.alphaValue = 0
+        // the drag goes on, it only fades, as a view out of sight would lose the drag.
+        if frame == nil, resize.dragging, !holder.isHidden {
+            holder.alphaValue = 0
             return
         }
-        panel.alphaValue = 1
+        holder.alphaValue = 1
         self.revealed = revealed
         if let content = window.contentView {
             edge.frame = NSRect(x: 0, y: 0, width: 8, height: content.bounds.height)
@@ -289,36 +307,32 @@ final class SidebarHost {
         container.layer?.borderColor =
             (isDark(model.space?.theme)
             ? NSColor.white.withAlphaComponent(0.2) : NSColor.black.withAlphaComponent(0.1)).cgColor
-        panel.hasShadow = floating
+        holder.layer?.shadowOpacity = floating ? 0.3 : 0
         // Only once it changes: publishing it draws the sidebar again, which ends a drag in it.
         let floats = floating && frame != nil
         let floated = model.sidebarFloating
         if floated != floats { model.sidebarFloating = floats }
         let docked = frame != nil && !floating
         if model.sidebarDocked != docked { model.sidebarDocked = docked }
-        // Raised above the window's others only as it shows: raising takes it out of the window
-        // a moment, which would end a drag in it.
-        panel.place(in: window, frame, raise: !panel.isVisible)
-        // As it starts floating, above the card's window too, which CEF orders as it lays the
-        // card out: like Arc's, the sidebar passes over the page and its bar. Ordering it again
-        // while it floats would end a drag in it.
-        if floats, !floated { panel.order(.above, relativeTo: 0) }
-        if container.superview != panel.contentView {
-            panel.contentView?.addSubview(container)
+        // Over the card, added after it: like Arc's, the floating sidebar passes over the page
+        // and its bar.
+        guard let frame, let parent = parent() else {
+            holder.isHidden = true
+            return
         }
-        container.frame = panel.contentView?.bounds ?? .zero
-        container.autoresizingMask = [.width, .height]
+        if holder.superview !== parent { parent.addSubview(holder) }
+        holder.frame = frame
+        holder.isHidden = false
+        sidebarOrigins[ObjectIdentifier(window)] = frame.origin
+        container.frame = holder.bounds
         container.subviews.forEach { $0.frame = container.bounds }
         let bounds = container.bounds
         // Across the margin between the sidebar's content and the page.
         if resize.superview != container { container.addSubview(resize) }
         resize.frame = NSRect(x: bounds.width - 8, y: 0, width: 8, height: bounds.height)
         resize.isHidden = floating
-        catchers[0].frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - 40))
-        let past = windowButtonsEnd - 6
-        catchers[1].frame = NSRect(
-            x: past, y: bounds.height - 40, width: max(0, bounds.width - past), height: 40)
-        panel.invalidateShadow()
+        holder.layer?.shadowPath = CGPath(
+            roundedRect: holder.bounds, cornerWidth: 12, cornerHeight: 12, transform: nil)
     }
 }
 
@@ -434,9 +448,9 @@ final class SidebarResize: NSView {
     override func mouseDragged(with event: NSEvent) {
         // Like Arc's, the cursor stays until the drag ends, past the edge, the sidebar hidden.
         NSCursor.resizeLeftRight.set()
-        guard let parent = window?.parent else { return }
-        // In the main window's points from its left edge, like the app's.
-        send("sidebar/width/\(parent.convertPoint(fromScreen: NSEvent.mouseLocation).x)")
+        guard let window else { return }
+        // In the window's points from its left edge, like the app's.
+        send("sidebar/width/\(window.convertPoint(fromScreen: NSEvent.mouseLocation).x)")
     }
 }
 
@@ -497,7 +511,7 @@ final class LightsView: NSView {
             #selector(NSWindow.zoom(_:)),
         ]
         for (button, action) in zip(buttons, actions) {
-            button.target = window?.parent
+            button.target = window
             button.action = action
         }
     }
@@ -511,7 +525,7 @@ final class WindowDrag: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
-        guard let main = window?.parent else { return }
+        guard let main = window else { return }
         // The system moves the window, as by its titlebar: with its tiling, and its child
         // windows, like the page's, along.
         guard event.clickCount == 2 else {

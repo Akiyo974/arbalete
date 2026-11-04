@@ -1790,7 +1790,12 @@ func percentEncoded(_ value: String) -> String {
 /// left corner, as "x/y/width/height".
 @MainActor func inMainWindow(_ frame: CGRect) -> String {
     var rect = frame
-    if let from = NSApp.currentEvent?.window, let main = from.parent,
+    // In the sidebar, a view of the main window, from the sidebar's top left corner.
+    if let from = NSApp.currentEvent?.window, from.parent == nil,
+        let origin = sidebarOrigins[ObjectIdentifier(from)]
+    {
+        rect = frame.offsetBy(dx: origin.x, dy: origin.y)
+    } else if let from = NSApp.currentEvent?.window, let main = from.parent,
         let fromHeight = from.contentView?.frame.height,
         let mainHeight = main.contentView?.frame.height
     {

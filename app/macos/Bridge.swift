@@ -609,6 +609,7 @@ final class NativeWindow {
         importSurface.takesKeyboard = true
         surfaces["import"] = importSurface
         let pages = PagePlacer(in: window, model: app)
+        sidebar.parent = { [weak pages] in pages?.overlay() }
         self.pages = pages
         let handles = SplitHandles(pages: pages, model: app)
         splitHandles = handles

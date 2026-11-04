@@ -323,6 +323,10 @@ final class PagePlacer {
     /// Moves the page under the pointer back or forward (init).
     private var mouseButtons: Any?
 
+    /// The view filling the window over its content view, which holds the card, and the views
+    /// placed over it from the window's top left corner, like the sidebar.
+    func overlay() -> NSView? { mount() ? layer : nil }
+
     /// Puts the card in the window, above its content view: over Chromium's content view rather
     /// than in it, whose hit test would hand the pages and bars clicks at the wrong place.
     private func mount() -> Bool {

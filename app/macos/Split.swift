@@ -102,9 +102,9 @@ final class SplitHandleView: NSView {
     override func mouseDragged(with event: NSEvent) {
         dragging = true
         showCursor()
-        guard let parent = window?.parent, let content = parent.contentView else { return }
-        // In the main window's points from its content's top left corner, like the app's.
-        let point = parent.convertPoint(fromScreen: NSEvent.mouseLocation)
+        guard let window, let content = window.contentView else { return }
+        // In the window's points from its content's top left corner, like the app's.
+        let point = window.convertPoint(fromScreen: NSEvent.mouseLocation)
         let along = stacked ? content.frame.height - point.y : point.x
         send("pane/resize/\(index)/\(along)")
     }
