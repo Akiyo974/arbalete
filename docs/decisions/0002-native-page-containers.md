@@ -57,9 +57,11 @@ Chromium stays the engine, in Alloy style, with the extension compatibility laye
 To answer in the first step of the migration, in this order:
 
 1. **Clicks, keyboard and focus**: a click in a page is taken at once, typing reaches the focused page, and the
-   focus moves between pages, the Command Bar and the sidebar as it does now. Clicks answered on 2026-11-04: taken
-   at once, a click in a split's page selecting it. CEF keeps the card's window from taking the keyboard, which
-   the page drawn in it needs: the app lets it, and puts the panels above it back once it does.
+   focus moves between pages, the Command Bar and the sidebar as it does now. Answered on 2026-11-04: they do, once
+   the app works around what Chromium expects of the window a page is drawn in. CEF keeps the card's window from
+   taking the keyboard, and AppKit from becoming key on a click: the app makes it key as a click starts, and puts
+   the panels above it back once it is. A page only takes a click when the window's content view finds it under
+   the pointer, which a container puts beside it: a page in a container that the window finds there takes it.
 2. **The `observer_list` checks** Chromium logs: harmless or a sign of a misuse. Answered on 2026-11-04: the app
    logs the same four at start with or without the containers; they come from the CEF views path.
 3. **What relies on CEF views today** and must work again: developer tools docked in the card, Peek, extension
