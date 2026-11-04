@@ -72,15 +72,12 @@ pub enum Setting {
     WarnBeforeQuit,
     RestoreSession,
     SuspendTabs,
-    DarkPages,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     /// The UI is listening: send it the current state.
     Ready,
-    /// macOS turned dark or light: the pages are darkened or not (Setting::DarkPages).
-    AppearanceChanged,
     Back,
     Forward,
     Reload,
@@ -558,7 +555,6 @@ impl Command {
             "page/devtools/elements" => Some(Self::DevToolsPanel("elements")),
             "page/capture" => Some(Self::Capture(None)),
             "page/capture/area" => Some(Self::CaptureArea),
-            "appearance" => Some(Self::AppearanceChanged),
             "settings/ready" => Some(Self::SettingsReady),
             "settings/hide" => Some(Self::HideSettings),
             "import/close" => Some(Self::CloseImport),
@@ -737,7 +733,6 @@ impl Command {
                         "warn-before-quit" => Setting::WarnBeforeQuit,
                         "restore-session" => Setting::RestoreSession,
                         "suspend-tabs" => Setting::SuspendTabs,
-                        "dark-pages" => Setting::DarkPages,
                         _ => return None,
                     };
                     return on.parse().ok().map(|on| Self::SetSetting(setting, on));
@@ -1787,14 +1782,6 @@ mod tests {
         assert_eq!(
             Command::parse("settings/suspend-tabs/false"),
             Some(Command::SetSetting(Setting::SuspendTabs, false))
-        );
-        assert_eq!(
-            Command::parse("settings/dark-pages/false"),
-            Some(Command::SetSetting(Setting::DarkPages, false))
-        );
-        assert_eq!(
-            Command::parse("appearance"),
-            Some(Command::AppearanceChanged)
         );
         assert_eq!(
             Command::parse("developer/on/localhost%3A3000"),
