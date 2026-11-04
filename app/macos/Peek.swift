@@ -12,19 +12,19 @@ private let peekControl: CGFloat = 32
 @MainActor
 final class PeekChrome {
     private let parent: NSWindow
-    private let scrim: ChildPanel
-    private let controls: ChildPanel
+    private let scrim: Overlay
+    private let controls: Overlay
 
     init(in parent: NSWindow, model: AppModel) {
         self.parent = parent
         let dim = Scrim()
         dim.closed = { model.run("peek/close") }
-        scrim = ChildPanel(view: dim)
-        scrim.ignoresMouseEvents = false
+        // Over the whole window, as it changes size too.
+        dim.autoresizingMask = [.width, .height]
+        scrim = Overlay(view: dim)
         let host = NSHostingView(rootView: PeekControls(model: model))
         host.sizingOptions = []
-        controls = ChildPanel(view: host)
-        controls.ignoresMouseEvents = false
+        controls = Overlay(view: host)
     }
 
     /// Shows the scrim over the window and the controls beside the card at `card`, in the
@@ -35,12 +35,12 @@ final class PeekChrome {
             scrim.place(in: parent, nil)
             return
         }
-        scrim.place(in: parent, content.bounds, raise: false)
+        scrim.place(in: parent, content.bounds)
         controls.place(
             in: parent,
             NSRect(
                 x: card.maxX + controlsGap, y: card.minY, width: peekControl,
-                height: peekControl * 3 + controlsGap * 2), raise: false)
+                height: peekControl * 3 + controlsGap * 2))
     }
 
     func close() {
@@ -61,6 +61,7 @@ private final class Scrim: NSView {
 
     required init?(coder: NSCoder) { nil }
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) { closed() }
 }
 

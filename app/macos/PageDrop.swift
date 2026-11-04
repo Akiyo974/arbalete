@@ -35,9 +35,9 @@ final class PageDrop {
     private let parent: NSWindow
     private let model: AppModel
     private let view = DropView()
-    private let panel: ChildPanel
+    private let panel: Overlay
     private let edge = EdgeView()
-    private let edgePanel: ChildPanel
+    private let edgePanel: Overlay
     private var watch: AnyCancellable?
     private var timer: Timer?
     /// The sidebar, docked or floating, from the window's top left corner, if it shows.
@@ -60,10 +60,8 @@ final class PageDrop {
     init(in parent: NSWindow, model: AppModel) {
         self.parent = parent
         self.model = model
-        panel = ChildPanel(view: view)
-        panel.ignoresMouseEvents = false
-        edgePanel = ChildPanel(view: edge)
-        edgePanel.ignoresMouseEvents = false
+        panel = Overlay(view: view)
+        edgePanel = Overlay(view: edge)
         edge.registerForDraggedTypes([.string])
         edge.rested = { model.edge($0 ? true : nil) }
         view.registerForDraggedTypes([.string])
@@ -100,28 +98,15 @@ final class PageDrop {
         } else {
             page = "page/preview/none"
         }
-        var moved = false
         if page != previewedPage {
             previewedPage = page
             model.run(page)
-            moved = true
         }
         let pane = target?.index.map { "pane/preview/\($0)" } ?? "pane/preview/none"
         if pane != previewed {
             previewed = pane
             model.run(pane)
-            moved = true
         }
-        // The pages laid out again, CEF may order their window above the drop's, which would
-        // take the drag from it: the drop goes back on top.
-        if moved { DispatchQueue.main.async { [weak self] in self?.raise() } }
-    }
-
-    /// Puts the drop back above the window's other child windows, the pages' among them.
-    private func raise() {
-        guard panel.isVisible, parent.childWindows?.last !== panel else { return }
-        parent.removeChildWindow(panel)
-        parent.addChildWindow(panel, ordered: .above)
     }
     private var previewedPage = "page/preview/none"
     /// The card's frame, from the window's top left corner, before it gave a drag room.

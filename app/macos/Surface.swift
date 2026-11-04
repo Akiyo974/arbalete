@@ -96,6 +96,44 @@ final class ChildPanel: NSPanel, NSWindowDelegate {
     }
 }
 
+/// The view over each window's card and sidebar, by window, which the views standing in for
+/// its child windows show in (PagePlacer.overlay).
+@MainActor var overlays: [ObjectIdentifier: () -> NSView?] = [:]
+
+/// A view over the window's card and sidebar, where a child window above them would be, placed
+/// from the window's top left corner, as the app counts.
+@MainActor
+final class Overlay {
+    let view: NSView
+
+    init(view: NSView) {
+        self.view = view
+        view.isHidden = true
+    }
+
+    var isVisible: Bool { view.superview != nil && !view.isHidden }
+
+    /// Shows it at `frame`, in `parent`'s points from its top left corner, above the others there
+    /// unless `raise` is off; or hides it without a frame. Raising it takes it out of the window a
+    /// moment, which ends a drag in it.
+    func place(in parent: NSWindow, _ frame: NSRect?, raise: Bool = true) {
+        guard let frame, let over = overlays[ObjectIdentifier(parent)]?() else {
+            view.isHidden = true
+            return
+        }
+        if view.superview !== over || (raise && over.subviews.last !== view) {
+            over.addSubview(view, positioned: .above, relativeTo: nil)
+        }
+        view.frame = frame
+        view.isHidden = false
+    }
+
+    /// Gives it the keyboard.
+    func makeKey() { view.window?.makeFirstResponder(view) }
+
+    func close() { view.removeFromSuperview() }
+}
+
 /// A rounded surface with a blur under its content and a shadow.
 @MainActor
 final class Surface {

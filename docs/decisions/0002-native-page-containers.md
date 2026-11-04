@@ -46,6 +46,9 @@ Chromium stays the engine, in Alloy style, with the extension compatibility laye
 - A bar and its page move together, and what shows over or between pages (a split's outline, a drag's room, the
   handles) is a native view among them, with no frames to send.
 - Most child windows and their reordering go: the sidebar, panels and bars are views of the main window.
+  The panels that take the keyboard, like the Command Bar and find, stay windows of their own while the main
+  window is CEF's: CEF gives the keyboard back to its own views as the window takes it, and Chromium stops on
+  a check when a native field takes it from them (2026-11-04).
 - The pages' layout moves from Rust (`app/src/shell.rs`: the card, `lay_out_split`, the inspector's stage) to
   the interface, which grows; the C interface carries which page shows where instead of frames.
 - Linux and Windows will need their own containers, as they need their own interface already.

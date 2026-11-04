@@ -8,18 +8,17 @@ import SwiftUI
 final class CaptureChrome {
     private let parent: NSWindow
     private let veil = Veil()
-    private let veilPanel: ChildPanel
-    private let note: ChildPanel
+    private let veilPanel: Overlay
+    private let note: Overlay
     private let noteModel = NoteModel()
     private var hiding: DispatchWorkItem?
 
     init(in parent: NSWindow, model: AppModel) {
         self.parent = parent
-        veilPanel = ChildPanel(view: veil)
-        veilPanel.ignoresMouseEvents = false
+        veilPanel = Overlay(view: veil)
         let host = NSHostingView(rootView: NoteView(model: noteModel))
         host.sizingOptions = []
-        note = ChildPanel(view: host)
+        note = Overlay(view: host)
         veil.picked = { [weak self] rect in
             self?.veilPanel.place(in: parent, nil)
             guard let rect else { return }

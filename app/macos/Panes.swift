@@ -302,6 +302,7 @@ final class PagePlacer {
         stage.frame = card.bounds
         stage.autoresizingMask = [.width, .height]
         card.addSubview(stage)
+        overlays[ObjectIdentifier(window)] = { [weak self] in self?.overlay() }
         letPagesTakeClicks
         // Like Chrome's, the mouse's back and forward buttons move the page under the pointer.
         mouseButtons = NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown) {
@@ -470,6 +471,7 @@ final class PagePlacer {
 
     func close() {
         if let mouseButtons { NSEvent.removeMonitor(mouseButtons) }
+        if let window { overlays[ObjectIdentifier(window)] = nil }
         toolbar.removeFromSuperview()
         outline.removeFromSuperview()
     }
