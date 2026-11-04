@@ -269,8 +269,6 @@ struct Win {
     /// Over the developer tools, filling the body but while they are docked, when it spans the
     /// room they leave the page alone: over them, it would take their clicks. It holds the stage.
     stage_frame: RefCell<Option<Panel>>,
-    /// The stage's place in the body while the developer tools are docked.
-    room: RefCell<Option<Rect>>,
     /// The tabs' pages, one shown at a time, or a split.
     stage: RefCell<Option<Panel>>,
     /// Where the pages show, as last sent to the native interface (send_panes).
@@ -367,7 +365,6 @@ impl Win {
             card: RefCell::new(None),
             body: RefCell::new(None),
             stage_frame: RefCell::new(None),
-            room: RefCell::new(None),
             stage: RefCell::new(None),
             #[cfg(target_os = "macos")]
             panes_sent: RefCell::new(None),
@@ -2217,31 +2214,14 @@ fn origin(url: &str) -> Option<&str> {
     Some(&url[..scheme.len() + 3 + site(url).len()])
 }
 
-/// Shows Chromium's developer tools for the shown page, in a window of their own, or closes them;
-/// on an element, at a point of the page, they show it, open or not.
-fn show_dev_tools(host: &BrowserHost, at: Option<(i32, i32)>) {
-    if at.is_none() && host.has_dev_tools() == 1 {
-        return host.close_dev_tools();
-    }
-    let at = at.map(|(x, y)| Point { x, y });
-    host.show_dev_tools(
-        Some(&WindowInfo::default()),
-        None,
-        Some(&BrowserSettings::default()),
-        at.as_ref(),
-    );
-}
-
 /// A page's developer tools, like Chrome's and Arc's: Chromium's own DevTools front end in a
 /// view of the card, under the page, which it talks to through CEF's DevTools protocol. Docked,
 /// the front end fills the card and the page shows in the room it leaves, at its right, left or
 /// bottom; undocked, it moves to a window of its own.
 struct Inspector {
-    frontend: BrowserView,
-    /// Where the front end wants the page, in the card's body, while docked.
-    room: RefCell<Option<Rect>>,
+    /// Drawn in its page's container, under the page, or in a window of its own while undocked.
+    frontend: Browser,
     docked: Cell<bool>,
-    window: RefCell<Option<Window>>,
     /// The front end said it is ready; until then, what to do once it is.
     ready: Cell<bool>,
     pending: RefCell<Vec<InspectorAction>>,
@@ -2264,10 +2244,6 @@ const APP_MESSAGES: u64 = 1_000_000_000;
 const INSPECT_AT_ID: u64 = APP_MESSAGES + 1;
 const LAYOUT_ID: u64 = APP_MESSAGES + 2;
 const CAPTURE_ID: u64 = APP_MESSAGES + 3;
-
-/// How much of the front end's resizer, a few points across the page's edge, the page leaves
-/// uncovered beside docked developer tools, so that a drag finds it.
-const INSPECTOR_GRIP: i32 = 3;
 
 /// The front end's page, told it may dock.
 const INSPECTOR_URL: &str = "devtools://devtools/bundled/devtools_app.html?can_dock=true";
@@ -2297,9 +2273,8 @@ const INSPECTOR_HOST: &str = r#"(() => {
   } catch (_) {}
 })();"#;
 
-/// Opens the shown page's developer tools, docked, or closes them.
-fn toggle_inspector() {
-    let Some(tab) = win().shown.get() else { return };
+/// Opens a tab's page's developer tools, docked, or closes them.
+fn toggle_inspector(tab: NodeId) {
     if INSPECTORS.with_borrow(|inspectors| inspectors.contains_key(&tab)) {
         close_inspector(tab);
     } else {
@@ -2307,10 +2282,9 @@ fn toggle_inspector() {
     }
 }
 
-/// Shows the shown page's developer tools on `panel`, opening them if need be, then does
-/// `then`, like Chrome's developer tools buttons and Inspect.
-fn show_inspector(panel: &'static str, then: Option<InspectorAction>) {
-    let Some(tab) = win().shown.get() else { return };
+/// Shows a tab's page's developer tools on `panel`, opening them if need be, then does `then`,
+/// like Chrome's developer tools buttons and Inspect.
+fn show_inspector(tab: NodeId, panel: &'static str, then: Option<InspectorAction>) {
     match INSPECTORS.with_borrow(|inspectors| inspectors.get(&tab).cloned()) {
         Some(inspector) => {
             act_in_inspector(
@@ -2328,34 +2302,53 @@ fn show_inspector(panel: &'static str, then: Option<InspectorAction>) {
 
 /// Opens a page's developer tools, docked, on `panel` if given, doing `then` once ready.
 fn open_inspector(tab: NodeId, panel: Option<&str>, then: Option<InspectorAction>) {
-    let (Some(body), Some(host)) = (card_body(), content().and_then(|browser| browser.host()))
-    else {
+    let Some(host) = PAGES.with_borrow(|pages| pages.get(&tab)?.browser.host()) else {
         return;
     };
     let url = match panel {
         Some(panel) => format!("{INSPECTOR_URL}&panel={panel}"),
         None => INSPECTOR_URL.to_string(),
     };
-    let frontend = browser_view(InspectorClient::new(tab), &url, no_width, None);
-    let mut view = View::from(&frontend);
-    body.add_child_view(Some(&mut view));
-    body.reorder_child_view(Some(&mut view), 0);
+    #[cfg(target_os = "macos")]
+    let Some(parent) = crate::native::tools_view(tab_number(tab)) else {
+        return;
+    };
+    let info = WindowInfo {
+        #[cfg(target_os = "macos")]
+        parent_view: parent,
+        // Any size: the container gives the front end its own.
+        bounds: Rect {
+            x: 0,
+            y: 0,
+            width: 800,
+            height: 600,
+        },
+        runtime_style: RuntimeStyle::ALLOY,
+        ..Default::default()
+    };
+    let Some(frontend) = browser_host_create_browser_sync(
+        Some(&info),
+        Some(&mut InspectorClient::new(tab)),
+        Some(&CefString::from(url.as_str())),
+        Some(&BrowserSettings::default()),
+        None,
+        None,
+    ) else {
+        return;
+    };
     let observer = host.add_dev_tools_message_observer(Some(&mut InspectorObserver::new(tab)));
     INSPECTORS.with_borrow_mut(|inspectors| {
         inspectors.insert(
             tab,
             Rc::new(Inspector {
                 frontend,
-                room: RefCell::new(None),
                 docked: Cell::new(true),
-                window: RefCell::new(None),
                 ready: Cell::new(false),
                 pending: RefCell::new(then.into_iter().collect()),
                 _observer: observer,
             }),
         )
     });
-    sync_inspectors();
 }
 
 /// Does `action` in a page's developer tools, at once if their front end is ready, or once it
@@ -2386,130 +2379,29 @@ fn close_inspector(tab: NodeId) {
     let Some(inspector) = INSPECTORS.with_borrow_mut(|inspectors| inspectors.remove(&tab)) else {
         return;
     };
-    inspector.frontend.set_visible(0);
-    // Taken out of the card, it closes: asked to close, it would close its page too.
-    post_task(
-        ThreadId::UI,
-        Some(&mut RemovePage::new(inspector.frontend.clone())),
-    );
-    if let Some(window) = inspector.window.take() {
-        window.close();
+    // Its view leaves its container (InspectorLifeSpan's do_close).
+    if let Some(host) = inspector.frontend.host() {
+        host.close_browser(1);
     }
-    lay_out_bodies();
 }
 
-/// Places every window's stage again, as the room the developer tools leave changed.
-fn lay_out_bodies() {
-    in_each_window(place_stage);
-}
-
-/// Lays the stage out, the shown page in the room its docked developer tools leave it, or the
-/// whole body. The page gets its size at once: the stage takes the room's size wherever its frame
-/// is, the whole body as the body lays it out, then the room (fit_stage).
+/// Lays the stage out, the shown page or a split filling the body, and the pages' containers
+/// over it.
 fn place_stage() {
     let (Some(body), Some(frame)) = (card_body(), win().stage_frame.with_borrow(Clone::clone))
     else {
         return;
     };
-    let size = body.bounds();
-    let room = win()
-        .shown
-        .get()
-        .filter(|_| split_shown().is_none())
-        .and_then(inspected_room)
-        .map(|room| {
-            // The page leaves the front end's resizer whole on the side it touches the tools.
-            let grip = |gap: i32| if gap > 0 { INSPECTOR_GRIP } else { 0 };
-            let (left, top) = (grip(room.x), grip(room.y));
-            let right = grip(size.width - room.x - room.width);
-            let bottom = grip(size.height - room.y - room.height);
-            Rect {
-                x: room.x + left,
-                y: room.y + top,
-                width: room.width - left - right,
-                height: room.height - top - bottom,
-            }
-        });
-    frame.set_to_box_layout(Some(&BoxLayoutSettings {
-        horizontal: 1,
-        // The tools docked at its left leave the page at the body's right.
-        main_axis_alignment: if room.as_ref().is_some_and(|room| room.x > 0) {
-            AxisAlignment::END
-        } else {
-            AxisAlignment::START
-        },
-        cross_axis_alignment: if room.is_some() {
-            AxisAlignment::START
-        } else {
-            AxisAlignment::STRETCH
-        },
-        default_flex: room.is_none().into(),
-        ..Default::default()
-    }));
-    win().room.replace(room);
     body.layout();
-    fit_stage(&win());
     frame.layout();
     send_panes();
 }
 
-/// Fits a window's stage frame to the room its docked developer tools leave the page, if any.
-fn fit_stage(win: &Win) {
-    let frame = win.stage_frame.with_borrow(Clone::clone);
-    if let (Some(frame), Some(room)) = (frame, win.room.borrow().as_ref()) {
-        frame.set_bounds(Some(room));
-    }
-}
-
 /// Runs a script in a page's developer tools' front end.
 fn run_in_inspector(inspector: &Inspector, script: &str) {
-    if let Some(frame) = inspector
-        .frontend
-        .browser()
-        .and_then(|browser| browser.main_frame())
-    {
+    if let Some(frame) = inspector.frontend.main_frame() {
         frame.execute_java_script(Some(&CefString::from(script)), None, 0);
     }
-}
-
-/// Where a page whose developer tools are docked goes in the card's body.
-fn inspected_room(tab: NodeId) -> Option<Rect> {
-    let inspector = INSPECTORS.with_borrow(|inspectors| inspectors.get(&tab).cloned())?;
-    inspector
-        .docked
-        .get()
-        .then(|| inspector.room.borrow().clone())
-        .flatten()
-}
-
-/// Shows the shown page's docked developer tools in this window's card, under the page, and hides
-/// the others it holds: like a page, they show in one window at a time.
-fn sync_inspectors() {
-    let Some(body) = card_body() else { return };
-    let shown = win().shown.get().filter(|_| split_shown().is_none());
-    let inspectors: Vec<_> = INSPECTORS.with_borrow(|inspectors| {
-        inspectors
-            .iter()
-            .map(|(tab, inspector)| (*tab, inspector.clone()))
-            .collect()
-    });
-    for (tab, inspector) in inspectors {
-        if !inspector.docked.get() {
-            continue;
-        }
-        let view = &inspector.frontend;
-        if shown == Some(tab) {
-            move_page(View::from(view), &body);
-            body.reorder_child_view(Some(&mut View::from(view)), 0);
-            view.set_visible(1);
-        } else if view
-            .parent_view()
-            .is_some_and(|parent| parent.is_same(Some(&mut View::from(&body))) == 1)
-        {
-            view.set_visible(0);
-        }
-    }
-    place_stage();
 }
 
 wrap_task! {
@@ -2547,14 +2439,9 @@ fn inspector_asked(tab: NodeId, kind: &str, data: &str) {
                 width: f64,
                 height: f64,
             }
+            #[cfg(target_os = "macos")]
             if let Ok(room) = serde_json::from_str::<Room>(data) {
-                inspector.room.set(Some(Rect {
-                    x: room.x.round() as i32,
-                    y: room.y.round() as i32,
-                    width: room.width.round() as i32,
-                    height: room.height.round() as i32,
-                }));
-                lay_out_bodies();
+                crate::native::tools_room(tab_number(tab), room.x, room.y, room.width, room.height);
             }
         }
         "dock" => {
@@ -2563,20 +2450,8 @@ fn inspector_asked(tab: NodeId, kind: &str, data: &str) {
                 return;
             }
             inspector.docked.set(docked);
-            if docked {
-                // Out of its window before the window closes, which would destroy it.
-                if let Some(window) = inspector.window.take() {
-                    window.remove_child_view(Some(&mut View::from(&inspector.frontend)));
-                    if let Some(body) = card_body() {
-                        body.add_child_view(Some(&mut View::from(&inspector.frontend)));
-                    }
-                    window.close();
-                }
-                sync_inspectors();
-            } else {
-                window_create_top_level(Some(&mut InspectorWindowDelegate::new(tab)));
-                lay_out_bodies();
-            }
+            #[cfg(target_os = "macos")]
+            crate::native::tools_docked(tab_number(tab), docked);
         }
         "ready" => {
             inspector.ready.set(true);
@@ -2640,8 +2515,35 @@ wrap_life_span_handler! {
             OPEN_BROWSERS.set(OPEN_BROWSERS.get() + 1);
         }
 
+        /// The front end closing leaves its page's container, which CEF would otherwise close the
+        /// window of.
+        fn do_close(&self, browser: Option<&mut Browser>) -> i32 {
+            let Some(host) = browser.and_then(|browser| browser.host()) else {
+                return 0;
+            };
+            post_task(
+                ThreadId::UI,
+                Some(&mut RemoveTools::new(host.window_handle() as usize)),
+            );
+            1
+        }
+
         fn on_before_close(&self, _browser: Option<&mut Browser>) {
             browser_closed();
+        }
+    }
+}
+
+wrap_task! {
+    struct RemoveTools {
+        view: usize,
+    }
+
+    impl Task {
+        /// Takes a closing front end's view out of the interface, which destroys its browser.
+        fn execute(&self) {
+            #[cfg(target_os = "macos")]
+            crate::native::tools_closed(self.view as *mut std::ffi::c_void);
         }
     }
 }
@@ -2728,66 +2630,6 @@ wrap_dev_tools_message_observer! {
         }
     }
 }
-
-// A page's developer tools undocked, in a window of their own.
-wrap_window_delegate! {
-    struct InspectorWindowDelegate {
-        tab: NodeId,
-    }
-
-    impl ViewDelegate {
-        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
-            INSPECTOR_SIZE
-        }
-    }
-
-    impl PanelDelegate {}
-
-    impl WindowDelegate {
-        fn on_window_created(&self, window: Option<&mut Window>) {
-            let window = window.expect("window").clone();
-            let Some(inspector) = INSPECTORS.with_borrow(|inspectors| inspectors.get(&self.tab).cloned()) else {
-                return;
-            };
-            window.set_title(Some(&CefString::from("Developer Tools")));
-            window.set_to_fill_layout();
-            let view = &inspector.frontend;
-            if let Some(parent) = view.parent_view().and_then(|parent| parent.as_panel()) {
-                parent.remove_child_view(Some(&mut View::from(view)));
-            }
-            window.add_child_view(Some(&mut View::from(view)));
-            view.set_visible(1);
-            inspector.window.set(Some(window.clone()));
-            window.center_window(Some(&INSPECTOR_SIZE));
-            window.show();
-        }
-
-        /// Its close button closes the developer tools.
-        fn can_close(&self, _window: Option<&mut Window>) -> i32 {
-            let undocked = INSPECTORS.with_borrow(|inspectors| {
-                inspectors.get(&self.tab).is_some_and(|inspector| !inspector.docked.get())
-            });
-            if undocked {
-                post_task(ThreadId::UI, Some(&mut InspectorTask::new(self.tab, "close".into(), String::new())));
-            }
-            1
-        }
-
-        fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 1 }
-        fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 1 }
-        fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 1 }
-
-        fn window_runtime_style(&self) -> RuntimeStyle {
-            RuntimeStyle::ALLOY
-        }
-    }
-}
-
-/// An undocked developer tools window's size, as it opens.
-const INSPECTOR_SIZE: Size = Size {
-    width: 900,
-    height: 700,
-};
 
 /// Whether a page's protocol message answers one of the app's own.
 fn is_app_message(message: &str) -> bool {
@@ -5184,7 +5026,6 @@ fn show_content(tab: NodeId, place: &Panel) {
     }
     win().shown.set(Some(tab));
     wake_page(tab);
-    sync_inspectors();
     // Square in full screen, now that a page shows alone.
     place_card();
     if let Some(panel) = card_panel() {
@@ -5229,7 +5070,6 @@ fn show_split(focused: NodeId, tabs: &[NodeId], places: &[Panel], layout: SplitL
         lay_out_split();
     }
     win().shown.set(Some(focused));
-    sync_inspectors();
     shown_on_card(focused);
 }
 
@@ -5874,7 +5714,6 @@ fn hide_content() {
             }
         });
     }
-    sync_inspectors();
     send_empty_card();
 }
 
@@ -5920,22 +5759,6 @@ fn close_page(tab: NodeId) {
     }
     if let Some(host) = live.browser.host() {
         host.close_browser(1);
-    }
-}
-
-wrap_task! {
-    struct RemovePage {
-        view: BrowserView,
-    }
-
-    impl Task {
-        /// Takes a closing view, like developer tools', out of the card, which destroys its
-        /// browser.
-        fn execute(&self) {
-            if let Some(card) = self.view.parent_view().and_then(|parent| parent.as_panel()) {
-                card.remove_child_view(Some(&mut View::from(&self.view)));
-            }
-        }
     }
 }
 
@@ -6276,6 +6099,7 @@ fn run_command(command: Command) {
             }
         }
         (Command::Close(tab), _) => close_tab(tab),
+        (Command::CloseInspector(tab), _) => close_inspector(tab),
         (Command::ResizePane(index, point), _) => resize_panes(index, point),
         (Command::ResizeSidebar(x), _) => resize_sidebar(x),
         // Kept once the drag ends, not on every move, which would stutter.
@@ -6464,28 +6288,23 @@ fn run_command(command: Command) {
             }
         }
         (Command::DevTools(at), Some(browser)) => {
-            // A split's pages keep Chromium's own window for them.
-            if split_shown().is_some() {
-                if let Some(host) = browser.host() {
-                    show_dev_tools(&host, at);
-                }
-            } else {
+            if let Some(tab) = page_tab(&browser) {
                 match at {
                     Some((x, y)) => {
-                        show_inspector("elements", Some(InspectorAction::InspectAt(x, y)))
+                        show_inspector(tab, "elements", Some(InspectorAction::InspectAt(x, y)))
                     }
-                    None => toggle_inspector(),
+                    None => toggle_inspector(tab),
                 }
             }
         }
         // The bar's picker picks an element in the page, the others show their panel.
-        (Command::DevToolsPanel("elements"), Some(_)) => show_inspector(
-            "elements",
-            Some(InspectorAction::Script(
-                "DevToolsAPI.enterInspectElementMode()".into(),
-            )),
-        ),
-        (Command::DevToolsPanel(panel), Some(_)) => show_inspector(panel, None),
+        (Command::DevToolsPanel(panel), Some(browser)) => {
+            let then = (panel == "elements")
+                .then(|| InspectorAction::Script("DevToolsAPI.enterInspectElementMode()".into()));
+            if let Some(tab) = page_tab(&browser) {
+                show_inspector(tab, panel, then);
+            }
+        }
         (Command::Capture(area), Some(_)) => capture(area),
         (Command::CaptureArea, Some(_)) => show_capture_veil(),
         (Command::Stop, Some(browser)) => browser.stop_load(),
@@ -6800,17 +6619,17 @@ wrap_window_delegate! {
             win().toolbar_view.set(Some(toolbar));
             // The card shows its body, which paints an empty Space's panel.
             card.set_background_color(0x0000_0001);
-            // The stage, with the page shown or a split, over the developer tools, which leave
-            // the page the room they ask for (Inspector).
-            let id = win().id;
-            let body = panel_create(Some(&mut BodyDelegate::new(id))).expect("body");
+            // The stage, with the page shown or a split; the developer tools are in the pages'
+            // containers (Inspector).
+            let body = panel_create(None).expect("body");
             body.set_to_fill_layout();
             card.add_child_view(Some(&mut View::from(&body)));
             win().body.set(Some(body.clone()));
             let frame = panel_create(None).expect("stage frame");
+            frame.set_to_fill_layout();
             body.add_child_view(Some(&mut View::from(&frame)));
             win().stage_frame.set(Some(frame));
-            let stage = panel_create(Some(&mut StageDelegate::new(id))).expect("stage");
+            let stage = panel_create(None).expect("stage");
             stage.set_to_box_layout(Some(&BoxLayoutSettings {
                 horizontal: 1,
                 cross_axis_alignment: AxisAlignment::STRETCH,
@@ -7264,42 +7083,6 @@ wrap_panel_delegate! {
     impl ViewDelegate {
         fn preferred_size(&self, _view: Option<&mut View>) -> Size {
             Size { width: 1, height: toolbar_height() }
-        }
-    }
-
-    impl PanelDelegate {}
-}
-
-// The card's body: its layout fills the stage frame, which then goes back to its room.
-wrap_panel_delegate! {
-    struct BodyDelegate {
-        window: u32,
-    }
-
-    impl ViewDelegate {
-        fn on_layout_changed(&self, _view: Option<&mut View>, _new_bounds: Option<&Rect>) {
-            if let Some(win) = window_by_id(self.window) {
-                fit_stage(&win);
-            }
-        }
-    }
-
-    impl PanelDelegate {}
-}
-
-// The stage: the room's size while the developer tools are docked.
-wrap_panel_delegate! {
-    struct StageDelegate {
-        window: u32,
-    }
-
-    impl ViewDelegate {
-        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
-            let room = window_by_id(self.window).and_then(|win| win.room.borrow().clone());
-            room.map_or(Size { width: 1, height: 1 }, |room| Size {
-                width: room.width,
-                height: room.height,
-            })
         }
     }
 
@@ -7784,15 +7567,11 @@ wrap_context_menu_handler! {
 
         fn on_context_menu_command(&self, browser: Option<&mut Browser>, _frame: Option<&mut Frame>, params: Option<&mut ContextMenuParams>, command_id: i32, _event_flags: EventFlags) -> i32 {
             let Some(params) = params else { return 0 };
-            // The shown page's own developer tools, docked; another page of a split keeps
-            // Chromium's window of them.
+            // The page's own developer tools, docked in it, a split's other pages' too.
             if command_id == INSPECT {
-                let at = (params.xcoord(), params.ycoord());
-                let host = browser.as_ref().and_then(|browser| browser.host());
-                if is_shown(browser) {
-                    post(Command::DevTools(Some(at)));
-                } else if let Some(host) = host {
-                    show_dev_tools(&host, Some(at));
+                let at = InspectorAction::InspectAt(params.xcoord(), params.ycoord());
+                if let Some(tab) = browser.and_then(|browser| page_tab(browser)) {
+                    show_inspector(tab, "elements", Some(at));
                 }
                 return 1;
             }

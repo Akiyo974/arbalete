@@ -37,6 +37,10 @@ unsafe extern "C" {
     fn arbalete_ui_page_closed(view: *mut std::ffi::c_void);
     fn arbalete_ui_hand_pages_over(from: u32, to: u32);
     fn arbalete_ui_focus_page(tab: i64);
+    fn arbalete_ui_tools_view(tab: i64) -> *mut std::ffi::c_void;
+    fn arbalete_ui_tools_room(tab: i64, x: f64, y: f64, width: f64, height: f64);
+    fn arbalete_ui_tools_docked(tab: i64, docked: bool);
+    fn arbalete_ui_tools_closed(view: *mut std::ffi::c_void);
     fn arbalete_ui_is_default_browser() -> bool;
     fn arbalete_ui_peek(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
     fn arbalete_ui_capture(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
@@ -202,6 +206,32 @@ pub fn page_closed(view: *mut std::ffi::c_void) {
 pub fn hand_pages_over(from: u32, to: u32) {
     // SAFETY: plain values.
     unsafe { arbalete_ui_hand_pages_over(from, to) };
+}
+
+/// The view a tab's page's developer tools are drawn in, docked under the page, which CEF makes
+/// their browser in.
+pub fn tools_view(tab: i64) -> Option<*mut std::ffi::c_void> {
+    // SAFETY: a plain value; the view lives until tools_closed.
+    let view = unsafe { arbalete_ui_tools_view(tab) };
+    (!view.is_null()).then_some(view)
+}
+
+/// Where a tab's page's docked developer tools leave the page, from their top left corner.
+pub fn tools_room(tab: i64, x: f64, y: f64, width: f64, height: f64) {
+    // SAFETY: plain values.
+    unsafe { arbalete_ui_tools_room(tab, x, y, width, height) };
+}
+
+/// Docks a tab's page's developer tools under the page, or shows them in a window of their own.
+pub fn tools_docked(tab: i64, docked: bool) {
+    // SAFETY: plain values.
+    unsafe { arbalete_ui_tools_docked(tab, docked) };
+}
+
+/// Takes developer tools away, their browser, whose view is `view`, closing.
+pub fn tools_closed(view: *mut std::ffi::c_void) {
+    // SAFETY: CEF's view of a browser closing, which the call only compares.
+    unsafe { arbalete_ui_tools_closed(view) };
 }
 
 /// Gives a tab's page's window the keyboard, if it shows.

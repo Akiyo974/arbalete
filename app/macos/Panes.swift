@@ -86,21 +86,122 @@ final class PageContainer: NSView {
 
     override var isFlipped: Bool { true }
 
-    /// Whether CEF's view of its page is `view`.
-    func holds(_ view: AnyObject) -> Bool {
-        host.subviews.contains { $0 === view }
+    /// The view CEF draws the page's developer tools in, while open: under the page, which
+    /// shows in the room they leave it, like Chrome's docked tools; or in a window of their own.
+    fileprivate var tools: PageHost?
+    /// Where the developer tools leave the page, from their top left corner, as they ask.
+    fileprivate var room: NSRect? {
+        didSet { if room != oldValue { arrange() } }
+    }
+    /// The window the developer tools show in while undocked.
+    fileprivate var toolsWindow: NSWindow?
+
+    /// Whether CEF's view of its page is at `view`: only its address, as CEF may have destroyed
+    /// it since.
+    func holds(_ view: UnsafeMutableRawPointer) -> Bool {
+        host.subviews.contains { Unmanaged.passUnretained($0).toOpaque() == view }
+    }
+
+    /// Whether CEF's view of its developer tools is at `view`, as `holds` compares.
+    fileprivate func holdsTools(_ view: UnsafeMutableRawPointer) -> Bool {
+        tools?.subviews.contains { Unmanaged.passUnretained($0).toOpaque() == view } == true
     }
 
     override func resizeSubviews(withOldSize oldSize: NSSize) {
         arrange()
     }
 
-    /// The bar on top, the page under it, as AppKit sizes the container.
-    private func arrange() {
+    /// The bar on top, the page under it, as AppKit sizes the container; with docked developer
+    /// tools, the tools under the bar and the page over them in its room.
+    fileprivate func arrange() {
         bar.isHidden = barHeight == 0
         bar.frame = NSRect(x: 0, y: 0, width: bounds.width, height: barHeight)
-        host.frame = NSRect(
+        let body = NSRect(
             x: 0, y: barHeight, width: bounds.width, height: max(0, bounds.height - barHeight))
+        guard let tools, tools.superview === self else {
+            host.frame = body
+            return
+        }
+        tools.frame = body
+        // Over the tools until they say where the page goes.
+        guard let room else {
+            host.frame = body
+            return
+        }
+        // The page leaves the tools' resizer whole on the sides it touches them, so that a drag
+        // finds it.
+        let left = room.minX > 0 ? toolsGrip : 0
+        let top = room.minY > 0 ? toolsGrip : 0
+        let right = body.width - room.maxX > 0 ? toolsGrip : 0
+        let bottom = body.height - room.maxY > 0 ? toolsGrip : 0
+        host.frame = NSRect(
+            x: room.minX + left, y: body.minY + room.minY + top,
+            width: max(0, room.width - left - right), height: max(0, room.height - top - bottom))
+    }
+
+    /// Makes the view the page's developer tools are drawn in, docked under the page.
+    fileprivate func makeTools() -> PageHost {
+        if let tools { return tools }
+        let tools = PageHost()
+        addSubview(tools, positioned: .below, relativeTo: host)
+        self.tools = tools
+        arrange()
+        return tools
+    }
+
+    /// Takes the developer tools away, their view and its window, which destroys their browser.
+    fileprivate func closeTools() {
+        tools?.removeFromSuperview()
+        tools = nil
+        room = nil
+        toolsWindow?.close()
+        toolsWindow = nil
+        arrange()
+    }
+
+    /// Docks the developer tools under the page, or shows them in a window of their own, whose
+    /// close button closes them.
+    fileprivate func dockTools(_ docked: Bool, closed: @escaping () -> Void) {
+        guard let tools else { return }
+        if docked {
+            addSubview(tools, positioned: .below, relativeTo: host)
+            toolsWindow?.close()
+            toolsWindow = nil
+            arrange()
+            return
+        }
+        let window = ToolsWindow(closed: closed)
+        tools.removeFromSuperview()
+        window.contentView = tools
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        toolsWindow = window
+        arrange()
+    }
+}
+
+/// How much of the developer tools' resizer, a few points across the page's edge, the page
+/// leaves uncovered.
+private let toolsGrip: CGFloat = 3
+
+/// The window undocked developer tools show in: closing it closes them.
+private final class ToolsWindow: NSWindow, NSWindowDelegate {
+    private let closed: () -> Void
+
+    init(closed: @escaping () -> Void) {
+        self.closed = closed
+        super.init(
+            contentRect: NSRect(x: 0, y: 0, width: 960, height: 640),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered,
+            defer: false)
+        title = "Developer Tools"
+        isReleasedWhenClosed = false
+        delegate = self
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        closed()
+        return false
     }
 }
 
@@ -493,8 +594,7 @@ public func pageView(_ id: UInt32, _ tab: Int64) -> UnsafeMutableRawPointer? {
 public func pageClosed(_ view: UnsafeMutableRawPointer?) {
     MainActor.assumeIsolated {
         guard let view else { return }
-        let closing = Unmanaged<AnyObject>.fromOpaque(view).takeUnretainedValue()
-        guard let (tab, container) = pageContainers.first(where: { $0.value.holds(closing) })
+        guard let (tab, container) = pageContainers.first(where: { $0.value.holds(view) })
         else { return }
         pageContainers.removeValue(forKey: tab)
         container.removeFromSuperview()
@@ -508,6 +608,47 @@ public func handPagesOver(_ from: UInt32, _ to: UInt32) {
     MainActor.assumeIsolated {
         guard let from = nativeWindows[from], let to = nativeWindows[to] else { return }
         from.pages.handOver(to: to.pages)
+    }
+}
+
+/// The view a tab's page's developer tools are drawn in, docked under the page: CEF makes their
+/// browser in it.
+@_cdecl("arbalete_ui_tools_view")
+public func toolsView(_ tab: Int64) -> UnsafeMutableRawPointer? {
+    // As an address: a pointer may not leave the main actor's closure.
+    let address: UInt = MainActor.assumeIsolated {
+        guard let tools = pageContainers[Int(tab)]?.makeTools() else { return 0 }
+        return UInt(bitPattern: Unmanaged.passUnretained(tools).toOpaque())
+    }
+    return UnsafeMutableRawPointer(bitPattern: address)
+}
+
+/// Where a tab's page's docked developer tools leave the page, from their top left corner, or
+/// nowhere yet without a width.
+@_cdecl("arbalete_ui_tools_room")
+public func toolsRoom(_ tab: Int64, _ x: Double, _ y: Double, _ width: Double, _ height: Double) {
+    MainActor.assumeIsolated {
+        pageContainers[Int(tab)]?.room =
+            width > 0 ? NSRect(x: x, y: y, width: width, height: height) : nil
+    }
+}
+
+/// Docks a tab's page's developer tools under the page, or shows them in a window of their own.
+@_cdecl("arbalete_ui_tools_docked")
+public func toolsDocked(_ tab: Int64, _ docked: Bool) {
+    MainActor.assumeIsolated {
+        pageContainers[Int(tab)]?.dockTools(docked) {
+            nativeWindows.values.first?.model.run("inspector/close/\(tab)")
+        }
+    }
+}
+
+/// Takes away the developer tools whose browser's view is `view`, their browser closing.
+@_cdecl("arbalete_ui_tools_closed")
+public func toolsClosed(_ view: UnsafeMutableRawPointer?) {
+    MainActor.assumeIsolated {
+        guard let view else { return }
+        pageContainers.values.first { $0.holdsTools(view) }?.closeTools()
     }
 }
 

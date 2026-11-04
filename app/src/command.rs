@@ -231,6 +231,9 @@ pub enum Command {
     Open(String),
     /// Closes a tab, `close/<tab id>`, or the selected one, `close`.
     Close(Option<NodeId>),
+    /// Closes a tab's page's developer tools, `inspector/close/<tab id>`, like their window's
+    /// close button.
+    CloseInspector(NodeId),
     /// Reopens a closed tab, by its rank from the last closed one, 0: `reopen/<rank>`, or the last
     /// closed one, `reopen`.
     Reopen(usize),
@@ -863,6 +866,9 @@ impl Command {
                 }
                 if let Some(id) = path.strip_prefix("select/") {
                     return serde_json::from_str(id).ok().map(Self::Select);
+                }
+                if let Some(id) = path.strip_prefix("inspector/close/") {
+                    return serde_json::from_str(id).ok().map(Self::CloseInspector);
                 }
                 if let Some(id) = path.strip_prefix("close/") {
                     return serde_json::from_str(id)
