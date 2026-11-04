@@ -331,6 +331,14 @@ pub enum Command {
     /// Lays the pages of the split shown, or a given one, out one above the other, or side by
     /// side again: `pane/flip`, `pane/flip/<split id>`.
     FlipPanes(Option<NodeId>),
+    /// While a tab is dragged over the page shown alone, makes room for it before or after the
+    /// page, one above the other with `stacked`, like Arc's, or gives the page its room back:
+    /// `page/preview/<before|after>/<side|stacked>`, `page/preview/none`.
+    PreviewDrop(Option<(bool, bool)>),
+    /// While a tab is dragged over the split shown, opens an empty page at `index` among its
+    /// pages, which share the room evenly with it, like Arc's, or closes it again:
+    /// `pane/preview/<index>`, `pane/preview/none`.
+    PreviewPane(Option<usize>),
     /// Takes every tab out of a split, as rows in its place: `pane/separate-all/<split id>`.
     SeparateAll(NodeId),
     /// Closes a split's tabs, which may be reopened: `pane/close-split/<split id>`.
@@ -393,7 +401,7 @@ pub enum Command {
     SetSpaceTheme(SpaceId, Theme),
     /// Replaces the URL Routing rules and default: `routing/<percent-encoded JSON>`.
     SetUrlRouting(UrlRouting),
-    /// Hides a Space's tabs in the sidebar, or shows them again: `space/toggle/<space id>`.
+    /// Hides a Space's pinned tabs in the sidebar, or shows them again: `space/toggle/<space id>`.
     ToggleSpace(SpaceId),
     /// Deletes a Space with its tabs: `space/delete/<space id>`.
     DeleteSpace(SpaceId),
@@ -907,6 +915,8 @@ impl Command {
                     "peek/split" => return Some(Self::KeepPeek { split: true }),
                     "pane/previous" => return Some(Self::SwitchPane(false)),
                     "pane/flip" => return Some(Self::FlipPanes(None)),
+                    "page/preview/none" => return Some(Self::PreviewDrop(None)),
+                    "pane/preview/none" => return Some(Self::PreviewPane(None)),
                     _ => {}
                 }
                 let id = |prefix| serde_json::from_str(path.strip_prefix(prefix)?).ok();
@@ -918,6 +928,26 @@ impl Command {
                 }
                 if path.starts_with("pane/separate-all/") {
                     return id("pane/separate-all/").map(Self::SeparateAll);
+                }
+                if let Some(index) = path.strip_prefix("pane/preview/") {
+                    return index
+                        .parse()
+                        .ok()
+                        .map(|index| Self::PreviewPane(Some(index)));
+                }
+                if let Some(args) = path.strip_prefix("page/preview/") {
+                    let (place, axis) = args.split_once('/')?;
+                    let before = match place {
+                        "before" => true,
+                        "after" => false,
+                        _ => return None,
+                    };
+                    let stacked = match axis {
+                        "side" => false,
+                        "stacked" => true,
+                        _ => return None,
+                    };
+                    return Some(Self::PreviewDrop(Some((before, stacked))));
                 }
                 if path.starts_with("pane/close-split/") {
                     return id("pane/close-split/").map(Self::CloseSplit);
@@ -1355,6 +1385,23 @@ mod tests {
         assert_eq!(Command::parse("sidebar/width/inf"), None);
         assert_eq!(Command::parse("pane/add"), Some(Command::AddPane(None)));
         assert_eq!(Command::parse("pane/flip"), Some(Command::FlipPanes(None)));
+        assert_eq!(
+            Command::parse("page/preview/before/stacked"),
+            Some(Command::PreviewDrop(Some((true, true))))
+        );
+        assert_eq!(
+            Command::parse("page/preview/none"),
+            Some(Command::PreviewDrop(None))
+        );
+        assert_eq!(Command::parse("page/preview/over/side"), None);
+        assert_eq!(
+            Command::parse("pane/preview/2"),
+            Some(Command::PreviewPane(Some(2)))
+        );
+        assert_eq!(
+            Command::parse("pane/preview/none"),
+            Some(Command::PreviewPane(None))
+        );
         assert!(matches!(
             Command::parse("pane/add/4"),
             Some(Command::AddPane(Some(_)))

@@ -411,7 +411,9 @@ private struct DestinationChoices: View {
 
     var body: some View {
         ForEach(spaces) { space in
-            let name = [space.emoji, space.title].compactMap { $0 }.joined(separator: " ")
+            // A symbol shows only in the sidebar.
+            let emoji = space.emoji.flatMap { symbolName($0) == nil ? $0 : nil }
+            let name = [emoji, space.title].compactMap { $0 }.joined(separator: " ")
             Text(space.profile.map { "\(name) (\($0))" } ?? name).tag(Destination.space(space.id))
         }
         Divider()

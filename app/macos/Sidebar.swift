@@ -431,26 +431,34 @@ struct SpaceSections: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 1) {
                     SpaceHeader(model: model, page: page, space: space)
+                    // Like Arc's, collapsing a Space folds its pinned tabs away, not today's.
                     if !page.collapsed {
                         ItemRows(
                             model: model, items: page.pinned, parent: page.roots.pinned,
                             selected: page.selected, pinned: true)
-                        // Dropped on, the divider puts the node last among the pinned tabs.
-                        DividerRow(model: model, clearable: !page.today.isEmpty)
-                            .dropDestination(for: String.self) { ids, _ in
-                                drop(ids) { model.move($0, to: page.roots.pinned, page.pinned.count) }
-                            }
+                            // Fading, not sliding, which would pass over the header.
+                            .transition(.opacity)
                     }
+                    // Dropped on, the divider puts the node last among the pinned tabs, the
+                    // line showing under the last one.
+                    DividerRow(model: model, clearable: !page.today.isEmpty, root: page.roots.pinned)
+                        .onDrop(
+                            of: [.plainText],
+                            delegate: SectionDrop(
+                                model: model, parent: page.roots.pinned, index: page.pinned.count,
+                                shown: lastShown(page.pinned).map { .after($0) }
+                                    ?? .into(page.roots.pinned)))
                     // Dropped on, New Tab puts the node first among today's tabs.
-                    NewTabRow(model: model)
-                        .dropDestination(for: String.self) { ids, _ in
-                            drop(ids) { model.move($0, to: page.roots.today, 0) }
-                        }
-                    if !page.collapsed {
-                        ItemRows(
-                            model: model, items: page.today, parent: page.roots.today,
-                            selected: page.selected)
-                    }
+                    NewTabRow(model: model, root: page.roots.today)
+                        .onDrop(
+                            of: [.plainText],
+                            delegate: SectionDrop(
+                                model: model, parent: page.roots.today, index: 0,
+                                shown: page.today.first.map { .before($0.id) }
+                                    ?? .into(page.roots.today)))
+                    ItemRows(
+                        model: model, items: page.today, parent: page.roots.today,
+                        selected: page.selected)
                     // Like Arc's, the room below the rows moves the window and, dropped on, puts
                     // what a drag carries after today's last tab.
                     WindowDragArea()
@@ -462,6 +470,9 @@ struct SpaceSections: View {
                 .frame(minHeight: _height.wrappedValue, alignment: .top)
                 // Rows moving or dropped slide to their places, as quickly as Arc's.
                 .animation(.easeInOut(duration: 0.12), value: (page.pinned + page.today).map(\.id))
+                // Folders open and close sliding, the pinned tabs fold away fading.
+                .animation(.easeInOut(duration: 0.2), value: openFolders(page.pinned + page.today))
+                .animation(.easeInOut(duration: 0.2), value: page.collapsed)
             }
             .scrollIndicators(.never)
             // Like Arc's, the tab list's empty room moves the window; a double-click there does
@@ -733,51 +744,94 @@ struct FavoriteTile: View {
     let item: Item
     let active: Bool
     private var dark: Bool { isDark(model.space?.theme) }
-    private let _hovered = State<Bool>(initialValue: false)
-    private var hovered: Bool {
+    /// The tab under the pointer, among a split's.
+    private let _hovered = State<Int?>(initialValue: nil)
+    private var hovered: Int? {
         get { _hovered.wrappedValue }
         nonmutating set { _hovered.wrappedValue = newValue }
     }
 
     var body: some View {
         let tabs = item.tabs
-        Button {
-            // A split shows whole, with its first tab focused.
-            if let first = tabs.first { model.run("select/\(first.id)") }
-        } label: {
-            // Like Arc's, a split's tile is cut in equal parts by a 2-point line, light grey like
-            // the outline once selected, a 13-point icon in the middle of each; a tab's has a 20-point icon.
-            HStack(spacing: 0) {
-                ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
-                    if index > 0 {
-                        Rectangle()
-                            .fill(active && dark ? Color(white: 0.85) : Ink.separator)
-                            .frame(width: 2)
+        Group {
+            if tabs.count > 1 && !active {
+                // Like Arc's, an unselected split's tile is its tabs' own tiles, 2 points apart,
+                // each lighting up under the pointer and showing its tab.
+                HStack(spacing: 2) {
+                    ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
+                        part(tab, shape: partShape(index, of: tabs.count))
                     }
-                    Favicon(url: tab.favicon, size: tabs.count > 1 ? 13 : 20)
-                        .frame(maxWidth: .infinity)
                 }
+            } else {
+                // A tab's tile, or a selected split's: cut in equal parts by a 2-point line,
+                // light grey like the outline in the dark.
+                Button {
+                    if let first = tabs.first { model.run("select/\(first.id)") }
+                } label: {
+                    HStack(spacing: 0) {
+                        ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
+                            if index > 0 {
+                                Rectangle()
+                                    .fill(dark ? Color(white: 0.85) : Ink.separator)
+                                    .frame(width: 2)
+                            }
+                            Favicon(url: tab.favicon, size: tabs.count > 1 ? 13 : 20)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: Measure.tile)
+                    .background(
+                        RoundedRectangle(cornerRadius: Measure.radius)
+                            .fill(
+                                active
+                                    ? (dark ? Color.white.opacity(0.53) : model.selectedInk)
+                                    : hovered != nil ? Ink.itemHovered : Ink.item)
+                            .shadow(color: active ? model.selectedShadow : .clear, radius: 1, y: 1))
+                    // Like Arc's, in the dark, the selected tile has a light grey outline.
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Measure.radius)
+                            .strokeBorder(Color(white: 0.85), lineWidth: 2)
+                            .opacity(active && dark ? 1 : 0))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onHover { hovered = $0 ? 0 : nil }
             }
+        }
+        .help(tabs.map(\.label).joined(separator: " | "))
+        .rightClick { model.run("menu/node/\(item.id)") }
+    }
+
+    /// One tab's part of an unselected split's tile.
+    private func part(_ tab: Tab, shape: UnevenRoundedRectangle) -> some View {
+        Button {
+            model.run("select/\(tab.id)")
+        } label: {
+            Favicon(url: tab.favicon, size: 13)
                 .frame(maxWidth: .infinity)
                 .frame(height: Measure.tile)
-                .background(
-                    RoundedRectangle(cornerRadius: Measure.radius)
-                        .fill(
-                            active
-                                ? (dark ? Color.white.opacity(0.53) : model.selectedInk)
-                                : hovered ? Ink.itemHovered : Ink.item)
-                        .shadow(color: active ? model.selectedShadow : .clear, radius: 1, y: 1))
-                // Like Arc's, in the dark, the selected tile has a light grey outline.
-                .overlay(
-                    RoundedRectangle(cornerRadius: Measure.radius)
-                        .strokeBorder(Color(white: 0.85), lineWidth: 2)
-                        .opacity(active && dark ? 1 : 0))
+                .background(shape.fill(hovered == tab.id ? Ink.itemHovered : Ink.item))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(tabs.map(\.label).joined(separator: " | "))
-        .onHover { hovered = $0 }
-        .rightClick { model.run("menu/node/\(item.id)") }
+        .onHover { over in
+            if over {
+                hovered = tab.id
+            } else if hovered == tab.id {
+                hovered = nil
+            }
+        }
+    }
+
+    /// The tile's rounded corners on the outer sides of its first and last parts.
+    private func partShape(_ index: Int, of count: Int) -> UnevenRoundedRectangle {
+        let radius = Measure.radius
+        let leading: CGFloat = index == 0 ? radius : 0
+        let trailing: CGFloat = index == count - 1 ? radius : 0
+        return UnevenRoundedRectangle(
+            topLeadingRadius: leading, bottomLeadingRadius: leading,
+            bottomTrailingRadius: trailing, topTrailingRadius: trailing)
     }
 }
 
@@ -858,24 +912,23 @@ struct SpaceHeader: View {
             } label: {
                 // Like Arc's: the emoji where the tabs' icons stand, and none without one.
                 HStack(spacing: 6) {
-                    if editing == "emoji" {
-                        SpaceField(model: model, space: page.space, field: "emoji", value: "")
-                            .font(.system(size: 16))
-                            .frame(width: 24)
-                    } else if let emoji = space.emoji {
+                    if hovered || space.emoji != nil {
+                        // Like Arc's, the pointer over the Space shows the chevron that folds
+                        // its pinned tabs, in the emoji's place or pushing its name aside.
                         Group {
                             if hovered {
                                 Image(systemName: "chevron.right")
                                     .rotationEffect(.degrees(page.collapsed ? 0 : 90))
-                                    .font(.system(size: 10, weight: .semibold))
-                            } else {
-                                Text(emoji).font(.system(size: 14))
+                                    .font(.system(size: 11, weight: .semibold))
+                            } else if let emoji = space.emoji {
+                                SpaceGlyph(icon: emoji, size: 14)
                             }
                         }
                         .frame(width: 24)
+                        .transition(.opacity)
                     }
                     if editing == "name" {
-                        SpaceField(model: model, space: page.space, field: "name", value: space.title)
+                        SpaceField(model: model, space: page.space, value: space.title)
                             .font(.system(size: 13, weight: .semibold))
                     } else {
                         Text(space.title)
@@ -897,6 +950,10 @@ struct SpaceHeader: View {
         // Measured on Arc's: its icon 19.5 points under the favorites, 38 over the divider.
         .frame(height: 39)
         .foregroundStyle(.secondary)
+        // Like Arc's, the whole row lights up under the pointer.
+        .background(
+            RoundedRectangle(cornerRadius: Measure.radius).fill(hovered ? Ink.item : .clear))
+        .animation(.easeInOut(duration: 0.12), value: hovered)
         .onHover { hovered = $0 }
         .rightClick { model.run("menu/space/\(page.space)") }
     }
@@ -915,12 +972,10 @@ struct SpaceEdit: Decodable, Equatable {
     var field: String
 }
 
-/// Edits a Space's name in place, or its icon: the character palette opens, and the first emoji
-/// picked or typed is the icon; an empty one removes it.
+/// Edits a Space's name in place; its icon has its own picker (EmojiPicker).
 struct SpaceField: View {
     @ObservedObject var model: AppModel
     let space: Int
-    let field: String
     let value: String
     private let _text = State<String>(initialValue: "")
     @FocusState private var focused: Bool
@@ -929,22 +984,17 @@ struct SpaceField: View {
         TextField("", text: _text.projectedValue)
             .textFieldStyle(.plain)
             .focused($focused)
+            .background(TakesKeyboard())
             .onAppear {
                 _text.wrappedValue = value
-                focused = true
-                if field == "emoji" {
-                    DispatchQueue.main.async { NSApp.orderFrontCharacterPalette(nil) }
-                }
-            }
-            .onChange(of: _text.wrappedValue) { _, now in
-                if field == "emoji", let first = now.first { done(String(first)) }
+                DispatchQueue.main.async { focused = true }
             }
             .onSubmit { done(_text.wrappedValue) }
             .onExitCommand { model.editingSpace = nil }
             .onChange(of: focused) { _, now in
                 // Clicked away: a name is kept, an icon not picked is left as it was.
                 guard !now, model.editingSpace != nil else { return }
-                if field == "name" { done(_text.wrappedValue) } else { model.editingSpace = nil }
+                done(_text.wrappedValue)
             }
     }
 
@@ -952,9 +1002,7 @@ struct SpaceField: View {
         guard model.editingSpace != nil else { return }
         model.editingSpace = nil
         let value = text.trimmingCharacters(in: .whitespaces)
-        if field == "emoji" {
-            model.run("space/emoji/\(space)/\(percentEncoded(value))")
-        } else if !value.isEmpty, value != self.value {
+        if !value.isEmpty, value != self.value {
             model.run("space/rename/\(space)/\(percentEncoded(value))")
         }
     }
@@ -964,6 +1012,8 @@ struct SpaceField: View {
 struct DividerRow: View {
     @ObservedObject var model: AppModel
     let clearable: Bool
+    /// The pinned tabs' container, whose drop line shows on the divider while they are empty.
+    var root: Int? = nil
     private let _hovered = State<Bool>(initialValue: false)
     private var hovered: Bool {
         get { _hovered.wrappedValue }
@@ -985,6 +1035,9 @@ struct DividerRow: View {
         .frame(height: 20)
         .contentShape(Rectangle())
         .onHover { hovered = $0 }
+        .overlay(alignment: .top) {
+            if let root, model.dropTarget == .into(root) { InsertionLine(tint: model.themeColor) }
+        }
         // Like Arc's, New Tab's label 23.5 points under the line.
         .padding(.bottom, -2.5)
     }
@@ -992,6 +1045,8 @@ struct DividerRow: View {
 
 struct NewTabRow: View {
     @ObservedObject var model: AppModel
+    /// Today's container, whose drop line shows under New Tab while it is empty.
+    var root: Int? = nil
     private let _hovered = State<Bool>(initialValue: false)
     private var hovered: Bool {
         get { _hovered.wrappedValue }
@@ -1018,6 +1073,11 @@ struct NewTabRow: View {
         .font(.system(size: 14))
         .foregroundStyle(Ink.secondary)
         .onHover { hovered = $0 }
+        .overlay(alignment: .bottom) {
+            if let root, model.dropTarget == .into(root) {
+                InsertionLine(tint: model.themeColor).offset(y: 4)
+            }
+        }
     }
 }
 
@@ -1057,11 +1117,71 @@ struct ItemRows: View {
             }
             .padding(.leading, CGFloat(depth) * Measure.indent)
             if case .folder(let id, _, true, let children) = item {
+                // Like Arc's, a folder opening slides its rows down from under it.
                 ItemRows(
                     model: model, items: children, parent: id, selected: selected,
                     pinned: pinned, depth: depth + 1)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+    }
+}
+
+/// A folder's icon, like Arc's: in the theme's color, its back lighter, outlined, its front
+/// leaning open once the folder is.
+struct FolderIcon: View {
+    let open: Bool
+    let tint: Color
+
+    var body: some View {
+        Canvas { context, size in
+            let (w, h) = (size.width, size.height)
+            let back = Color(nsColor: NSColor(tint).blended(withFraction: 0.5, of: .white) ?? .white)
+            let outline = Color(nsColor: NSColor(tint).blended(withFraction: 0.8, of: .white) ?? .white)
+            // The back, with its tab at the top left.
+            var rear = Path()
+            rear.addRoundedRect(
+                in: CGRect(x: 0.5, y: h * 0.12, width: w - 1, height: h * 0.8),
+                cornerSize: CGSize(width: 2, height: 2))
+            rear.addRoundedRect(
+                in: CGRect(x: 0.5, y: h * 0.04, width: w * 0.42, height: h * 0.2),
+                cornerSize: CGSize(width: 1.5, height: 1.5))
+            context.fill(rear, with: .color(back))
+            // The front, straight while closed, leaning once open.
+            var front = Path()
+            if open {
+                front.move(to: CGPoint(x: w * 0.2, y: h * 0.38))
+                front.addLine(to: CGPoint(x: w - 0.5, y: h * 0.38))
+                front.addLine(to: CGPoint(x: w * 0.8, y: h * 0.92))
+                front.addLine(to: CGPoint(x: 0.5, y: h * 0.92))
+                front.closeSubpath()
+            } else {
+                front.addRoundedRect(
+                    in: CGRect(x: 0.5, y: h * 0.3, width: w - 1, height: h * 0.62),
+                    cornerSize: CGSize(width: 2, height: 2))
+            }
+            context.fill(front, with: .color(tint))
+            context.stroke(front, with: .color(outline), lineWidth: 1)
+            context.stroke(rear, with: .color(outline), lineWidth: 1)
+        }
+        .frame(width: 16, height: 14)
+    }
+}
+
+/// The last row `items` show, inside an open folder at their end, if any.
+func lastShown(_ items: [Item]) -> Int? {
+    guard let last = items.last else { return nil }
+    if case .folder(_, _, true, let children) = last, let inner = lastShown(children) {
+        return inner
+    }
+    return last.id
+}
+
+/// The open folders among `items`, as deep as they go.
+func openFolders(_ items: [Item]) -> [Int] {
+    items.flatMap { item -> [Int] in
+        guard case .folder(let id, _, let expanded, let children) = item, expanded else { return [] }
+        return [id] + openFolders(children)
     }
 }
 
@@ -1109,8 +1229,11 @@ struct TabRow: View {
                 }
                 Spacer(minLength: 0)
                 if hovered || active {
-                    // Like Arc's: a minus for a pinned tab, which stays, an x for the others.
-                    CloseButton(symbol: pinned ? "minus" : "xmark", help: "Close \(tab.label)") {
+                    // Like Arc's: a minus for an open pinned tab, which closes it and stays,
+                    // an x for the others, which removes a closed pinned tab.
+                    CloseButton(
+                        symbol: pinned && active ? "minus" : "xmark", help: "Close \(tab.label)"
+                    ) {
                         model.run("close/\(tab.id)")
                     }
                     .opacity(hovered ? 1 : 0)
@@ -1131,7 +1254,11 @@ struct TabRow: View {
                 .shadow(color: active ? model.selectedShadow : .clear, radius: 1, y: 1))
         .padding(.vertical, (Measure.row - Measure.rowFill) / 2)
         .contentShape(Rectangle())
-        .onTapGesture { model.click(tab.id) }
+        .onTapGesture {
+            model.click(tab.id)
+            // Like Arc's, a double-click renames it, without delaying a click to select it.
+            if NSApp.currentEvent?.clickCount == 2 { model.renaming = tab.id }
+        }
         .onHover { hovered = $0 }
         .rightClick {
             // Several tabs selected at once share one menu.
@@ -1145,7 +1272,7 @@ struct TabRow: View {
     }
 }
 
-/// A click collapses or expands the folder, a double click edits its title.
+/// A click collapses or expands the folder; its menu's Rename edits its title.
 struct FolderRow: View {
     @ObservedObject var model: AppModel
     let id: Int
@@ -1159,8 +1286,7 @@ struct FolderRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: expanded ? "folder" : "folder.fill")
-                .font(.system(size: 13))
+            FolderIcon(open: expanded, tint: model.accent)
                 .frame(width: 16)
             if model.renaming == id {
                 NameField(model: model, id: id, title: title, blank: false)
@@ -1176,9 +1302,8 @@ struct FolderRow: View {
             RoundedRectangle(cornerRadius: Measure.radius).fill(hovered ? Ink.item : .clear))
         .padding(.vertical, (Measure.row - Measure.rowFill) / 2)
         .contentShape(Rectangle())
-        .gesture(
-            TapGesture(count: 2).onEnded { model.renaming = id }
-                .exclusively(before: TapGesture().onEnded { model.run("toggle/\(id)") }))
+        // Like Arc's, a click opens or closes it at once; its menu renames it.
+        .onTapGesture { model.run("toggle/\(id)") }
         .onHover { hovered = $0 }
         .rightClick { model.run("menu/node/\(id)") }
     }
@@ -1229,7 +1354,7 @@ struct NameField: View {
 }
 
 /// Makes its window the key one as it shows in it.
-private struct TakesKeyboard: NSViewRepresentable {
+struct TakesKeyboard: NSViewRepresentable {
     func makeNSView(context: Context) -> View { View() }
     func updateNSView(_ view: View, context: Context) {}
 
@@ -1328,8 +1453,9 @@ struct CloseButton: View {
 
     var body: some View {
         Button(action: action) {
+            // Like Arc's, the minus 13 points wide, wider than the x.
             Image(systemName: symbol)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: symbol == "minus" ? 16 : 11, weight: symbol == "minus" ? .medium : .semibold))
                 .foregroundStyle(Color.ink((0x000000, 0.565), (0xFFFFFF, 0.592)))
                 .frame(width: 24, height: 24)
                 .background(
@@ -1558,7 +1684,7 @@ struct SpaceIcon: View {
         } label: {
             Group {
                 if let emoji = space.emoji {
-                    Text(emoji).font(.system(size: 12)).opacity(displayed ? 1 : 0.5)
+                    SpaceGlyph(icon: emoji, size: 12).opacity(displayed ? 1 : 0.5)
                 } else {
                     // Measured on Arc's: 8 points with room, 4 without, dimmed while the
                     // window is inactive.
@@ -1578,6 +1704,17 @@ struct SpaceIcon: View {
         .help(space.title)
         .onHover { hovered = $0 }
         .rightClick { model.run("menu/space/\(space.id)") }
+        // Like Arc's, a drag resting on a Space's icon slides to that Space, to drop there.
+        .onDrop(of: [.plainText], delegate: SpaceIconDrop(model: model, space: space.id))
+        // Like Arc's, Change Space Icon… opens its picker above the Space's icon.
+        .popover(
+            isPresented: Binding(
+                get: { model.editingSpace == SpaceEdit(space: space.id, field: "emoji") },
+                set: { if !$0 { model.editingSpace = nil } }),
+            arrowEdge: .top
+        ) {
+            EmojiPicker(model: model, space: space.id)
+        }
     }
 }
 

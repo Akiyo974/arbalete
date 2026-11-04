@@ -63,7 +63,7 @@ struct Extension: Decodable, Identifiable {
 struct SpacePage: Decodable, Identifiable {
     var space: Int
     var selected: Int?
-    /// Only the Space's header and its New Tab row show.
+    /// Its pinned tabs are folded away, like Arc's.
     var collapsed: Bool
     /// The containers of the sections, to move tabs and folders into.
     var roots: Roots

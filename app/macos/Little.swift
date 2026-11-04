@@ -104,7 +104,7 @@ struct LittleBarView: View {
                     bar.app.run("little/\(bar.id)/open")
                 } label: {
                     HStack(spacing: 6) {
-                        Text(page.space.emoji ?? "")
+                        SpaceGlyph(icon: page.space.emoji ?? "", size: 13)
                             .frame(width: 26, height: 26)
                             .background(RoundedRectangle(cornerRadius: 4).fill(.black.opacity(0.15)))
                         Text("Open in \(page.space.title)")

@@ -321,6 +321,13 @@ struct Win {
     overlay_min_width: Cell<Option<i32>>,
     /// The Command Bar is open for a page to show beside the selected one, in its split.
     adding_pane: Cell<bool>,
+    /// Where a tab dragged over the page shown alone would open: before it or after, one above
+    /// the other or side by side. The page gives it the room meanwhile, like Arc's.
+    drop_preview: Cell<Option<(bool, bool)>>,
+    /// Where among the split's pages a tab dragged over it would open, and the empty page that
+    /// stands there meanwhile, like Arc's.
+    pane_preview: Cell<Option<usize>>,
+    drop_slot: RefCell<Option<Panel>>,
     /// The tabs selected last, the most recent first, which the tab switcher lists.
     recent: RefCell<Vec<NodeId>>,
     /// The tab switcher's tabs and the picked one's index, while ⌃ is held.
@@ -388,6 +395,9 @@ impl Win {
             over_url_bar: Cell::new(false),
             overlay_min_width: Cell::new(None),
             adding_pane: Cell::new(false),
+            drop_preview: Cell::new(None),
+            pane_preview: Cell::new(None),
+            drop_slot: RefCell::new(None),
             recent: RefCell::new(Vec::new()),
             switch: RefCell::new(None),
             colored: Cell::new(false),
@@ -1888,7 +1898,24 @@ fn place_card() {
     if split_shown().is_some() {
         lay_out_split();
     } else {
-        card.set_bounds(Some(&win().sidebar_mode.get().layout(&size).card));
+        let mut room = win().sidebar_mode.get().layout(&size).card;
+        // A tab dragged over the page: like Arc's, the page gives it half the room.
+        if let Some((before, stacked)) = win().drop_preview.get() {
+            if stacked {
+                let half = (room.height - SPLIT_GAP) / 2;
+                if before {
+                    room.y += half + SPLIT_GAP;
+                }
+                room.height = half;
+            } else {
+                let half = (room.width - SPLIT_GAP) / 2;
+                if before {
+                    room.x += half + SPLIT_GAP;
+                }
+                room.width = half;
+            }
+        }
+        card.set_bounds(Some(&room));
         // The page follows the card's corners at once, not at CEF's next layout.
         if let Some(panel) = card_frame() {
             panel.layout();
@@ -5079,6 +5106,7 @@ fn show_split(focused: NodeId, tabs: &[NodeId], views: &[BrowserView], layout: S
             return;
         }
         split.remove_all_child_views();
+        win().pane_preview.set(None);
         for ((&tab, view), slot) in tabs.iter().zip(views).zip(&slots) {
             take_page(tab);
             move_page(view, slot);
@@ -5197,7 +5225,20 @@ fn lay_out_split() {
             card.width
         }
     });
-    SLOT_LENGTHS.set((layout.stacked, pane_lengths(room, &layout.factors)));
+    // A tab dragged over the split: like Arc's, an empty page opens where it would go, all the
+    // pages sharing the room evenly.
+    let lengths = match win().pane_preview.get() {
+        Some(_) => {
+            let count = layout.factors.len() + 1;
+            let mut lengths = pane_lengths(room, &vec![1.0 / count as f64; count]);
+            let empty = lengths.pop().unwrap_or(1);
+            lengths.resize(MAX_SPLIT_TABS, 1);
+            lengths.push(empty);
+            lengths
+        }
+        None => pane_lengths(room, &layout.factors),
+    };
+    SLOT_LENGTHS.set((layout.stacked, lengths));
     split
         .set_to_box_layout(Some(&BoxLayoutSettings {
             horizontal: (!layout.stacked).into(),
@@ -5219,6 +5260,35 @@ fn lay_out_split() {
     }
     place_split_handles();
     send_panes();
+}
+
+/// Opens the empty page standing where a tab dragged over the split would go, at `index` among
+/// its pages, or closes it.
+fn preview_pane(index: Option<usize>) {
+    if win().pane_preview.replace(index) == index {
+        return;
+    }
+    let Some(split) = win().split_view.with_borrow(Clone::clone) else {
+        return;
+    };
+    let slot = win()
+        .drop_slot
+        .borrow_mut()
+        .get_or_insert_with(|| {
+            let slot =
+                panel_create(Some(&mut SlotDelegate::new(MAX_SPLIT_TABS))).expect("drop slot");
+            // It shows the window, the interface drawing the empty page over it.
+            slot.set_background_color(0x0000_0001);
+            slot
+        })
+        .clone();
+    split.remove_child_view(Some(&mut View::from(&slot)));
+    if let Some(index) = index {
+        let count = win().split.borrow().0.len();
+        let at = i32::try_from(index.min(count)).unwrap_or(0);
+        split.add_child_view_at(Some(&mut View::from(&slot)), at);
+    }
+    lay_out_split();
 }
 
 /// Tells the native interface where the split's pages are and how each stands, for their bars
@@ -6029,6 +6099,12 @@ fn run_command(command: Command) {
         (Command::ClosePeek, _) => close_peek(),
         (Command::KeepPeek { split }, _) => keep_peek(split),
         (Command::FlipPanes(split), _) => flip_panes(split),
+        (Command::PreviewPane(index), _) => preview_pane(index),
+        (Command::PreviewDrop(preview), _) => {
+            if win().drop_preview.replace(preview) != preview {
+                place_card();
+            }
+        }
         (Command::SeparateAll(split), _) => {
             if update_sidebar(|sidebar| sidebar.separate_all(split)).is_ok() {
                 show_selected();

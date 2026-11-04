@@ -35,6 +35,10 @@ final class AppModel: ObservableObject {
     var draggedTab = false
     /// The tabs a drag carries, several when they were selected at once.
     var draggedTabs: [Int] = []
+    /// What the drag carries, as it was when it started, which a drag switching Spaces leaves.
+    var draggedItem: Item?
+    /// A drag resting on a Space's icon, until it slides there.
+    var spaceWait: DispatchWorkItem?
     /// The tabs selected at once with ⌘ or ⇧, besides the one shown, like Arc's; none otherwise.
     @Published var marked: [Int] = []
     /// Where the card is, from the window's top left corner, which the window is shaded around and
@@ -343,7 +347,11 @@ final class AppModel: ObservableObject {
             }
             return nil
         }
+        // What a drag carries from another Space, which it switched from.
         return find(page.favorites + page.pinned + page.today)
+            ?? draggedItem.flatMap { item in
+                item.id == id ? item : item.tabs.first { $0.id == id }.map { .tab($0) }
+            }
     }
 
     /// Where a node is in the displayed Space's page: its parent and its index among the
@@ -396,15 +404,21 @@ final class AppModel: ObservableObject {
         return container == page.roots.pinned || holds(page.pinned)
     }
 
-    /// Like Arc's, a tab just pinned says, for 3 seconds, that a double-click renames it.
+    /// Like Arc's, a tab just pinned says, a moment after it lands and for 3 seconds, that a
+    /// double-click renames it.
     private func hintRename(_ tab: Int) {
         renameHintWait?.cancel()
-        renameHint = tab
-        let end = DispatchWorkItem { [weak self] in
-            if self?.renameHint == tab { self?.renameHint = nil }
+        let show = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            renameHint = tab
+            let end = DispatchWorkItem { [weak self] in
+                if self?.renameHint == tab { self?.renameHint = nil }
+            }
+            renameHintWait = end
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: end)
         }
-        renameHintWait = end
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: end)
+        renameHintWait = show
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: show)
     }
 
     /// Puts a tab beside another in a split, after it or `before` it, or a copy of it with

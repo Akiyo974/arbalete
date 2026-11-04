@@ -114,6 +114,7 @@ extension AppModel {
     /// A row starts a drag: the node it carries, and whether it is a tab, which may split.
     func startDrag(_ item: Item) -> NSItemProvider {
         dragged = item.id
+        draggedItem = item
         if case .tab = item { draggedTab = true } else { draggedTab = false }
         draggedTabs = draggedTab ? acting(on: item.id) : [item.id]
         return NSItemProvider(object: String(item.id) as NSString)
@@ -249,12 +250,13 @@ struct TailDrop: DropDelegate {
     func dropUpdated(info: DropInfo) -> DropProposal? {
         let x = info.location.x
         model.edge(x <= edgeBand ? true : x >= width - edgeBand ? false : nil)
-        model.hover(page.today.last.map { .after($0.id) })
+        // Without today's tabs, the line shows under New Tab.
+        model.hover(page.today.last.map { .after($0.id) } ?? .into(page.roots.today))
         return DropProposal(operation: .move)
     }
 
     func dropExited(info: DropInfo) {
-        if let last = page.today.last { model.leave(last.id) }
+        if let last = page.today.last { model.leave(last.id) } else { model.hover(nil) }
     }
 
     func performDrop(info: DropInfo) -> Bool {
@@ -264,6 +266,102 @@ struct TailDrop: DropDelegate {
         model.marked = []
         _ = model.endDrag()
         ids.enumerated().forEach { model.move($1, to: page.roots.today, page.today.count + $0) }
+        return true
+    }
+}
+
+/// What a drag shows, changed while it is over a place that takes it, like Arc's tile over the
+/// favorites or card over the page, and given back once it leaves.
+final class DragShape {
+    /// What each dragged item showed before it changed.
+    private var rows: [(frame: NSRect, components: [NSDraggingImageComponent])] = []
+
+    /// Shows `image`, `size` large, centered on the pointer, in `view`'s coordinates.
+    func morph(_ sender: any NSDraggingInfo, in view: NSView, size: CGSize, image: NSImage) {
+        let point = view.convert(sender.draggingLocation, from: nil)
+        let keep = rows.isEmpty
+        sender.enumerateDraggingItems(
+            options: [], for: view, classes: [NSPasteboardItem.self], searchOptions: [:]
+        ) { item, _, _ in
+            if keep { self.rows.append((item.draggingFrame, item.imageComponents ?? [])) }
+            item.setDraggingFrame(
+                NSRect(
+                    x: point.x - size.width / 2, y: point.y - size.height / 2,
+                    width: size.width, height: size.height),
+                contents: image)
+        }
+    }
+
+    /// Gives the drag back what it showed.
+    func restore(_ sender: any NSDraggingInfo, in view: NSView) {
+        guard !rows.isEmpty else { return }
+        var index = 0
+        sender.enumerateDraggingItems(
+            options: [], for: view, classes: [NSPasteboardItem.self], searchOptions: [:]
+        ) { item, _, _ in
+            guard index < self.rows.count else { return }
+            let row = self.rows[index]
+            index += 1
+            guard !row.components.isEmpty else { return }
+            item.draggingFrame = row.frame
+            item.imageComponentsProvider = { row.components }
+        }
+        rows = []
+    }
+
+    /// Forgets what the drag showed, once it dropped.
+    func forget() { rows = [] }
+}
+
+/// A Space's icon under a drag: resting there a moment slides to that Space, whose tabs then
+/// take the drop. The icon itself takes none.
+struct SpaceIconDrop: DropDelegate {
+    let model: AppModel
+    let space: Int
+
+    func dropEntered(info: DropInfo) {
+        guard model.dragged != nil else { return }
+        model.spaceWait?.cancel()
+        let go = DispatchWorkItem { [model, space] in
+            if model.dragged != nil { model.slide(to: space) }
+        }
+        model.spaceWait = go
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: go)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .forbidden) }
+
+    func dropExited(info: DropInfo) {
+        model.spaceWait?.cancel()
+        model.spaceWait = nil
+    }
+
+    func performDrop(info: DropInfo) -> Bool { false }
+}
+
+/// A section's edge taking a drop, like the divider or New Tab: what the drag carries goes at
+/// `index` in `parent`, moved, the line showing where. Not SwiftUI's drop destination, which
+/// copies, its pointer showing a "+".
+struct SectionDrop: DropDelegate {
+    let model: AppModel
+    let parent: Int
+    let index: Int
+    /// Where the line shows.
+    let shown: DropTarget?
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        model.hover(shown)
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) { model.hover(nil) }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard model.dragged != nil else { return false }
+        let ids = model.draggedTabs
+        model.marked = []
+        _ = model.endDrag()
+        ids.enumerated().forEach { model.move($1, to: parent, index + $0) }
         return true
     }
 }
@@ -429,8 +527,7 @@ struct FavoritesTarget: NSViewRepresentable {
         var tile = CGSize.zero
         var hover: (CGPoint?) -> Void = { _ in }
         var drop: (Int) -> Bool = { _ in false }
-        /// What each dragged item showed before it turned into a tile.
-        private var rows: [(frame: NSRect, components: [NSDraggingImageComponent])] = []
+        private let shape = DragShape()
 
         override var isFlipped: Bool { true }
 
@@ -458,20 +555,8 @@ struct FavoritesTarget: NSViewRepresentable {
         }
 
         override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-            rows = []
             guard takes(sender) else { return [] }
-            let point = convert(sender.draggingLocation, from: nil)
-            let image = tileImage(carried(sender))
-            sender.enumerateDraggingItems(
-                options: [], for: self, classes: [NSPasteboardItem.self], searchOptions: [:]
-            ) { item, _, _ in
-                self.rows.append((item.draggingFrame, item.imageComponents ?? []))
-                item.setDraggingFrame(
-                    NSRect(
-                        x: point.x - self.tile.width / 2, y: point.y - self.tile.height / 2,
-                        width: self.tile.width, height: self.tile.height),
-                    contents: image)
-            }
+            shape.morph(sender, in: self, size: tile, image: tileImage(carried(sender)))
             return draggingUpdated(sender)
         }
 
@@ -483,19 +568,7 @@ struct FavoritesTarget: NSViewRepresentable {
 
         override func draggingExited(_ sender: (any NSDraggingInfo)?) {
             hover(nil)
-            guard let sender, !rows.isEmpty else { return }
-            var index = 0
-            sender.enumerateDraggingItems(
-                options: [], for: self, classes: [NSPasteboardItem.self], searchOptions: [:]
-            ) { item, _, _ in
-                guard index < self.rows.count else { return }
-                let row = self.rows[index]
-                index += 1
-                guard !row.components.isEmpty else { return }
-                item.draggingFrame = row.frame
-                item.imageComponentsProvider = { row.components }
-            }
-            rows = []
+            if let sender { shape.restore(sender, in: self) }
         }
 
         override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool {
@@ -503,7 +576,7 @@ struct FavoritesTarget: NSViewRepresentable {
         }
 
         override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-            rows = []
+            shape.forget()
             guard let id = carried(sender) else { return false }
             return drop(id)
         }

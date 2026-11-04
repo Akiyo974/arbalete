@@ -436,7 +436,7 @@ struct SpaceColumn: View {
         let ink: Color = colored ? .black.opacity(0.4) : Ink.primary
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 9) {
-                if let emoji = space.emoji { Text(emoji).font(.system(size: 16)) }
+                if let emoji = space.emoji { SpaceGlyph(icon: emoji, size: 16) }
                 Text(space.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                 Spacer()
                 IconButton(symbol: "paintbrush.pointed.fill", label: "Edit Theme Color", size: 24) {

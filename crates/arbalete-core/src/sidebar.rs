@@ -179,7 +179,7 @@ pub struct Space {
     pub today: NodeId,
     /// The tab shown when the Space is displayed.
     pub selected: Option<NodeId>,
-    /// The sidebar hides the Space's pinned and "Today" tabs.
+    /// The sidebar hides the Space's pinned tabs, like Arc's; "Today" tabs stay.
     #[serde(default)]
     pub collapsed: bool,
 }
@@ -808,7 +808,7 @@ impl Sidebar {
         Ok(())
     }
 
-    /// Hides the Space's tabs in the sidebar, or shows them again.
+    /// Hides the Space's pinned tabs in the sidebar, or shows them again.
     pub fn toggle_space(&mut self, id: SpaceId) -> Result<(), Error> {
         let space = self.space_mut(id)?;
         space.collapsed = !space.collapsed;
@@ -1337,11 +1337,11 @@ impl Sidebar {
             space.selected = None;
         }
         let today = space.today;
+        // Like Arc's, it keeps its title until its page shows again.
         if let Some(tab) = self.tab_mut(tab)
             && let Some(saved_url) = &tab.saved_url
         {
             tab.url = saved_url.clone();
-            tab.title = saved_url.clone();
         }
         let today = &self.nodes[&today].children;
         Ok(opener.or_else(|| today.iter().rev().copied().find(|&id| self.is_tab(id))))
@@ -2399,7 +2399,7 @@ mod tests {
     }
 
     #[test]
-    fn closing_a_pinned_tab_keeps_it_and_takes_it_back_to_its_saved_url() {
+    fn closing_a_pinned_tab_keeps_it_and_its_title_and_takes_it_back_to_its_saved_url() {
         let mut sidebar = Sidebar::default();
         let home = home(&sidebar);
         let today = sidebar.open_tab(home.id, "today").unwrap();
@@ -2413,7 +2413,10 @@ mod tests {
         assert_eq!(sidebar.spaces()[0].selected, None);
         assert_eq!(children(&sidebar, home.pinned), [pinned]);
         let tab = sidebar.tab_mut(pinned).unwrap();
-        assert_eq!((tab.url.as_str(), tab.title.as_str()), ("saved", "saved"));
+        assert_eq!(
+            (tab.url.as_str(), tab.title.as_str()),
+            ("saved", "Elsewhere")
+        );
     }
 
     #[test]
