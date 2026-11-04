@@ -141,6 +141,12 @@ final class PagePlacer {
     }()
     /// The tabs whose pages it shows.
     private var shown: [Int] = []
+    /// The view of the card's window that holds the pages, once found, and the card's top left
+    /// corner, in the window's points from its own.
+    private(set) weak var holder: NSView?
+    private(set) var cardOrigin: NSPoint = .zero
+    /// Called once the pages are placed, for what goes above them, like a split's handles.
+    var didPlace: () -> Void = {}
 
     init(in window: NSWindow, model: AppModel) {
         self.window = window
@@ -175,22 +181,49 @@ final class PagePlacer {
         }
         if let card, card.parent === window, at(card) { return card }
         card = window.childWindows?.first { !($0 is NSPanel) && at($0) }
-        if let card { letTakeKeyboard(card) }
+        if let card {
+            letTakeKeyboard(card)
+            keyObserver.map(NotificationCenter.default.removeObserver)
+            keyObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didBecomeKeyNotification, object: card, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.lowerCard() }
+            }
+        }
         return card
+    }
+
+    /// Watches the card's window take the keyboard (lowerCard).
+    private var keyObserver: NSObjectProtocol?
+
+    /// Puts the card's window back under the panels above it, like the revealed sidebar or a drag's
+    /// room, as AppKit brings it to the front once a click in a page makes it key.
+    private func lowerCard() {
+        guard let window else { return }
+        DispatchQueue.main.async {
+            for panel in window.childWindows ?? [] where panel is NSPanel && panel.isVisible {
+                window.removeChildWindow(panel)
+                window.addChildWindow(panel, ordered: .above)
+            }
+        }
     }
 
     /// Lays `panes` out in the card at `frame`, or hides them all without it. Returns the card's
     /// content view.
     func place(_ panes: [Pane], card frame: NSRect?) -> NSView? {
         let cardWindow = frame.flatMap(cardWindow(at:))
-        guard let cardWindow, let content = cardWindow.contentView,
+        defer { didPlace() }
+        guard let frame, let cardWindow, let content = cardWindow.contentView,
             let container = content.superview
         else {
             hide(except: [])
             toolbar.removeFromSuperview()
             outline.removeFromSuperview()
+            holder = nil
             return nil
         }
+        holder = container
+        cardOrigin = frame.origin
         // Rects from the card's top left corner, in its content view's coordinates, then in the
         // view above it that holds ours: over Chromium's content view rather than in it, whose hit
         // test would hand the pages and bars clicks at the wrong place.
@@ -271,6 +304,7 @@ final class PagePlacer {
     }
 
     func close() {
+        keyObserver.map(NotificationCenter.default.removeObserver)
         toolbar.removeFromSuperview()
         outline.removeFromSuperview()
     }
@@ -367,11 +401,12 @@ private struct Panes: Decodable {
 /// content view, once the card shows.
 @_cdecl("arbalete_ui_panes")
 public func placePanes(_ id: UInt32, _ panes: UnsafePointer<CChar>) -> UnsafeMutableRawPointer? {
-    MainActor.assumeIsolated {
+    // As an address: a pointer may not leave the main actor's closure.
+    let address: UInt = MainActor.assumeIsolated {
         let data = Data(String(cString: panes).utf8)
         guard let sent = try? JSONDecoder().decode(Panes.self, from: data),
             let native = nativeWindows[id]
-        else { return nil }
+        else { return 0 }
         let card = sent.card.flatMap {
             $0.count == 4 ? NSRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil
         }
@@ -382,20 +417,23 @@ public func placePanes(_ id: UInt32, _ panes: UnsafePointer<CChar>) -> UnsafeMut
         native.pageDrop.emptyPane = empty
         native.pageDrop.panes = split
         if native.model.panes != split { native.model.panes = split }
-        return content.map { Unmanaged.passUnretained($0).toOpaque() }
+        return content.map { UInt(bitPattern: Unmanaged.passUnretained($0).toOpaque()) } ?? 0
     }
+    return UnsafeMutableRawPointer(bitPattern: address)
 }
 
 /// The view a tab's page is drawn in, in the window `id`, hidden until it shows: CEF makes the
 /// page's browser in it.
 @_cdecl("arbalete_ui_page_view")
 public func pageView(_ id: UInt32, _ tab: Int64) -> UnsafeMutableRawPointer? {
-    MainActor.assumeIsolated {
+    // As an address: a pointer may not leave the main actor's closure.
+    let address: UInt = MainActor.assumeIsolated {
         guard let container = nativeWindows[id]?.pages.container(for: Int(tab)) else {
-            return nil
+            return 0
         }
-        return Unmanaged.passUnretained(container.host).toOpaque()
+        return UInt(bitPattern: Unmanaged.passUnretained(container.host).toOpaque())
     }
+    return UnsafeMutableRawPointer(bitPattern: address)
 }
 
 /// Takes away the container holding `view`, CEF's view of a page closing: the view goes with it,

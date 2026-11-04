@@ -1,6 +1,6 @@
 // The handles between a split's pages, which resize them, like Arc's Split View: the app places
-// them in the room between the pages (place_split_handles in app/src/shell.rs). The pages are
-// windows of their own above the main one's, so each handle is a child window too.
+// them in the room between the pages (place_split_handles in app/src/shell.rs). They are views of
+// the card's window, above the pages' containers.
 
 import AppKit
 
@@ -53,17 +53,34 @@ final class SplitHandleView: NSView {
     }
 
     private var dragging = false
+    private var hovered = false
     private var cursor: NSCursor { stacked ? .resizeUpDown : .resizeLeftRight }
 
+    /// Shows the resize cursor, again once the card's window and the pages under the handle,
+    /// which track the pointer too, have set theirs.
+    private func showCursor() {
+        cursor.set()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, hovered || dragging else { return }
+            cursor.set()
+        }
+    }
+
     override func mouseEntered(with event: NSEvent) {
+        hovered = true
         // Between stacked pages, like Arc's, the grabber that rests there shows instead (the
         // backdrop's LoadingLine).
         pill.isHidden = stacked
-        cursor.set()
+        showCursor()
     }
 
-    override func mouseMoved(with event: NSEvent) { cursor.set() }
-    override func mouseExited(with event: NSEvent) { pill.isHidden = stacked || dragging }
+    override func mouseMoved(with event: NSEvent) { showCursor() }
+
+    override func mouseExited(with event: NSEvent) {
+        hovered = false
+        pill.isHidden = stacked || dragging
+        if !dragging { NSCursor.arrow.set() }
+    }
 
     override func mouseUp(with event: NSEvent) {
         if dragging { send("resized") }
@@ -72,7 +89,7 @@ final class SplitHandleView: NSView {
         pill.isHidden = stacked || !bounds.contains(point)
     }
 
-    override func cursorUpdate(with event: NSEvent) { cursor.set() }
+    override func cursorUpdate(with event: NSEvent) { showCursor() }
 
     override func resetCursorRects() { addCursorRect(bounds, cursor: cursor) }
 
@@ -84,6 +101,7 @@ final class SplitHandleView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         dragging = true
+        showCursor()
         guard let parent = window?.parent, let content = parent.contentView else { return }
         // In the main window's points from its content's top left corner, like the app's.
         let point = parent.convertPoint(fromScreen: NSEvent.mouseLocation)
@@ -95,50 +113,63 @@ final class SplitHandleView: NSView {
 /// The handles of the split a window shows, made as it needs them.
 @MainActor
 final class SplitHandles {
-    private let parent: NSWindow
+    private let pages: PagePlacer
     private let model: AppModel
-    private var panels: [ChildPanel] = []
+    private var views: [SplitHandleView] = []
+    /// Where the handles go, in the window's points from its top left corner.
+    private var frames: [NSRect] = []
+    private var stacked = false
 
-    init(in parent: NSWindow, model: AppModel) {
-        self.parent = parent
+    init(pages: PagePlacer, model: AppModel) {
+        self.pages = pages
         self.model = model
     }
 
     /// Shows a handle at each frame, in the window's points from its top left corner, and hides
     /// the others.
     func place(stacked: Bool, frames: [NSRect]) {
-        while panels.count < frames.count {
+        self.stacked = stacked
+        self.frames = frames
+        arrange()
+    }
+
+    /// Lays the handles out in the card's window, above the pages, once it is found.
+    func arrange() {
+        while views.count < frames.count {
             let view = SplitHandleView(frame: .zero)
             view.send = { [weak model] path in model?.run(path) }
-            let panel = ChildPanel(view: view)
-            // The whole handle takes the pointer: a transparent window lets it through but where
-            // it draws, unless told otherwise.
-            panel.ignoresMouseEvents = false
-            panels.append(panel)
+            views.append(view)
         }
-        for (index, panel) in panels.enumerated() {
-            let frame = index < frames.count
-                ? frames[index].insetBy(dx: stacked ? 0 : -reach, dy: stacked ? -reach : 0) : nil
-            if let view = panel.contentView as? SplitHandleView {
-                view.index = index
-                view.stacked = stacked
-                view.needsLayout = true
-            }
-            // Raised below once only, if needed: raising it would end a drag of it.
-            panel.place(in: parent, frame, raise: false)
+        guard let holder = pages.holder, let content = holder.window?.contentView else {
+            views.forEach { $0.removeFromSuperview() }
+            return
         }
-        // Above the pages, which CEF may order above them once it shows the card again.
-        DispatchQueue.main.async { [self] in
-            guard let last = parent.childWindows?.last, !panels.contains(where: { $0 === last })
-            else { return }
-            for panel in panels where panel.isVisible {
-                parent.removeChildWindow(panel)
-                parent.addChildWindow(panel, ordered: .above)
+        for (index, view) in views.enumerated() {
+            guard index < frames.count else {
+                view.removeFromSuperview()
+                continue
             }
+            let frame = frames[index].insetBy(dx: stacked ? 0 : -reach, dy: stacked ? -reach : 0)
+                .offsetBy(dx: -pages.cardOrigin.x, dy: -pages.cardOrigin.y)
+            let rect = NSRect(
+                x: frame.minX,
+                y: content.isFlipped ? frame.minY : content.bounds.height - frame.maxY,
+                width: frame.width, height: frame.height)
+            view.index = index
+            view.stacked = stacked
+            view.frame = holder.convert(rect, from: content)
+            view.needsLayout = true
+            // Raised only below a page: raising it would end a drag of it.
+            let order = holder.subviews
+            let below =
+                order.firstIndex(of: view).map { at in
+                    order[(at + 1)...].contains { $0 is PageContainer }
+                } ?? true
+            if below { holder.addSubview(view, positioned: .above, relativeTo: nil) }
         }
     }
 
-    func close() { panels.forEach { $0.close() } }
+    func close() { views.forEach { $0.removeFromSuperview() } }
 }
 
 @_cdecl("arbalete_ui_split")

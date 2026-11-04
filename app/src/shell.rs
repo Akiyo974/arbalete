@@ -1444,6 +1444,12 @@ fn open_overlay(visible: bool, tab: Option<(String, Option<String>)>) {
     }
     if !visible {
         win().adding_pane.set(false);
+        // The page takes the keyboard back from the Command Bar.
+        if overlay.is_visible() == 1
+            && let Some(tab) = win().shown.get()
+        {
+            focus_page(tab);
+        }
     }
     // Like Arc's, the window keeps the Command Bar's room while it shows, as wide as it was.
     let window = win().window.with_borrow(Clone::clone);

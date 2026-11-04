@@ -608,8 +608,11 @@ final class NativeWindow {
         let importSurface = Surface(in: window, radius: 16) { ImportView(model: importer) }
         importSurface.takesKeyboard = true
         surfaces["import"] = importSurface
-        splitHandles = SplitHandles(in: window, model: app)
-        pages = PagePlacer(in: window, model: app)
+        let pages = PagePlacer(in: window, model: app)
+        self.pages = pages
+        let handles = SplitHandles(pages: pages, model: app)
+        splitHandles = handles
+        pages.didPlace = { [weak handles] in handles?.arrange() }
         pageDrop = PageDrop(in: window, model: app)
         peek = PeekChrome(in: window, model: app)
         capture = CaptureChrome(in: window, model: app)
