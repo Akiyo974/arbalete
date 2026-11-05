@@ -171,6 +171,9 @@ thread_local! {
     /// The Little Arbalete windows' pages closing as another profile's take their place, by
     /// browser id.
     static REPLACED_LITTLE_PAGES: RefCell<Vec<i32>> = const { RefCell::new(Vec::new()) };
+    /// The Little Arbalete window in front last, until a main window comes there: its page is
+    /// its profile's active tab for the extensions, while their popup has the keyboard too.
+    static ACTIVE_LITTLE: Cell<Option<u32>> = const { Cell::new(None) };
     /// Links other apps asked to open before the main window existed.
     static PENDING_LINKS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     /// The settings, in a window of their own while it is open.
@@ -1155,7 +1158,20 @@ fn send_state() {
         };
         Some((space.profile, tab))
     });
-    extensions::sync(active.into_iter().collect());
+    let mut active: HashMap<_, _> = active.into_iter().collect();
+    // The Little Arbalete window in front last shows its profile's active tab.
+    let little = LITTLE.with_borrow(|littles| {
+        let little = littles.iter().find(|l| Some(l.id) == ACTIVE_LITTLE.get())?;
+        let tab = extensions::ActiveTab {
+            page: little.browser().map(|browser| browser.identifier()),
+            url: little.url.clone(),
+            title: little.title.clone(),
+            favicon: None,
+        };
+        Some((little.profile, tab))
+    });
+    active.extend(little);
+    extensions::sync(active);
 }
 
 /// Shows the bar above the page, with the navigation buttons and the address, which the sidebar
@@ -2891,6 +2907,8 @@ fn little_page(view: *mut std::ffi::c_void, profile: ProfileId, url: &str) -> Op
     if let Some(host) = browser.host() {
         host.set_focus(1);
     }
+    // The extensions learn it, as they learn the tabs' pages.
+    extensions::page_created(profile, &browser);
     Some(browser)
 }
 
@@ -2940,6 +2958,11 @@ fn little_of(browser: &Browser) -> Option<u32> {
 fn little_action(id: u32, action: LittleAction) {
     match action {
         LittleAction::Ready => send_little(id),
+        LittleAction::Focused => {
+            if ACTIVE_LITTLE.replace(Some(id)) != Some(id) {
+                send_state();
+            }
+        }
         LittleAction::Navigate(url) => {
             if let Some(frame) = little_browser(id).and_then(|browser| browser.main_frame()) {
                 frame.load_url(Some(&CefString::from(url.as_str())));
@@ -2982,6 +3005,7 @@ fn set_little_profile(id: u32, profile: ProfileId) {
             }
         });
         REPLACED_LITTLE_PAGES.with_borrow_mut(|pages| pages.push(old.identifier()));
+        extensions::page_closed(old.identifier());
         if let Some(host) = old.host() {
             host.close_browser(1);
         }
@@ -3004,6 +3028,10 @@ fn little_changed(browser: &mut Browser, change: impl FnOnce(&mut Little)) {
     });
     if let Some(id) = id {
         send_little(id);
+        // The extensions see its page's address and title as the active tab's.
+        if ACTIVE_LITTLE.get() == Some(id) {
+            send_state();
+        }
     }
 }
 
@@ -3939,7 +3967,7 @@ fn open_extension_popup(id: &str) {
     if open.as_deref() == Some(id) {
         return;
     }
-    let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
+    let profile = extension_profile();
     let (Some(url), Some(button)) = (
         extensions::popup_url(profile, id),
         win().site_button.with_borrow(Clone::clone),
@@ -4503,7 +4531,7 @@ fn show_menu(target: Target) {
 /// Shows the developer bar's extensions menu at the pointer, like Arc's: the displayed Space's
 /// profile's extensions turned on, then adding and managing them.
 fn show_extensions_menu() {
-    let extensions: Vec<_> = extensions::list(displayed_profile())
+    let extensions: Vec<_> = extensions::list(extension_profile())
         .into_iter()
         .filter(|extension| extension.enabled)
         .map(|extension| (extension.id, extension.name))
@@ -4513,6 +4541,20 @@ fn show_extensions_menu() {
     crate::mac::pop_up(entries);
     #[cfg(not(target_os = "macos"))]
     let _ = entries;
+}
+
+/// The profile whose extensions act: the Little Arbalete window's in front last, if any, else the
+/// displayed Space's.
+fn extension_profile() -> ProfileId {
+    let little = LITTLE.with_borrow(|littles| {
+        Some(
+            littles
+                .iter()
+                .find(|l| Some(l.id) == ACTIVE_LITTLE.get())?
+                .profile,
+        )
+    });
+    little.unwrap_or_else(displayed_profile)
 }
 
 /// Shows the menu of an extension of the displayed Space's profile, by its id.
@@ -5980,8 +6022,18 @@ wrap_task! {
     impl Task {
         /// Closes a Little Arbalete window, its page closing, which destroys the page's browser.
         fn execute(&self) {
-            LITTLE.with_borrow_mut(|littles| littles.retain(|little| little.id != self.id));
+            let page = LITTLE.with_borrow_mut(|littles| {
+                let at = littles.iter().position(|little| little.id == self.id)?;
+                Some(littles.remove(at).browser.identifier())
+            });
+            if let Some(page) = page {
+                extensions::page_closed(page);
+            }
             crate::native::little_closed(self.id);
+            if ACTIVE_LITTLE.get() == Some(self.id) {
+                ACTIVE_LITTLE.set(None);
+                send_state();
+            }
         }
     }
 }
@@ -6830,6 +6882,10 @@ pub fn window_resized(id: u32) {
 /// may take it.
 pub fn window_activated(id: u32, active: bool) {
     focus(id);
+    // Its tab is the active one for the extensions again.
+    if active && ACTIVE_LITTLE.take().is_some() {
+        send_state();
+    }
     // Like Arc's, the Command Bar stays as the window comes back, as when it is resized: the page
     // it shows over keeps it from the focus.
     let overlay = win()

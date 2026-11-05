@@ -19,6 +19,8 @@ pub enum SiteData {
 pub enum LittleAction {
     /// The bar is listening: send it its page's address.
     Ready,
+    /// The window came in front: its page is its profile's active tab for the extensions.
+    Focused,
     /// Loads an address in the window's page.
     Navigate(String),
     /// Moves the page into a Space, the displayed one without, as a tab, and closes the window:
@@ -1020,6 +1022,7 @@ impl Command {
                     let id = id.parse().ok()?;
                     let action = match action {
                         "ready" => LittleAction::Ready,
+                        "focus" => LittleAction::Focused,
                         "open" => LittleAction::OpenInSpace(None),
                         _ if action.starts_with("open/") => LittleAction::OpenInSpace(Some(
                             serde_json::from_str(action.strip_prefix("open/")?).ok()?,
@@ -1818,6 +1821,10 @@ mod tests {
         assert_eq!(
             Command::parse("little/3/ready"),
             Some(Command::Little(3, LittleAction::Ready))
+        );
+        assert_eq!(
+            Command::parse("little/3/focus"),
+            Some(Command::Little(3, LittleAction::Focused))
         );
         assert_eq!(
             Command::parse("little/3/open"),

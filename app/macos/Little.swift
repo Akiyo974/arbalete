@@ -60,6 +60,17 @@ final class LittleBar: ObservableObject {
         command = CommandBar(app: app, little: .some(id))
     }
 
+    /// Shows the menu of the extensions under its button at `frame`, from its window's top left
+    /// corner: the app places their popup from the main window's, which it counts the button in.
+    func extensions(from frame: CGRect) {
+        guard let little = littles[id]?.window, let main = nativeWindows[app.window]?.window
+        else { return }
+        let x = little.frame.minX + frame.minX - main.frame.minX
+        let y = main.frame.maxY - (little.frame.maxY - frame.minY)
+        app.run(
+            "extension/menu/toolbar/\(Int(x))/\(Int(y))/\(Int(frame.width))/\(Int(frame.height))")
+    }
+
     /// Copies its page's address, which the button shows a moment.
     func copy() {
         guard let url = page?.url else { return }
@@ -178,6 +189,11 @@ final class LittleWindow: NSObject, NSWindowDelegate {
 
     func windowDidResize(_ notification: Notification) {
         centerButtons()
+    }
+
+    /// Its page becomes its profile's active tab for the extensions.
+    func windowDidBecomeKey(_ notification: Notification) {
+        bar.app.run("little/\(bar.id)/focus")
     }
 
     /// Its page closes first, which closes the window (arbalete_ui_little_closed).
@@ -355,6 +371,21 @@ struct LittleBarView: View {
                 }
                 Spacer(minLength: 0)
                 if !empty {
+                    // Like Little Arc's, a menu of the extensions, whose popup acts on its page.
+                    GeometryReader { geometry in
+                        Button {
+                            bar.extensions(from: geometry.frame(in: .global))
+                        } label: {
+                            Image(systemName: "puzzlepiece.extension")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 26, height: 26)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Extensions")
+                    }
+                    .frame(width: 26, height: 26)
                     Button(action: bar.copy) {
                         Image(systemName: bar.copied ? "checkmark" : "link")
                             .font(.system(size: 13))
