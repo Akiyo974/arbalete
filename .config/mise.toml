@@ -39,6 +39,9 @@ run = [
   # The bundle and its name in the menu bar and the Finder take a capital, unlike the executable.
   "mv target/bundle/arbalete.app target/bundle/Arbalete.app",
   "plutil -replace CFBundleName -string Arbalete target/bundle/Arbalete.app/Contents/Info.plist",
+  # Like Arc's, what the system writes for the app (times, apps' names, its panels) speaks the
+  # system's language, around Arbalete's own English.
+  "plutil -replace CFBundleAllowMixedLocalizations -bool YES target/bundle/Arbalete.app/Contents/Info.plist",
   # The helper extension, loaded in every profile (app/src/extensions.rs).
   "cp -R app/extension target/bundle/Arbalete.app/Contents/Resources/arbalete-helper",
   # A browser opens web links: macOS offers it as the default browser, which other apps' links

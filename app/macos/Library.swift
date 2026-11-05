@@ -64,6 +64,7 @@ struct ArchivedTab: Decodable {
 struct Download: Decodable, Identifiable {
     var id: Int
     var name: String
+    var path: String
     var url: String
     var received: Double
     var total: Double
@@ -326,12 +327,7 @@ struct MediaGrid: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        let media = model.downloads.reversed().filter { download in
-            let ext = (download.name as NSString).pathExtension.lowercased()
-            return download.state == "complete" && !download.missing
-                && ["png", "jpg", "jpeg", "gif", "webp", "avif", "mp4", "m4v", "webm", "mov"].contains(ext)
-                && matches(model.query, download.name)
-        }
+        let media = libraryMedia(model).filter { matches(model.query, $0.name) }
         if media.isEmpty {
             // Like Arc's, a picture's outline over what found nothing, in the middle.
             VStack(spacing: 18) {
@@ -352,13 +348,13 @@ struct MediaGrid: View {
             columns: Array(repeating: GridItem(.fixed(132), spacing: 16), count: 2), spacing: 8
         ) {
             ForEach(media) { download in
+                // Like Arc's, in the app's own viewer.
                 Button {
-                    model.run("download/open/\(download.id)")
+                    model.viewing = download.id
                 } label: {
                     MediaTile(
                         image: uiImage("arbalete://ui/media/\(download.id)"),
-                        video: ["mp4", "m4v", "webm", "mov"].contains(
-                            (download.name as NSString).pathExtension.lowercased()))
+                        video: mediaKind(download) == .video)
                 }
                 .buttonStyle(.plain)
                 .help(download.name)

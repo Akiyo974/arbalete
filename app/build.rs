@@ -58,6 +58,8 @@ fn main() {
     println!("cargo:rustc-link-search=native=/usr/lib/swift");
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
     println!("cargo:rustc-link-lib=framework=SwiftUI");
+    // The media viewer's videos (macos/MediaViewer.swift).
+    println!("cargo:rustc-link-lib=framework=AVKit");
     // The certificate sheet (showCertificate in macos/Panels.swift).
     println!("cargo:rustc-link-lib=framework=SecurityInterface");
 }

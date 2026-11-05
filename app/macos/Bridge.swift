@@ -23,6 +23,11 @@ final class AppModel: ObservableObject {
     /// The Spaces there were when one was asked for, until it shows.
     var awaitingDraft: Set<Int>?
     @Published var downloads: [Download] = []
+    /// The download the media viewer shows (MediaViewer.swift).
+    @Published var viewing: Int? {
+        didSet { viewingChanged() }
+    }
+    var viewingChanged: () -> Void = {}
     @Published var archive: [ArchivedTab] = []
     /// The sidebar shows the library, on a section, under what its field searches.
     @Published var libraryShown = false
@@ -526,6 +531,7 @@ final class NativeWindow {
     let pageDrop: PageDrop
     let peek: PeekChrome
     let capture: CaptureChrome
+    let viewer: MediaViewer
     /// The panels above the page, by the name of the web view they stand for, like "overlay".
     var surfaces: [String: Surface] = [:]
     private var observers: [NSObjectProtocol] = []
@@ -630,6 +636,9 @@ final class NativeWindow {
         peek = PeekChrome(in: window, model: app)
         peek.fade = { [weak pages] in pages?.fade($0) }
         capture = CaptureChrome(in: window, model: app)
+        let viewer = MediaViewer(in: window, model: app)
+        self.viewer = viewer
+        app.viewingChanged = { [weak viewer] in viewer?.update() }
     }
 
     /// Closes its panels, the window they belong to closing.
@@ -643,6 +652,7 @@ final class NativeWindow {
         pageDrop.close()
         peek.close()
         capture.close()
+        viewer.close()
     }
 
     /// Gives one of its views an event, by the name of the web view it stands for.
