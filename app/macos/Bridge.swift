@@ -665,21 +665,6 @@ final class NativeWindow {
 /// The interface of each of the app's windows, by the id the app gives it.
 @MainActor var nativeWindows: [UInt32: NativeWindow] = [:]
 
-/// Puts the interface in the window `handle` is, or is in, which the app knows as `id`: the blur
-/// behind every view, and the sidebar above them.
-@_cdecl("arbalete_ui_attach")
-public func attach(_ id: UInt32, _ handle: UnsafeMutableRawPointer, _ send: Send) {
-    MainActor.assumeIsolated {
-        let object = Unmanaged<AnyObject>.fromOpaque(handle).takeUnretainedValue()
-        guard let window = (object as? NSWindow) ?? (object as? NSView)?.window,
-            let content = window.contentView
-        else { return }
-        let app = AppModel(window: id, send: send)
-        nativeWindows[id] = NativeWindow(window: window, content: content, app: app)
-        if settingsModel == nil { settingsModel = SettingsModel(app: app) }
-    }
-}
-
 /// Takes the interface out of the window `id`, which closed: its panels close with it.
 @_cdecl("arbalete_ui_detach")
 public func detach(_ id: UInt32) {

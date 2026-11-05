@@ -966,8 +966,7 @@ pub fn sidebar_shown(view: *mut c_void, shown: bool) {
             ns_string!("Show Sidebar")
         });
     }
-    // SAFETY: CEF gives the window's NSView, which the window keeps alive.
-    let Some(window) = unsafe { view.cast::<NSView>().as_ref() }.and_then(NSView::window) else {
+    let Some(window) = ns_window(view) else {
         return;
     };
     for button in [

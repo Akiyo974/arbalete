@@ -53,6 +53,7 @@ const CARD_MARGIN: i32 = 10;
 
 /// The window's color until the sidebar sends the displayed Space's: the dark one, its most
 /// common appearance (--window-end in ui/src/index.css).
+#[cfg(not(target_os = "macos"))]
 const WINDOW_COLOR: u32 = 0xff1b_0e1f;
 
 /// The strip along the window's left edge that reveals the hidden sidebar when the pointer
@@ -141,9 +142,6 @@ const SETTINGS_SIZE: Size = Size {
 /// The Privacy & Security pane of System Settings that lists the apps with Full Disk Access.
 const FULL_DISK_ACCESS: &str =
     "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
-
-/// The height of the sidebar's toolbar, which holds the window buttons on macOS (ui/src/index.css).
-const TOOLBAR_HEIGHT: f32 = 40.0;
 
 /// The first tab of a new session.
 const START_URL: &str = "https://www.wikipedia.org/";
@@ -297,6 +295,12 @@ wrap_task! {
 }
 
 /// What a window holds of its own: its views, the page it shows and its panels' state.
+/// A main window: the native interface's on macOS, CEF's elsewhere.
+#[cfg(target_os = "macos")]
+type MainWindow = crate::native::Window;
+#[cfg(not(target_os = "macos"))]
+type MainWindow = Window;
+
 struct Win {
     /// What the native interface knows the window by.
     id: u32,
@@ -312,7 +316,7 @@ struct Win {
     /// The native card holding its pages, once the card has shown (send_panes), which a picture of
     /// the page covers while another window shows it.
     card_view: Cell<Option<*mut std::ffi::c_void>>,
-    window: RefCell<Option<Window>>,
+    window: RefCell<Option<MainWindow>>,
     /// Beside the card, at the window's left edge. It must not reach under the card: a web view
     /// below the overlays receives no real mouse event on macOS, only synthesized ones.
     sidebar: RefCell<Option<Panel>>,
@@ -569,6 +573,9 @@ fn open_window_in(view: WindowView, fresh: bool, incognito: Option<SpaceId>) {
     window.fresh.set(fresh);
     WINDOWS.with_borrow_mut(|windows| windows.push(Rc::new(window)));
     save_session();
+    #[cfg(target_os = "macos")]
+    open_main_window(id);
+    #[cfg(not(target_os = "macos"))]
     window_create_top_level(Some(&mut MainWindowDelegate::new(id)));
 }
 
@@ -684,6 +691,8 @@ impl SidebarMode {
 
     /// Where the margins that move the window start: past the docked sidebar, which has its own
     /// drag areas, or at the window's edge.
+    // Where the window's margins move it, which the native window does itself on macOS.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     fn margins_start(self) -> i32 {
         if self == SidebarMode::Shown {
             docked_width()
@@ -1876,21 +1885,26 @@ fn settle_sidebar() {
 /// docked. CEF applies the regions in order, a region that is not draggable cutting out of the
 /// ones before: the sidebar's come last, so its controls stay clickable.
 fn update_drag_regions() {
-    let Some(window) = win().window.with_borrow(Clone::clone) else {
-        return;
-    };
-    let mode = win().sidebar_mode.get();
-    let size = window.size();
-    let regions = if fills_window() {
-        Vec::new()
-    } else {
-        margin_regions(&size, &mode.layout(&size).card, mode.margins_start())
-    };
-    window.set_draggable_regions(Some(&regions));
+    // On macOS, the native window's own background moves it.
+    #[cfg(not(target_os = "macos"))]
+    {
+        let Some(window) = win().window.with_borrow(Clone::clone) else {
+            return;
+        };
+        let mode = win().sidebar_mode.get();
+        let size = window.size();
+        let regions = if fills_window() {
+            Vec::new()
+        } else {
+            margin_regions(&size, &mode.layout(&size).card, mode.margins_start())
+        };
+        window.set_draggable_regions(Some(&regions));
+    }
 }
 
 /// The margins around the `card` of a window of `size`, from `start`: the docked sidebar's edge,
 /// or the window's. Beside the docked sidebar, the margin resizes it instead.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn margin_regions(size: &Size, card: &Rect, start: i32) -> Vec<DraggableRegion> {
     let (width, height) = (size.width, size.height);
     let (right, bottom) = (card.x + card.width, card.y + card.height);
@@ -1980,6 +1994,7 @@ fn relayout_library() {
     if let Some(sidebar) = win().sidebar.with_borrow(Clone::clone) {
         sidebar.invalidate_layout();
     }
+    #[cfg(not(target_os = "macos"))]
     if let Some(window) = win().window.with_borrow(Clone::clone) {
         window.layout();
     }
@@ -2903,30 +2918,34 @@ fn show_settings() {
 /// Runs `expression` in a page, `url`, of a profile, loaded hidden above the page for it, then
 /// closes the page a moment later: an extension removing itself never answers.
 pub fn run_in_hidden_page(profile: ProfileId, url: &str, expression: &str) {
-    let Some(window) = win().window.with_borrow(Clone::clone) else {
+    // Without a window, like the bridge's.
+    let info = WindowInfo {
+        windowless_rendering_enabled: 1,
+        ..Default::default()
+    };
+    let Some(browser) = browser_host_create_browser_sync(
+        Some(&info),
+        Some(&mut HiddenPageClient::new(expression.to_string())),
+        Some(&CefString::from(url)),
+        Some(&BrowserSettings::default()),
+        None,
+        profile_context(profile).as_mut(),
+    ) else {
         return;
     };
-    let client = HiddenPageClient::new(expression.to_string());
-    let view = browser_view(client, url, no_width, profile_context(profile).as_mut());
-    let controller = window
-        .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 0)
-        .expect("hidden page");
-    controller.set_visible(0);
-    post_delayed_task(
-        ThreadId::UI,
-        Some(&mut DestroyOverlay::new(controller)),
-        3000,
-    );
+    post_delayed_task(ThreadId::UI, Some(&mut CloseHiddenPage::new(browser)), 3000);
 }
 
 wrap_task! {
-    struct DestroyOverlay {
-        controller: OverlayController,
+    struct CloseHiddenPage {
+        browser: Browser,
     }
 
     impl Task {
         fn execute(&self) {
-            self.controller.destroy();
+            if let Some(host) = self.browser.host() {
+                host.close_browser(1);
+            }
         }
     }
 }
@@ -3143,7 +3162,7 @@ wrap_window_delegate! {
             .expect("permission view");
             window.add_child_view(Some(&mut View::from(&view)));
             PERMISSION_WINDOW_HIDDEN.set(self.hidden);
-            let main = win().window.with_borrow(|w| w.as_ref().map(Window::bounds));
+            let main = win().window.with_borrow(|w| w.as_ref().map(MainWindow::bounds));
             match main.filter(|_| self.hidden) {
                 // Its sheet shows at its top, over the main window's middle.
                 Some(main) => window.set_bounds(Some(&Rect {
@@ -5290,7 +5309,7 @@ fn peek_page(action: PeekAction) {
 fn place_peek() {
     let size = win()
         .window
-        .with_borrow(|window| window.as_ref().map(Window::size));
+        .with_borrow(|window| window.as_ref().map(MainWindow::size));
     let Some(frame) = size.as_ref().map(peek_frame) else {
         return;
     };
@@ -5660,10 +5679,7 @@ fn set_window_colors(card_color: u32, grain: f64, colors: &[u32]) {
         // The native interface tints the window itself, over the blurred desktop, which shows
         // through: transparent, but not 0, which CEF takes for its theme's color.
         #[cfg(target_os = "macos")]
-        {
-            let _ = (grain, colors);
-            window.set_background_color(0x0000_0001);
-        }
+        let _ = (window, grain, colors);
         #[cfg(not(target_os = "macos"))]
         window.set_background_color(colors[0]);
     }
@@ -6360,6 +6376,9 @@ wrap_browser_process_handler! {
             check_archive();
             DOWNLOADS.set(downloads::load(&self.data_dir.join(downloads::FILE_NAME)));
             make_bridge();
+            #[cfg(target_os = "macos")]
+            open_main_window(0);
+            #[cfg(not(target_os = "macos"))]
             window_create_top_level(Some(&mut MainWindowDelegate::new(0)));
         }
 
@@ -6369,6 +6388,160 @@ wrap_browser_process_handler! {
     }
 }
 
+/// Opens the main window `id` on macOS, the native interface making it, then makes it usable
+/// (window_ready).
+#[cfg(target_os = "macos")]
+fn open_main_window(id: u32) {
+    focus(id);
+    let bounds = win().cascade.take().map(|from| Rect {
+        x: from.x + CASCADE,
+        y: from.y + CASCADE,
+        ..from
+    });
+    let min = Size {
+        width: MIN_WINDOW_WIDTH,
+        height: MIN_WINDOW_HEIGHT,
+    };
+    let window = crate::native::Window::open(id, bounds.as_ref(), &min);
+    window_ready(window);
+}
+
+/// Makes the window just made usable: its panels' places, its interface's state, its card and
+/// sidebar, then its selected tab's page, the links and windows waiting for it.
+fn window_ready(window: MainWindow) {
+    #[cfg(target_os = "macos")]
+    crate::mac::toolbar_shown(app_settings().show_toolbar);
+    // Below the overlay, which is added after it.
+    let reveal = place_view(no_width, 1);
+    let controller = Spot::default();
+    win().reveal_view.set(Some(reveal));
+    win().reveal.set(Some(controller));
+    let overlay = place_view(no_width, 1);
+    win().overlay_view.set(Some(overlay));
+    win().overlay.set(Some(Spot::default()));
+    let site = place_view(no_width, 1);
+    win().site_view.set(Some(site));
+    win().site.set(Some(Spot::default()));
+    let theme = place_view(no_width, 1);
+    win().theme_view.set(Some(theme));
+    win().theme.set(Some(Spot::default()));
+    window.show();
+    #[cfg(target_os = "macos")]
+    {
+        // What the web sidebar asks for once ready (Command::Ready).
+        send_state();
+        send_downloads();
+    }
+    win().window.set(Some(window));
+    place_card();
+    place_reveal();
+    // Only the selected tab loads: the others wait until they are selected.
+    show_selected();
+    if IMPORT_AT_LAUNCH.take() {
+        show_import();
+    }
+    for link in PENDING_LINKS.take() {
+        open_link(Some(link));
+    }
+    for view in RESTORED_WINDOWS.take() {
+        open_window(view, false);
+    }
+    // Once it has settled in front: until then, the window taking the keyboard back from the
+    // Command Bar's field would close it.
+    if win().fresh.take() {
+        post_delayed_task(ThreadId::UI, Some(&mut OpenCommandBar::new(win().id)), 300);
+    }
+}
+
+/// The card, the revealed sidebar and the margins follow the window `id`'s size. A slide places
+/// them on its next step.
+pub fn window_resized(id: u32) {
+    focus(id);
+    if win().slide.with_borrow(Option::is_none) {
+        place_card();
+        place_reveal();
+        place_find();
+    }
+    // Like Arc's, the Command Bar stays centered as the window is resized.
+    let overlay = win().overlay.with_borrow(Clone::clone);
+    if let Some(overlay) = overlay.filter(|o| o.is_visible() == 1 && !win().over_url_bar.get()) {
+        place_overlay(overlay.bounds().height);
+        round_overlay();
+    }
+    update_drag_regions();
+    send_window_width();
+    place_theme_picker();
+    place_peek();
+    #[cfg(target_os = "macos")]
+    sync_native_surfaces();
+}
+
+/// The window `id` in front shows the live page of its tab, taking it from another window. One
+/// going to the background takes a picture of its page, which still draws, for the window that
+/// may take it.
+pub fn window_activated(id: u32, active: bool) {
+    focus(id);
+    // Like Arc's, the Command Bar stays as the window comes back, as when it is resized: the page
+    // it shows over keeps it from the focus.
+    let overlay = win()
+        .overlay
+        .with_borrow(|overlay| overlay.as_ref().is_some_and(|o| o.is_visible() == 1));
+    if active && !overlay {
+        show_selected();
+    } else if !active {
+        snapshot_shown();
+    }
+}
+
+/// Whether the window `id` may close: every browser is asked to close, and it closes once they
+/// all can. With other windows open, it closes alone, its pages going to another one, like Arc's.
+pub fn window_can_close(id: u32) -> bool {
+    focus(id);
+    if !CLOSING.get() && WINDOWS.with_borrow(Vec::len) > 1 {
+        close_incognito(id);
+        hand_pages_over(id);
+        return true;
+    }
+    CLOSING.set(true);
+    let hosts: Vec<_> = PAGES.with_borrow(|pages| {
+        pages
+            .values()
+            .filter_map(|live| live.browser.host())
+            .collect()
+    });
+    let mut closed = true;
+    for host in hosts {
+        closed &= host.try_close_browser() == 1;
+    }
+    closed
+}
+
+/// Forgets the window `id`, which closed; the last one closing quits.
+pub fn window_closed(id: u32) {
+    WINDOWS.with_borrow_mut(|windows| windows.retain(|win| win.id != id));
+    #[cfg(target_os = "macos")]
+    crate::native::detach(id);
+    if let Some(next) = WINDOWS.with_borrow(|windows| windows.first().map(|win| win.id)) {
+        focus(next);
+        show_selected();
+    } else if let Some(host) = bridge_host() {
+        // Quitting: the incognito windows' folders go too.
+        for (_, dir) in INCOGNITO.take() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+        // The bridge closes last, which quits (browser_closed): closed with the pages, it could
+        // quit while the windows still close their overlays, and the app crashed.
+        host.close_browser(1);
+    }
+    // Once another window holds the sidebar: quitting keeps every window for the next session.
+    if !CLOSING.get() {
+        save_session();
+    }
+}
+
+// A main window on Linux and Windows, which CEF makes; on macOS, the native interface does
+// (open_main_window).
+#[cfg(not(target_os = "macos"))]
 wrap_window_delegate! {
     struct MainWindowDelegate {
         id: u32,
@@ -6389,8 +6562,7 @@ wrap_window_delegate! {
             Size { width, height: MIN_WINDOW_HEIGHT }
         }
 
-        // CEF gives views its theme's colors again once it changes, as when the window shows:
-        // the window's own, transparent on macOS, and the card's come back.
+        // CEF gives views its theme's colors again once it changes, as when the window shows.
         fn on_theme_changed(&self, _view: Option<&mut View>) {
             focus(self.id);
             if let Some(colors) = win().window_colors.with_borrow(Clone::clone) {
@@ -6398,27 +6570,8 @@ wrap_window_delegate! {
             }
         }
 
-        // The card, the revealed sidebar and the margins follow the window's size.
-        // A slide places them on its next step.
         fn on_layout_changed(&self, _view: Option<&mut View>, _new_bounds: Option<&Rect>) {
-            focus(self.id);
-            if win().slide.with_borrow(Option::is_none) {
-                place_card();
-                place_reveal();
-                place_find();
-            }
-            // Like Arc's, the Command Bar stays centered as the window is resized.
-            let overlay = win().overlay.with_borrow(Clone::clone);
-            if let Some(overlay) = overlay.filter(|o| o.is_visible() == 1 && !win().over_url_bar.get()) {
-                place_overlay(overlay.bounds().height);
-                round_overlay();
-            }
-            update_drag_regions();
-            send_window_width();
-            place_theme_picker();
-            place_peek();
-            #[cfg(target_os = "macos")]
-            sync_native_surfaces();
+            window_resized(self.id);
         }
     }
 
@@ -6432,8 +6585,7 @@ wrap_window_delegate! {
             if let Some(from) = win().cascade.take() {
                 window.set_bounds(Some(&Rect { x: from.x + CASCADE, y: from.y + CASCADE, ..from }));
             }
-            // The sidebar at the left edge, the rest of the window its own background, below the
-            // card and the other overlays.
+            // The sidebar at the left edge, the rest of the window its own background.
             window.set_background_color(WINDOW_COLOR);
             let layout = window
                 .set_to_box_layout(Some(&BoxLayoutSettings {
@@ -6443,139 +6595,23 @@ wrap_window_delegate! {
                 }))
                 .expect("box layout");
             let sidebar = place_view(docked_width, 1);
-            // On macOS, the native sidebar stands in for it (app/macos).
-            sidebar.set_visible((!cfg!(target_os = "macos")).into());
             let mut view = View::from(&sidebar);
             window.add_child_view(Some(&mut view));
             layout.set_flex_for_view(Some(&mut view), 0);
             win().sidebar.set(Some(sidebar));
-            #[cfg(target_os = "macos")]
-            crate::mac::toolbar_shown(app_settings().show_toolbar);
-            // Below the overlay, which is added after it.
-            let reveal = place_view(no_width, 1);
-            let controller = Spot::default();
-            controller.set_visible(0);
-            win().reveal_view.set(Some(reveal));
-            win().reveal.set(Some(controller));
-            let overlay = place_view(no_width, 1);
-            let controller = Spot::default();
-            controller.set_visible(0);
-            win().overlay_view.set(Some(overlay));
-            win().overlay.set(Some(controller));
-            // Made with the window, so that its page listens by the first time it shows.
-            let site = place_view(no_width, 1);
-            let controller = Spot::default();
-            controller.set_visible(0);
-            win().site_view.set(Some(site));
-            win().site.set(Some(controller));
-            let theme = place_view(no_width, 1);
-            let controller = Spot::default();
-            controller.set_visible(0);
-            win().theme_view.set(Some(theme));
-            win().theme.set(Some(controller));
-            window.show();
-            #[cfg(target_os = "macos")]
-            {
-                crate::native::attach(win().id, window.window_handle());
-                // The native interface blurs the desktop through the window's transparent parts.
-                window.set_background_color(0x0000_0001);
-                // What the web sidebar asks for once ready (Command::Ready).
-                send_state();
-                send_downloads();
-            }
-            win().window.set(Some(window));
-            place_card();
-            place_reveal();
-            // Only the selected tab loads: the others wait until they are selected.
-            show_selected();
-            if IMPORT_AT_LAUNCH.take() {
-                show_import();
-            }
-            for link in PENDING_LINKS.take() {
-                open_link(Some(link));
-            }
-            for view in RESTORED_WINDOWS.take() {
-                open_window(view, false);
-            }
-            // Once it has settled in front: until then, the window taking the keyboard back
-            // from the Command Bar's field would close it.
-            if win().fresh.take() {
-                post_delayed_task(ThreadId::UI, Some(&mut OpenCommandBar::new(self.id)), 300);
-            }
+            window_ready(window);
         }
 
-        // The window in front shows the live page of its tab, taking it from another window. One
-        // going to the background takes a picture of its page, which still draws, for the window
-        // that may take it.
         fn on_window_activation_changed(&self, _window: Option<&mut Window>, active: i32) {
-            focus(self.id);
-            // Like Arc's, the Command Bar stays as the window comes back, as when it is resized:
-            // the page it shows over keeps it from the focus.
-            let overlay = win()
-                .overlay
-                .with_borrow(|overlay| overlay.as_ref().is_some_and(|o| o.is_visible() == 1));
-            if active == 1 && !overlay {
-                show_selected();
-            } else if active == 0 {
-                snapshot_shown();
-            }
+            window_activated(self.id, active == 1);
         }
 
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
-            WINDOWS.with_borrow_mut(|windows| windows.retain(|win| win.id != self.id));
-            #[cfg(target_os = "macos")]
-            crate::native::detach(self.id);
-            if let Some(next) = WINDOWS.with_borrow(|windows| windows.first().map(|win| win.id)) {
-                focus(next);
-                show_selected();
-            } else if let Some(host) = bridge_host() {
-                // Quitting: the incognito windows' folders go too.
-                for (_, dir) in INCOGNITO.take() {
-                    let _ = std::fs::remove_dir_all(dir);
-                }
-                // The bridge closes last, which quits (browser_closed): closed with the pages, it
-                // could quit while the windows still close their overlays, and the app crashed.
-                host.close_browser(1);
-            }
-            // Once another window holds the sidebar: quitting keeps every window for the next
-            // session.
-            if !CLOSING.get() {
-                save_session();
-            }
+            window_closed(self.id);
         }
 
-        /// Asks every browser to close; the window closes once they all can. With other windows
-        /// open, it closes alone, its pages going to another one, like Arc's.
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
-            focus(self.id);
-            if !CLOSING.get() && WINDOWS.with_borrow(Vec::len) > 1 {
-                close_incognito(self.id);
-                hand_pages_over(self.id);
-                return 1;
-            }
-            CLOSING.set(true);
-            let hosts: Vec<_> = PAGES.with_borrow(|pages| {
-                pages.values().filter_map(|live| live.browser.host()).collect()
-            });
-            let mut closed = 1;
-            for host in hosts {
-                closed &= host.try_close_browser();
-            }
-            closed
-        }
-
-        // No title bar, like Arc: the window buttons sit in the sidebar's toolbar. Only macOS
-        // keeps standard window buttons in a frameless window.
-        fn is_frameless(&self, _window: Option<&mut Window>) -> i32 {
-            cfg!(target_os = "macos").into()
-        }
-
-        // The window buttons are centered vertically in this height.
-        fn titlebar_height(&self, _window: Option<&mut Window>, height: Option<&mut f32>) -> i32 {
-            if let Some(height) = height {
-                *height = TOOLBAR_HEIGHT;
-            }
-            1
+            window_can_close(self.id).into()
         }
 
         fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 { 1 }
@@ -6583,16 +6619,11 @@ wrap_window_delegate! {
         fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 1 }
         fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 1 }
 
-        fn accepts_first_mouse(&self, _window: Option<&mut Window>) -> State {
-            State::ENABLED
-        }
-
         fn window_runtime_style(&self) -> RuntimeStyle {
             RuntimeStyle::ALLOY
         }
     }
 }
-
 wrap_window_delegate! {
     struct SettingsWindowDelegate {}
 

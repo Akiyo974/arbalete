@@ -6,11 +6,6 @@ use cef::{Rect, Size};
 use std::ffi::{CStr, CString, c_char, c_void};
 
 unsafe extern "C" {
-    fn arbalete_ui_attach(
-        window: u32,
-        handle: *mut c_void,
-        send: extern "C" fn(u32, *const c_char),
-    );
     fn arbalete_ui_event(
         window: u32,
         surface: *const c_char,
@@ -45,6 +40,28 @@ unsafe extern "C" {
     fn arbalete_ui_peek(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
     fn arbalete_ui_peek_view(window: u32) -> *mut std::ffi::c_void;
     fn arbalete_ui_peek_closed(window: u32);
+    #[allow(clippy::too_many_arguments)]
+    fn arbalete_ui_open_window(
+        window: u32,
+        framed: bool,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        min_width: f64,
+        min_height: f64,
+        send: extern "C" fn(u32, *const c_char),
+    );
+    fn arbalete_ui_window_frame(
+        window: u32,
+        x: *mut f64,
+        y: *mut f64,
+        width: *mut f64,
+        height: *mut f64,
+    );
+    fn arbalete_ui_window_activate(window: u32);
+    fn arbalete_ui_window_close(window: u32);
+    fn arbalete_ui_window_handle(window: u32) -> *mut c_void;
     fn arbalete_ui_extension_popup_view(window: u32) -> *mut std::ffi::c_void;
     #[allow(clippy::too_many_arguments)]
     fn arbalete_ui_extension_popup_show(
@@ -97,10 +114,101 @@ unsafe extern "C" {
     );
 }
 
-/// Puts the native interface in the window `handle` is, or is in, which the app knows as `window`.
-pub fn attach(window: u32, handle: *mut c_void) {
-    // SAFETY: CEF gives a live NSWindow or NSView, and `send` lives as long as the app.
-    unsafe { arbalete_ui_attach(window, handle, send) };
+/// A main window, which the native interface makes and keeps (app/macos/MainWindow.swift), as
+/// the app knows it, by its id: as CEF's window would, it tells its size and bounds, from the
+/// main screen's top left corner, shows, comes in front and closes.
+#[derive(Clone)]
+pub struct Window(pub u32);
+
+impl Window {
+    /// Makes the window `id`, with its interface, at `bounds` if any, else centered; at least
+    /// `min` large.
+    pub fn open(id: u32, bounds: Option<&Rect>, min: &Size) -> Self {
+        let rect = bounds.cloned().unwrap_or_default();
+        // SAFETY: plain values, and `send` lives as long as the app.
+        unsafe {
+            arbalete_ui_open_window(
+                id,
+                bounds.is_some(),
+                rect.x.into(),
+                rect.y.into(),
+                rect.width.into(),
+                rect.height.into(),
+                min.width.into(),
+                min.height.into(),
+                send,
+            )
+        };
+        Window(id)
+    }
+
+    pub fn bounds(&self) -> Rect {
+        let (mut x, mut y, mut width, mut height) = (0.0, 0.0, 0.0, 0.0);
+        // SAFETY: the interface writes the four values during the call.
+        unsafe { arbalete_ui_window_frame(self.0, &mut x, &mut y, &mut width, &mut height) };
+        let round = |value: f64| value.round() as i32;
+        Rect {
+            x: round(x),
+            y: round(y),
+            width: round(width),
+            height: round(height),
+        }
+    }
+
+    /// Its content's size: the window's, its content filling it.
+    pub fn size(&self) -> Size {
+        let bounds = self.bounds();
+        Size {
+            width: bounds.width,
+            height: bounds.height,
+        }
+    }
+
+    /// Shows it in front, with the keyboard.
+    pub fn show(&self) {
+        self.activate();
+    }
+
+    pub fn activate(&self) {
+        // SAFETY: a plain value.
+        unsafe { arbalete_ui_window_activate(self.0) };
+    }
+
+    /// Asks it to close, which the app may refuse while its pages close.
+    pub fn close(&self) {
+        // SAFETY: a plain value.
+        unsafe { arbalete_ui_window_close(self.0) };
+    }
+
+    /// Its NSWindow, for app/src/mac.rs.
+    pub fn window_handle(&self) -> *mut c_void {
+        // SAFETY: a plain value.
+        unsafe { arbalete_ui_window_handle(self.0) }
+    }
+}
+
+/// The window `window` resized, went into full screen or out of it.
+#[unsafe(no_mangle)]
+pub extern "C" fn arbalete_window_resized(window: u32) {
+    crate::shell::window_resized(window);
+}
+
+/// The window `window` came in front, or left it.
+#[unsafe(no_mangle)]
+pub extern "C" fn arbalete_window_activated(window: u32, active: bool) {
+    crate::shell::window_activated(window, active);
+}
+
+/// Whether the window `window` may close now.
+#[unsafe(no_mangle)]
+pub extern "C" fn arbalete_window_should_close(window: u32) -> bool {
+    crate::shell::window_can_close(window)
+}
+
+/// The window `window` closed.
+#[unsafe(no_mangle)]
+pub extern "C" fn arbalete_window_closed(window: u32) {
+    crate::shell::window_closed(window);
 }
 
 /// Takes the native interface out of `window`, which closed.
