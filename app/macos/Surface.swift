@@ -130,12 +130,30 @@ final class Overlay {
 /// and sidebar.
 @MainActor
 final class Surface {
+    /// How tall a beak is, and half as wide at its base.
+    static let beakHeight: CGFloat = 10
+    private static let beakHalfWidth: CGFloat = 13
     private let overlay: Overlay
     /// Casts its shadow, which its rounded content would clip.
     private let holder = NSView()
+    private let effect = NSVisualEffectView()
+    /// Its edge, a line just inside its outline.
+    private let border = CAShapeLayer()
     private let host: NSView
     private let parent: NSWindow
     private let radius: CGFloat
+    /// Where a beak on its top edge points, from its left edge, like Arc's site controls: its top
+    /// `beakHeight` points are then the beak's, and its content is under them.
+    var beak: CGFloat? {
+        didSet { if beak != oldValue { shape() } }
+    }
+    /// Whether it grows from its beak, or its top's middle, as it shows, and shrinks back as it
+    /// hides, like Arc's site controls.
+    var pops = false
+    /// Told whether it shows, each time the app shows or hides it.
+    var visibility: (Bool) -> Void = { _ in }
+    /// Hides it once it has shrunk.
+    private var hiding: DispatchWorkItem?
     /// Called once the surface shows, to focus what it holds.
     var shown: () -> Void = {}
     /// Whether it takes the keyboard when it shows.
@@ -154,16 +172,10 @@ final class Surface {
     ) {
         self.parent = parent
         self.radius = radius
-        let effect = NSVisualEffectView()
         effect.material = material
         // Over the page and the sidebar, in the same window: it blurs them.
         effect.blendingMode = .withinWindow
         effect.state = .active
-        effect.wantsLayer = true
-        effect.layer?.cornerRadius = radius
-        effect.layer?.masksToBounds = true
-        effect.layer?.borderWidth = 0.5
-        effect.layer?.borderColor = NSColor.separatorColor.cgColor
         effect.autoresizingMask = [.width, .height]
         let host = NSHostingView(rootView: view())
         host.autoresizingMask = [.width, .height]
@@ -176,6 +188,12 @@ final class Surface {
         holder.layer?.shadowRadius = 16
         holder.layer?.shadowOffset = .zero
         holder.addSubview(effect)
+        // Half its stroke shows: the half inside the outline.
+        border.fillColor = nil
+        border.strokeColor = NSColor.separatorColor.cgColor
+        border.lineWidth = 1
+        border.mask = CAShapeLayer()
+        holder.layer?.addSublayer(border)
         overlay = Overlay(view: holder)
         resignedKey = NotificationCenter.default.addObserver(
             forName: NSWindow.didResignKeyNotification, object: parent, queue: .main
@@ -211,12 +229,82 @@ final class Surface {
 
     /// Shows the surface at `frame`, from the window's top left corner, or hides it.
     func place(_ shown: Bool, _ frame: NSRect) {
+        visibility(shown)
+        // Already shrinking away.
+        if !shown, hiding != nil { return }
+        // Shown again as it shrinks, it grows back.
+        let shrunk = hiding != nil
+        hiding?.cancel()
+        hiding = nil
+        if pops, !shown, isShown {
+            pop(growing: false)
+            let hide = DispatchWorkItem { [weak self] in
+                self?.hiding = nil
+                self?.apply(false, frame)
+            }
+            hiding = hide
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.shrinking, execute: hide)
+            return
+        }
+        let showing = shown && !isShown
+        apply(shown, frame)
+        if pops, showing || shrunk { pop(growing: true) }
+    }
+
+    /// How long it takes to shrink away, like Arc's site controls.
+    private static let shrinking = 0.1
+
+    /// Grows it from its beak, or shrinks it back, like Arc's site controls, measured from a
+    /// recording: from half its size with a critically damped spring settling in about 0.2 s,
+    /// fading in over 0.08 s; back to 0.6 of its size, fading out, over 0.1 s.
+    private func pop(growing: Bool) {
+        guard let layer = holder.layer else { return }
+        let bounds = holder.bounds
+        // About its beak's tip, at its top: AppKit anchors a view's layer at its bottom left
+        // corner, y going up.
+        let tip = CGPoint(x: beak ?? bounds.midX, y: bounds.maxY)
+        let small = growing ? 0.5 : 0.6
+        var scaled = CATransform3DMakeTranslation(tip.x, tip.y, 0)
+        scaled = CATransform3DScale(scaled, small, small, 1)
+        scaled = CATransform3DTranslate(scaled, -tip.x, -tip.y, 0)
+        let size: CABasicAnimation
+        let fade = CABasicAnimation(keyPath: "opacity")
+        if growing {
+            let spring = CASpringAnimation(keyPath: "transform")
+            spring.stiffness = 500
+            spring.damping = 45
+            spring.duration = spring.settlingDuration
+            size = spring
+            fade.duration = 0.08
+            fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        } else {
+            size = CABasicAnimation(keyPath: "transform")
+            size.duration = Self.shrinking
+            size.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            fade.duration = Self.shrinking
+            fade.timingFunction = size.timingFunction
+        }
+        let (from, to) = growing ? (scaled, CATransform3DIdentity) : (CATransform3DIdentity, scaled)
+        size.fromValue = NSValue(caTransform3D: from)
+        size.toValue = NSValue(caTransform3D: to)
+        fade.fromValue = growing ? 0 : 1
+        fade.toValue = growing ? 1 : 0
+        let group = CAAnimationGroup()
+        group.animations = [size, fade]
+        group.duration = max(size.duration, fade.duration)
+        // Shrunk, it stays so until it hides.
+        group.fillMode = .forwards
+        group.isRemovedOnCompletion = growing
+        layer.add(group, forKey: "pop")
+    }
+
+    /// Shows or hides it at once.
+    private func apply(_ shown: Bool, _ frame: NSRect) {
         let showing = shown && !isShown
         if showing { before = parent.firstResponder }
         let had = (parent.firstResponder as? NSView)?.isDescendant(of: holder) == true
         overlay.place(in: parent, shown ? frame : nil)
-        holder.layer?.shadowPath = CGPath(
-            roundedRect: holder.bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        if shown { shape() }
         // Hiding, it gives the keyboard back to what had it.
         if !shown, had {
             parent.makeFirstResponder((before as? NSView).flatMap { $0.window === parent ? $0 : nil })
@@ -225,6 +313,60 @@ final class Surface {
         if takesKeyboard { parent.makeKey() }
         // Once its views are made, which they are on first showing.
         DispatchQueue.main.async { self.focus() }
+    }
+
+    /// Fits its blur, edge, shadow and content to its outline.
+    private func shape() {
+        let bounds = holder.bounds
+        // Not placed yet.
+        guard bounds.height > Self.beakHeight else { return }
+        let outline = outline(in: bounds)
+        effect.maskImage = NSImage(size: bounds.size, flipped: false) { _ in
+            NSColor.black.setFill()
+            NSBezierPath(cgPath: outline).fill()
+            return true
+        }
+        border.frame = bounds
+        border.path = outline
+        (border.mask as? CAShapeLayer)?.path = outline
+        holder.layer?.shadowPath = outline
+        var content = bounds
+        if beak != nil { content.size.height -= Self.beakHeight }
+        host.frame = content
+    }
+
+    /// Its outline in `bounds`: a rounded rectangle, with its beak on top if it has one, a bump
+    /// with a rounded tip, like Arc's.
+    private func outline(in bounds: CGRect) -> CGPath {
+        guard let beak else {
+            return CGPath(
+                roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        }
+        let body = bounds.divided(atDistance: Self.beakHeight, from: .maxYEdge).remainder
+        let half = Self.beakHalfWidth
+        // Within its top edge's straight part.
+        let x = min(max(beak, body.minX + radius + half), body.maxX - radius - half)
+        let (top, tip) = (body.maxY, bounds.maxY)
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: body.minX + radius, y: top))
+        path.addLine(to: CGPoint(x: x - half, y: top))
+        path.addCurve(
+            to: CGPoint(x: x, y: tip), control1: CGPoint(x: x - 8, y: top),
+            control2: CGPoint(x: x - 5, y: tip))
+        path.addCurve(
+            to: CGPoint(x: x + half, y: top), control1: CGPoint(x: x + 5, y: tip),
+            control2: CGPoint(x: x + 8, y: top))
+        let corners = [
+            (CGPoint(x: body.maxX, y: top), CGPoint(x: body.maxX, y: body.minY)),
+            (CGPoint(x: body.maxX, y: body.minY), CGPoint(x: body.minX, y: body.minY)),
+            (CGPoint(x: body.minX, y: body.minY), CGPoint(x: body.minX, y: top)),
+            (CGPoint(x: body.minX, y: top), CGPoint(x: body.maxX, y: top)),
+        ]
+        for (corner, next) in corners {
+            path.addArc(tangent1End: corner, tangent2End: next, radius: radius)
+        }
+        path.closeSubpath()
+        return path
     }
 
     /// Focuses what it holds, or itself, if it takes the keyboard.

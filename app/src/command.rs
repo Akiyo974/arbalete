@@ -142,6 +142,8 @@ pub enum Command {
     CloseExtensionPopup,
     /// Opens the Chrome Web Store, to install extensions: `site/store`.
     ShowStore,
+    /// Shows the shown page's certificate, like Arc's: `site/certificate`.
+    ShowCertificate,
     /// Opens Chromium's extensions page, to load an extension from a folder:
     /// `extension/load-unpacked`.
     ShowExtensionsPage,
@@ -579,6 +581,7 @@ impl Command {
             "site/hide" => Some(Self::HideSiteControls),
             "theme/hide" => Some(Self::HideThemePicker),
             "site/store" => Some(Self::ShowStore),
+            "site/certificate" => Some(Self::ShowCertificate),
             "extension/load-unpacked" => Some(Self::ShowExtensionsPage),
             "extension/update" => Some(Self::UpdateExtensions),
             "extension/manage" => Some(Self::ManageExtensions),
@@ -1127,6 +1130,10 @@ mod tests {
         );
         assert_eq!(Command::parse("site/hide"), Some(Command::HideSiteControls));
         assert_eq!(Command::parse("site/store"), Some(Command::ShowStore));
+        assert_eq!(
+            Command::parse("site/certificate"),
+            Some(Command::ShowCertificate)
+        );
         assert_eq!(
             Command::parse("extension/load-unpacked"),
             Some(Command::ShowExtensionsPage)

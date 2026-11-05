@@ -279,6 +279,8 @@ struct IconButton: View {
     var size: CGFloat = 28
     /// The symbol's point size.
     var symbolSize: CGFloat = 13
+    /// What it opens shows: it looks hovered, like Arc's.
+    var active = false
     let action: () -> Void
     private let _hovered = State<Bool>(initialValue: false)
     private var hovered: Bool {
@@ -287,16 +289,17 @@ struct IconButton: View {
     }
 
     var body: some View {
+        let lit = hovered || active
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: symbolSize, weight: .medium))
                 .frame(width: size, height: size)
                 .background(
-                    RoundedRectangle(cornerRadius: 7).fill(.primary.opacity(hovered ? 0.1 : 0)))
+                    RoundedRectangle(cornerRadius: 7).fill(.primary.opacity(lit ? 0.1 : 0)))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .opacity(hovered ? 1 : 0.75)
+        .opacity(lit ? 1 : 0.75)
         .onHover { hovered = $0 }
         .help(label)
         .accessibilityLabel(label)
@@ -333,17 +336,19 @@ struct AddressRow: View {
             .buttonStyle(.plain)
             .help(tab?.url ?? "")
             if tab != nil {
+                // Like Arc's, the address's buttons show while the pointer is over it, and while
+                // the site controls show.
+                let shown = hovered || model.siteControlsShown
                 if copied {
                     Text("Copied").font(.caption).padding(.horizontal, 6)
-                } else if hovered {
+                } else if shown {
                     IconButton(symbol: "link", label: "Copy link", size: 26) {
                         model.run("link/copy")
                         copied = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
                     }
                 }
-                // Like Arc's, the site controls show while the pointer is over the address.
-                if hovered {
+                if shown {
                     SiteControlsButton(model: model)
                 }
                 ForEach(model.state?.extensions ?? []) { ext in
@@ -387,7 +392,10 @@ struct SiteControlsButton: View {
 
     var body: some View {
         GeometryReader { geometry in
-            IconButton(symbol: symbol, label: "Site controls", size: 26, symbolSize: symbolSize) {
+            IconButton(
+                symbol: symbol, label: "Site controls", size: 26, symbolSize: symbolSize,
+                active: model.siteControlsShown
+            ) {
                 model.run("site/show/\(view)/\(inMainWindow(geometry.frame(in: .global)))")
             }
         }

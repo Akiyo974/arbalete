@@ -2,6 +2,7 @@
 // toolbar mode (ui/src/Toolbar.tsx), and the site controls (ui/src/Site.tsx).
 
 import AppKit
+import SecurityInterface
 import SwiftUI
 
 /// Finds text in the page. Each keystroke searches; Enter goes to the next match, Shift-Enter to
@@ -350,14 +351,18 @@ final class SiteControls: ObservableObject {
 
     @Published var site: Site?
     let app: AppModel
+    /// Points the panel's beak at the button, from its left edge.
+    var beak: (CGFloat) -> Void = { _ in }
 
     init(app: AppModel) {
         self.app = app
     }
 
     func handle(_ name: String, _ detail: Data) {
-        if name == "arbalete:show" {
-            site = try? JSONDecoder().decode(Site.self, from: detail)
+        switch name {
+        case "arbalete:show": site = try? JSONDecoder().decode(Site.self, from: detail)
+        case "arbalete:beak": (try? JSONDecoder().decode(CGFloat.self, from: detail)).map(beak)
+        default: break
         }
     }
 }
@@ -370,97 +375,107 @@ private let siteActions = [
     ("clear-cookies", "Clear Cookies", "circle.dotted"),
 ]
 
+/// The site controls' panel, like Arc's, measured from a recording of it, in points: 236 wide,
+/// its content 10 from its edges; a row of 48 by 32 tiles, 8 apart; then its sections, a
+/// 14 point header over their content; and its footer under a line.
 struct SiteView: View {
     @ObservedObject var controls: SiteControls
 
     var body: some View {
         if let site = controls.site {
             let app = controls.app
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 8) {
                     ForEach(siteActions, id: \.0) { item, label, symbol in
-                        SiteTile(label: label) {
+                        SiteTile(label: label, sunken: true) {
                             app.run("site/hide")
                             app.run("menu/choose/site/any/\(item)")
                         } content: {
-                            Image(systemName: symbol).font(.system(size: 15))
+                            Image(systemName: symbol).font(.system(size: 16))
                         }
                     }
                 }
-                HStack {
-                    Text("Extensions").font(.system(size: 12, weight: .semibold))
-                    Spacer()
-                    Button("Manage") { app.run("extension/manage") }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-                LazyVGrid(columns: Array(repeating: GridItem(.fixed(48), spacing: 8), count: 4),
-                    alignment: .leading, spacing: 8
+                SiteSection(
+                    title: "Extensions", more: "Manage", action: { app.run("extension/manage") }
                 ) {
-                    ForEach(site.extensions) { ext in
-                        SiteTile(label: ext.enabled ? ext.name : "\(ext.name) (off)") {
-                            app.run("site/extension/\(ext.id)")
-                        } content: {
-                            Favicon(url: ext.icon, size: 18)
-                        }
-                        .disabled(!ext.popup || !ext.enabled)
-                        .overlay(alignment: .topTrailing) {
-                            Button {
-                                app.run("extension/\(ext.pinned ? "unpin" : "pin")/\(ext.id)")
-                            } label: {
-                                Image(systemName: ext.pinned ? "pin.fill" : "pin")
-                                    .font(.system(size: 9))
-                                    .padding(3)
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.fixed(48), spacing: 8), count: 4),
+                        alignment: .leading, spacing: 8
+                    ) {
+                        ForEach(site.extensions) { ext in
+                            SiteTile(label: ext.enabled ? ext.name : "\(ext.name) (off)") {
+                                app.run("site/extension/\(ext.id)")
+                            } content: {
+                                Favicon(url: ext.icon, size: 16)
+                                    .opacity(ext.enabled ? 1 : 0.4)
                             }
-                            .buttonStyle(.plain)
-                            .help(ext.pinned ? "Unpin" : "Pin")
+                            .disabled(!ext.popup || !ext.enabled)
+                            .contextMenu {
+                                Button(ext.pinned ? "Unpin" : "Pin") {
+                                    app.run("extension/\(ext.pinned ? "unpin" : "pin")/\(ext.id)")
+                                }
+                            }
+                        }
+                        SiteTile(label: "Add Extensions") {
+                            app.run("site/store")
+                        } content: {
+                            Image(systemName: "plus").font(.system(size: 15))
                         }
                     }
-                    SiteTile(label: "Add Extensions") {
-                        app.run("site/store")
-                    } content: {
-                        Image(systemName: "plus").font(.system(size: 15))
-                    }
                 }
-                Text("Settings").font(.system(size: 12, weight: .semibold))
-                // Like Arc's: a row turning the site's developer mode on or off.
-                Button {
-                    let turn = site.developer ? "off" : "on"
-                    app.run("developer/\(turn)/\(percentEncoded(site.site))")
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "hammer.fill")
-                            .font(.system(size: 12))
-                            .frame(width: 26, height: 26)
-                            .background(Circle().fill(.primary.opacity(site.developer ? 0.2 : 0.08)))
-                            .opacity(site.developer ? 1 : 0.5)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Developer Mode").font(.system(size: 12, weight: .semibold))
-                            Text(site.developer ? "On" : "Off")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
+                .padding(.top, 10.5)
+                SiteSection(title: "Settings") {
+                    VStack(alignment: .leading, spacing: 11) {
+                        SiteSetting(
+                            symbol: "hammer.fill", title: "Developer Mode", on: site.developer,
+                            help: "Turn \(site.developer ? "off" : "on") Developer Mode for this site"
+                        ) {
+                            let turn = site.developer ? "off" : "on"
+                            app.run("developer/\(turn)/\(percentEncoded(site.site))")
                         }
-                        Spacer()
+                        if site.suspends {
+                            SiteSetting(
+                                symbol: "sun.max.fill", title: "Keep Awake", on: site.awake,
+                                help: "Keep this site's tabs from being suspended"
+                            ) {
+                                let turn = site.awake ? "off" : "on"
+                                app.run("awake/\(turn)/\(percentEncoded(site.site))")
+                            }
+                        }
                     }
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .help("Turn \(site.developer ? "off" : "on") Developer Mode for this site")
-                if site.suspends {
-                    Toggle("Keep this site awake", isOn: Binding(
-                        get: { site.awake },
-                        set: { app.run("awake/\($0 ? "on" : "off")/\(percentEncoded(site.site))") }
-                    ))
-                    .font(.system(size: 12))
+                .padding(.top, 15.5)
+                Divider().padding(.top, 15.5)
+                HStack(spacing: 0) {
+                    let secure = site.url.hasPrefix("https://")
+                    // Like Arc's, it shows the site's certificate.
+                    Button {
+                        app.run("site/certificate")
+                    } label: {
+                        HStack(spacing: 9) {
+                            Image(systemName: secure ? "lock.fill" : "lock.open.fill")
+                                .font(.system(size: 13))
+                            Text(secure ? "Secure" : "Not Secure")
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        .padding(.horizontal, 10)
+                        .frame(height: 32)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(.primary.opacity(0.08)))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!secure)
+                    .help(secure ? "Show Certificate" : "")
+                    Spacer()
+                    SiteMore(app: app)
                 }
-                Divider()
-                let secure = site.url.hasPrefix("https://")
-                Label(secure ? "Secure" : "Not Secure", systemImage: secure ? "lock" : "lock.open")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                .padding(.top, 10)
             }
-            .padding(14)
+            .padding(.horizontal, 10)
+            .padding(.top, 10)
+            .padding(.bottom, 9)
             .fixedSize(horizontal: false, vertical: true)
             .background(
                 GeometryReader { geometry in
@@ -471,25 +486,169 @@ struct SiteView: View {
         }
     }
 
-    /// Tells the app the panel's height, which it fits it to.
+    /// Tells the app the panel's height, with its beak, which it fits it to.
     private func report(_ height: CGFloat) {
-        controls.app.run("site/height/\(Int(height.rounded(.up)))")
+        controls.app.run("site/height/\(Int((height + Surface.beakHeight).rounded(.up)))")
     }
 }
 
+/// The site controls' "…" button, like Arc's: a round button that pulls down what the site keeps,
+/// and the extensions. Arc's Boosts and site settings have no counterpart here yet.
+struct SiteMore: View {
+    let app: AppModel
+    private let hovered = State(initialValue: false)
+
+    var body: some View {
+        Menu {
+            Button("Clear Cache") { run("menu/choose/site/any/clear-cache") }
+            Button("Clear Cookies") { run("menu/choose/site/any/clear-cookies") }
+            Divider()
+            Button("Manage Extensions…") { run("extension/manage") }
+            Button("Add Extension…") { run("site/store") }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 32, height: 32)
+                .contentShape(Circle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .background(Circle().fill(.primary.opacity(hovered.wrappedValue ? 0.1 : 0)))
+        .onHover { hovered.wrappedValue = $0 }
+        .help("More")
+    }
+
+    /// Runs `command` in place of the site controls.
+    private func run(_ command: String) {
+        app.run("site/hide")
+        app.run(command)
+    }
+}
+
+/// A section of the site controls, like Arc's: its title over its content, and a button beside
+/// the title while the pointer is over the section.
+struct SiteSection<Content: View>: View {
+    let title: String
+    var more: String?
+    var action: () -> Void = {}
+    @ViewBuilder let content: () -> Content
+    private let hovered = State(initialValue: false)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(title).font(.system(size: 14, weight: .bold))
+                Spacer()
+                if let more {
+                    Button(more, action: action)
+                        .buttonStyle(.plain)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .opacity(hovered.wrappedValue ? 1 : 0)
+                }
+            }
+            content()
+        }
+        .contentShape(Rectangle())
+        .onHover { over in
+            withAnimation(.easeOut(duration: 0.1)) { hovered.wrappedValue = over }
+        }
+    }
+}
+
+/// A tile of the site controls, like Arc's: the actions' are sunken, the extensions' flat.
 struct SiteTile<Content: View>: View {
     let label: String
+    var sunken = false
     let action: () -> Void
     @ViewBuilder let content: () -> Content
+    @Environment(\.colorScheme) private var scheme
+    private let hovered = State(initialValue: false)
 
     var body: some View {
         Button(action: action) {
             content()
-                .frame(width: 48, height: 40)
-                .background(RoundedRectangle(cornerRadius: 8).fill(.primary.opacity(0.08)))
+                .frame(width: 48, height: 32)
+                .background(background)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { hovered.wrappedValue = $0 }
         .help(label)
+    }
+
+    private var background: some View {
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        let dark = scheme == .dark
+        let lit = hovered.wrappedValue ? 0.05 : 0
+        return Group {
+            if sunken {
+                // Darker than the panel, its top edge catching the light.
+                shape.fill(dark ? Color.black.opacity(0.45 - lit) : Color.white.opacity(0.7 + lit))
+                    .overlay(
+                        shape.strokeBorder(
+                            LinearGradient(
+                                colors: [.white.opacity(dark ? 0.15 : 0.6), .clear],
+                                startPoint: .top, endPoint: .center),
+                            lineWidth: 1))
+            } else {
+                shape.fill(.primary.opacity(0.05 + lit))
+            }
+        }
+    }
+}
+
+/// A setting of the site, like Arc's: its symbol in a circle, light while it is on, over its name
+/// and state.
+struct SiteSetting: View {
+    let symbol: String
+    let title: String
+    let on: Bool
+    let help: String
+    let action: () -> Void
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(systemName: symbol)
+                    .font(.system(size: 14))
+                    .foregroundStyle(on ? (scheme == .dark ? Color.black : Color.white) : Color.primary)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(.primary.opacity(on ? 0.88 : 0.25)))
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                    Text(on ? "On" : "Off")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+}
+
+/// Shows a site's certificate on the window `id`, like Arc's: macOS's certificate sheet, with the
+/// certificates that issued it above it. `certificates` are DER encoded, the site's first.
+@_cdecl("arbalete_ui_certificate")
+public func showCertificate(
+    _ id: UInt32, _ certificates: UnsafePointer<UnsafePointer<UInt8>>,
+    _ sizes: UnsafePointer<Int>, _ count: Int
+) {
+    MainActor.assumeIsolated {
+        guard let window = nativeWindows[id]?.window else { return }
+        let chain = (0..<count).compactMap {
+            SecCertificateCreateWithData(nil, Data(bytes: certificates[$0], count: sizes[$0]) as CFData)
+        }
+        guard !chain.isEmpty else { return }
+        SFCertificatePanel.shared().beginSheet(
+            for: window, modalDelegate: nil, didEnd: nil, contextInfo: nil, certificates: chain,
+            showGroup: false)
     }
 }

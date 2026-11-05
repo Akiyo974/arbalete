@@ -3531,8 +3531,10 @@ struct ExtensionPopup {
 
 /// The gap between the site controls' button and the panel under it.
 const PANEL_GAP: i32 = 6;
-/// The site controls' panel's width (ui/src/Site.tsx).
-const SITE_WIDTH: i32 = 300;
+/// The site controls' panel's width, like Arc's (SiteView in app/macos/Panels.swift).
+const SITE_WIDTH: i32 = 236;
+/// The gap between the site controls' button and the tip of their panel's beak, like Arc's.
+const BEAK_GAP: i32 = 2;
 
 /// Where a panel `size` large stands under `button`, centered on it, within a window of `window`.
 fn under(button: &Rect, size: &Size, window: &Size) -> Rect {
@@ -3702,7 +3704,8 @@ fn selected_url() -> Option<String> {
     STATE.with_borrow_mut(|state| active_tab(&mut state.sidebar).map(|tab| tab.url.clone()))
 }
 
-/// Puts the site controls' panel under their button, as tall as its page asks.
+/// Puts the site controls' panel under their button, as tall as its page asks, its beak pointing
+/// at the button.
 fn place_site_controls() {
     let (Some(controller), Some(button), Some(window)) = (
         win().site.with_borrow(Clone::clone),
@@ -3717,7 +3720,44 @@ fn place_site_controls() {
         width: SITE_WIDTH,
         height: win().site_height.get(),
     };
-    controller.set_bounds(Some(&under(&button, &size, &window)));
+    let mut bounds = under(&button, &size, &window);
+    bounds.y += BEAK_GAP - PANEL_GAP;
+    let beak = button.x + button.width / 2 - bounds.x;
+    dispatch(
+        &win().site_view,
+        &format!(r#"new CustomEvent("arbalete:beak", {{ detail: {beak} }})"#),
+    );
+    controller.set_bounds(Some(&bounds));
+}
+
+/// Shows the shown page's certificate and the ones that issued it, like Arc's, in place of the
+/// site controls: macOS's certificate sheet on the window.
+fn show_certificate() {
+    hide_site_controls();
+    let certificate = content()
+        .and_then(|browser| browser.host())
+        .and_then(|host| host.visible_navigation_entry())
+        .and_then(|entry| entry.sslstatus())
+        .and_then(|status| status.x509_certificate());
+    let Some(certificate) = certificate else {
+        return;
+    };
+    let mut issuers: Vec<Option<BinaryValue>> =
+        (0..certificate.issuer_chain_size()).map(|_| None).collect();
+    certificate.derencoded_issuer_chain(Some(&mut issuers));
+    let chain: Vec<Vec<u8>> = std::iter::once(certificate.derencoded())
+        .chain(issuers)
+        .flatten()
+        .map(|der| {
+            let mut bytes = vec![0; der.size()];
+            der.data(Some(&mut bytes), 0);
+            bytes
+        })
+        .collect();
+    #[cfg(target_os = "macos")]
+    crate::native::certificate(win().id, &chain);
+    #[cfg(not(target_os = "macos"))]
+    let _ = chain;
 }
 
 /// Hides the site controls' panel, if it shows.
@@ -6301,6 +6341,7 @@ fn run_command(command: Command) {
         }
         (Command::OpenExtensionPopup(id), _) => open_extension_popup(&id),
         (Command::ShowStore, _) => show_store(),
+        (Command::ShowCertificate, _) => show_certificate(),
         (Command::ShowExtensionsPage, _) => extensions::load_unpacked(displayed_profile()),
         (Command::UpdateExtensions, _) => extensions::update(displayed_profile()),
         (Command::ManageExtensions, _) => {

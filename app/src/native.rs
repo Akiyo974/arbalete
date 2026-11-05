@@ -23,6 +23,12 @@ unsafe extern "C" {
     );
     fn arbalete_ui_detach(window: u32);
     fn arbalete_ui_settings(shown: bool);
+    fn arbalete_ui_certificate(
+        window: u32,
+        certificates: *const *const u8,
+        sizes: *const usize,
+        count: usize,
+    );
     fn arbalete_ui_little(id: u32, handle: *mut c_void);
     fn arbalete_ui_settings_focused() -> bool;
     fn arbalete_ui_make_default_browser();
@@ -295,6 +301,18 @@ pub fn little(id: u32, handle: Option<*mut c_void>) {
 pub fn settings(shown: bool) {
     // SAFETY: a plain value.
     unsafe { arbalete_ui_settings(shown) };
+}
+
+/// Shows a certificate sheet on the window: `chain`, DER encoded, the site's certificate first,
+/// then the ones that issued it.
+pub fn certificate(window: u32, chain: &[Vec<u8>]) {
+    if chain.is_empty() {
+        return;
+    }
+    let certificates: Vec<*const u8> = chain.iter().map(|der| der.as_ptr()).collect();
+    let sizes: Vec<usize> = chain.iter().map(Vec::len).collect();
+    // SAFETY: the arrays and the bytes they point to outlive the call, which copies them.
+    unsafe { arbalete_ui_certificate(window, certificates.as_ptr(), sizes.as_ptr(), chain.len()) };
 }
 
 /// Puts the handles that resize a split's pages at `frames`, in the window's points from its top

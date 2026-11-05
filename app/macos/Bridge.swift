@@ -12,6 +12,8 @@ public typealias Send = @convention(c) (UInt32, UnsafePointer<CChar>) -> Void
 @MainActor
 final class AppModel: ObservableObject {
     @Published var state: AppState?
+    /// The site controls' panel shows: their button, and the address's, stay in sight.
+    @Published var siteControlsShown = false
     /// The folder or the tab whose name is being edited.
     @Published var renaming: Int?
     /// The Space whose name or icon ("name" or "emoji") is edited in its header.
@@ -606,7 +608,14 @@ final class NativeWindow {
         surfaces["find"] = findSurface
         let site = SiteControls(app: app)
         siteControls = site
-        let siteSurface = Surface(in: window, radius: 12) { SiteView(controls: site) }
+        // Arc's, measured from a recording.
+        let siteSurface = Surface(in: window, radius: 18) { SiteView(controls: site) }
+        siteSurface.pops = true
+        siteSurface.visibility = { shown in
+            if app.siteControlsShown != shown { app.siteControlsShown = shown }
+        }
+        siteSurface.beak = 0
+        site.beak = { [weak siteSurface] in siteSurface?.beak = $0 }
         siteSurface.takesKeyboard = true
         siteSurface.resigned = { app.run("site/hide") }
         surfaces["site"] = siteSurface
