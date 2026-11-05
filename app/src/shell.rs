@@ -2014,6 +2014,8 @@ fn relayout_library() {
     if let Some(sidebar) = win().sidebar.with_borrow(Clone::clone) {
         sidebar.invalidate_layout();
     }
+    #[cfg(target_os = "macos")]
+    place_native_sidebar();
     #[cfg(not(target_os = "macos"))]
     if let Some(window) = win().window.with_borrow(Clone::clone) {
         window.layout();
