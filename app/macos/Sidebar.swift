@@ -12,6 +12,11 @@ let spaceSlide = 0.3
 
 struct SidebarView: View {
     @ObservedObject var model: AppModel
+    private let _hovered = State<Bool>(initialValue: false)
+    private var hovered: Bool {
+        get { _hovered.wrappedValue }
+        nonmutating set { _hovered.wrappedValue = newValue }
+    }
 
     var body: some View {
         if model.libraryShown {
@@ -31,7 +36,7 @@ struct SidebarView: View {
                     } else {
                         VStack(spacing: 0) {
                             if !(model.state?.toolbar ?? false) {
-                                AddressRow(model: model)
+                                AddressRow(model: model, sidebarHovered: hovered)
                             }
                             if model.state?.incognito == true, let page = model.page {
                                 IncognitoSections(model: model, page: page)
@@ -67,6 +72,7 @@ struct SidebarView: View {
             .padding(.horizontal, Measure.inset)
             .foregroundStyle(.primary)
             .overlay(alignment: .trailing) { CreateHint(model: model) }
+            .onHover { hovered = $0 }
             // Like Arc's, the sidebar's empty room offers the displayed Space's menu.
             .overlay(RightClick(underOthers: true) {
                 if let page = model.page { model.run("menu/space/\(page.space)") }
@@ -311,19 +317,19 @@ struct IconButton: View {
 /// The selected tab's host: a click edits the address in the Command Bar, as ⌘L does.
 struct AddressRow: View {
     @ObservedObject var model: AppModel
+    /// Whether the pointer is over the sidebar, which shows the address's buttons.
+    var sidebarHovered: Bool
     private let _copied = State<Bool>(initialValue: false)
     private var copied: Bool {
         get { _copied.wrappedValue }
         nonmutating set { _copied.wrappedValue = newValue }
     }
-    private let _hovered = State<Bool>(initialValue: false)
-    private var hovered: Bool {
-        get { _hovered.wrappedValue }
-        nonmutating set { _hovered.wrappedValue = newValue }
-    }
 
     var body: some View {
         let tab = model.activeTab
+        // Like Arc's, the address's buttons, the pinned extensions first, fade in while the
+        // pointer is over the sidebar, and stay while the site controls show.
+        let shown = sidebarHovered || model.siteControlsShown || copied
         HStack(spacing: 2) {
             Button {
                 model.run("overlay/edit")
@@ -338,25 +344,24 @@ struct AddressRow: View {
             .buttonStyle(.plain)
             .help(tab?.url ?? "")
             if tab != nil {
-                // Like Arc's, the pinned extensions first, always there.
-                ForEach(model.state?.extensions ?? []) { ext in
-                    PinnedExtension(model: model, extension: ext)
-                }
-                // Like Arc's, the address's buttons show while the pointer is over it, and while
-                // the site controls show.
-                let shown = hovered || model.siteControlsShown
-                if copied {
-                    Text("Copied").font(.caption).padding(.horizontal, 6)
-                } else if shown {
-                    IconButton(symbol: "link", label: "Copy link", size: 26) {
-                        model.run("link/copy")
-                        copied = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+                HStack(spacing: 2) {
+                    ForEach(model.state?.extensions ?? []) { ext in
+                        PinnedExtension(model: model, extension: ext)
                     }
-                }
-                if shown {
+                    if copied {
+                        Text("Copied").font(.caption).padding(.horizontal, 6)
+                    } else {
+                        IconButton(symbol: "link", label: "Copy link", size: 26) {
+                            model.run("link/copy")
+                            copied = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+                        }
+                    }
                     SiteControlsButton(model: model)
                 }
+                .opacity(shown ? 1 : 0)
+                .allowsHitTesting(shown)
+                .animation(.easeInOut(duration: 0.2), value: shown)
             }
         }
         .padding(.trailing, 4)
@@ -369,7 +374,6 @@ struct AddressRow: View {
                     .padding(.horizontal, 10)
             }
         }
-        .onHover { hovered = $0 }
         // 46 points from the window's top, like Arc's.
         .padding(.top, 46 - windowButtonsCenter - 20)
         .padding(.bottom, 7)
