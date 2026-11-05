@@ -2240,6 +2240,14 @@ fn is_chrome_page(url: &str) -> bool {
     url.starts_with("chrome://")
 }
 
+/// Whether the window of Chromium's own pages is the one in front.
+fn chrome_page_focused() -> bool {
+    CHROME_PAGE.with_borrow(|page| {
+        page.as_ref()
+            .is_some_and(|(window, _)| window.is_active() == 1)
+    })
+}
+
 /// Shows one of Chromium's own pages, like a site's settings or the extensions, in a Chrome-style
 /// window of its own, in the displayed Space's profile: Alloy pages have none, and macOS has no
 /// Chrome style in a native view. The window open loads it instead.
@@ -2254,8 +2262,14 @@ fn open_chrome_page(url: &str) {
         window.activate();
         return;
     }
+    // An incognito window's profile, whose web data stays in memory, has no Chrome-style page:
+    // Chromium's own pages show the first profile's, as an incognito window keeps no history.
+    let profile = Some(displayed_profile())
+        .filter(|profile| INCOGNITO.with_borrow(|incognito| !incognito.contains_key(profile)))
+        .or_else(|| STATE.with_borrow(|state| state.sidebar.profiles().first().map(|p| p.id)))
+        .unwrap_or_else(displayed_profile);
     window_create_top_level(Some(&mut ChromePageWindowDelegate::new(
-        displayed_profile(),
+        profile,
         url.to_string(),
     )));
 }
@@ -6541,6 +6555,12 @@ fn run_command(command: Command) {
             Ok((sidebar.remove_split(split)?, profile))
         }),
         (Command::Close(None), _) if settings_focused() => close_settings(),
+        // ⌘W closes the window of Chromium's own pages when it is in front.
+        (Command::Close(None), _) if chrome_page_focused() => {
+            if let Some((window, _)) = CHROME_PAGE.with_borrow(Clone::clone) {
+                window.close();
+            }
+        }
         // Like Arc's, ⌘W closes Peek and ⌘O keeps its page in a tab.
         (Command::Close(None), _) if peek_shown() => close_peek(),
         (Command::OpenLittleInSpace, _) if peek_shown() => keep_peek(false),
@@ -6890,6 +6910,23 @@ pub fn close() {
     let littles: Vec<_> = LITTLE.with_borrow(|littles| littles.iter().map(|l| l.id).collect());
     for id in littles {
         close_little(id);
+    }
+    // The developer tools in a window of their own, Chromium's own pages and the browsers
+    // Chromium opened by itself, which would keep the app from quitting.
+    let inspectors: Vec<_> =
+        INSPECTORS.with_borrow(|inspectors| inspectors.keys().copied().collect());
+    for tab in inspectors {
+        close_inspector(tab);
+    }
+    if let Some((window, _)) = CHROME_PAGE.with_borrow(Clone::clone) {
+        window.close();
+    }
+    for host in STRAYS
+        .with_borrow(Clone::clone)
+        .iter()
+        .filter_map(|browser| browser.host())
+    {
+        host.close_browser(1);
     }
     if !CLOSING.replace(true) {
         QUIT_WINDOWS.set(Some(other_windows()));
