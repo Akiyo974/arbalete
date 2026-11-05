@@ -547,7 +547,9 @@ path stays for what has not moved yet.
 4. **Extension popups**, then removing what the CEF views path leaves: the card's views, `lay_out_split`, the
    inspector's stage, the frames sent for bars, and the child windows' reordering.
 5. **The window**: a native window holding the sidebar and the containers, instead of CEF's window and the
-   card's; then the other windows CEF draws (Little Arbalete, developer tools on their own, permissions).
+   card's; then the other windows CEF draws (Little Arbalete, developer tools on their own). The permission
+   window stays CEF's: Chromium prompts only from a Chrome-style page.
+- **Done (2026-11-05)**: every page in a native container, every panel a view of a native window.
 
 ### Later
 - **Linux and Windows**, last and not planned for now: CI on both (system libraries CEF needs, loading `libcef`
