@@ -168,6 +168,9 @@ thread_local! {
     /// open in.
     static LITTLE: RefCell<Vec<Little>> = const { RefCell::new(Vec::new()) };
     static NEXT_LITTLE: Cell<u32> = const { Cell::new(0) };
+    /// The Little Arbalete windows' pages closing as another profile's take their place, by
+    /// browser id.
+    static REPLACED_LITTLE_PAGES: RefCell<Vec<i32>> = const { RefCell::new(Vec::new()) };
     /// Links other apps asked to open before the main window existed.
     static PENDING_LINKS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     /// The settings, in a window of their own while it is open.
@@ -2842,32 +2845,9 @@ fn open_little(url: Option<String>) {
         let Some(view) = crate::native::open_little(id) else {
             return;
         };
-        let info = WindowInfo {
-            parent_view: view,
-            // Any size: the window gives the page its own.
-            bounds: Rect {
-                x: 0,
-                y: 0,
-                width: 800,
-                height: 600,
-            },
-            runtime_style: RuntimeStyle::ALLOY,
-            ..Default::default()
-        };
-        let start = if url.is_empty() { "about:blank" } else { &url };
-        let Some(browser) = browser_host_create_browser_sync(
-            Some(&info),
-            Some(&mut ContentClient::new(profile, true)),
-            Some(&CefString::from(start)),
-            Some(&BrowserSettings::default()),
-            None,
-            profile_context(profile).as_mut(),
-        ) else {
+        let Some(browser) = little_page(view, profile, &url) else {
             return crate::native::little_closed(id);
         };
-        if let Some(host) = browser.host() {
-            host.set_focus(1);
-        }
         LITTLE.with_borrow_mut(|littles| {
             littles.push(Little {
                 id,
@@ -2881,6 +2861,37 @@ fn open_little(url: Option<String>) {
     }
     #[cfg(not(target_os = "macos"))]
     window_create_top_level(Some(&mut LittleWindowDelegate::new(id, profile, url)));
+}
+
+/// Makes a Little Arbalete window's page, in `profile`, on `url`, in its window's `view`, with
+/// the keyboard.
+#[cfg(target_os = "macos")]
+fn little_page(view: *mut std::ffi::c_void, profile: ProfileId, url: &str) -> Option<Browser> {
+    let info = WindowInfo {
+        parent_view: view,
+        // Any size: the window gives the page its own.
+        bounds: Rect {
+            x: 0,
+            y: 0,
+            width: 800,
+            height: 600,
+        },
+        runtime_style: RuntimeStyle::ALLOY,
+        ..Default::default()
+    };
+    let start = if url.is_empty() { "about:blank" } else { url };
+    let browser = browser_host_create_browser_sync(
+        Some(&info),
+        Some(&mut ContentClient::new(profile, true)),
+        Some(&CefString::from(start)),
+        Some(&BrowserSettings::default()),
+        None,
+        profile_context(profile).as_mut(),
+    )?;
+    if let Some(host) = browser.host() {
+        host.set_focus(1);
+    }
+    Some(browser)
 }
 
 /// A Little Arbalete window's page's browser.
@@ -2934,19 +2945,50 @@ fn little_action(id: u32, action: LittleAction) {
                 frame.load_url(Some(&CefString::from(url.as_str())));
             }
         }
-        LittleAction::OpenInSpace => {
+        LittleAction::OpenInSpace(space) => {
             let url = LITTLE
                 .with_borrow(|littles| Some(littles.iter().find(|l| l.id == id)?.url.clone()));
             let Some(url) = url.filter(|url| !url.is_empty()) else {
                 return;
             };
-            open_tab(&url);
+            open_in_window(space, &url);
             close_little(id);
-            if let Some(window) = win().window.with_borrow(Clone::clone) {
-                window.activate();
-            }
         }
+        LittleAction::SetProfile(profile) => set_little_profile(id, profile),
     }
+}
+
+/// Opens a Little Arbalete window's page again in `profile`, at the same address, like Little
+/// Arc's profile menu: the new page takes the old one's place, which closes.
+fn set_little_profile(id: u32, profile: ProfileId) {
+    #[cfg(target_os = "macos")]
+    {
+        let found = LITTLE.with_borrow(|littles| {
+            let little = littles
+                .iter()
+                .find(|l| l.id == id && l.profile != profile)?;
+            Some((little.browser.clone(), little.url.clone()))
+        });
+        let (Some((old, url)), Some(view)) = (found, crate::native::little_page(id)) else {
+            return;
+        };
+        let Some(browser) = little_page(view, profile, &url) else {
+            return;
+        };
+        LITTLE.with_borrow_mut(|littles| {
+            if let Some(little) = littles.iter_mut().find(|l| l.id == id) {
+                little.browser = browser;
+                little.profile = profile;
+            }
+        });
+        REPLACED_LITTLE_PAGES.with_borrow_mut(|pages| pages.push(old.identifier()));
+        if let Some(host) = old.host() {
+            host.close_browser(1);
+        }
+        send_little(id);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (id, profile);
 }
 
 /// Changes what a Little Arbalete window's bar shows of its page, if `browser` is one's page.
@@ -2970,16 +3012,29 @@ fn little_changed(browser: &mut Browser, change: impl FnOnce(&mut Little)) {
 fn send_little(id: u32) {
     let found = LITTLE.with_borrow(|littles| {
         let little = littles.iter().find(|l| l.id == id)?;
-        let (space, engine, name) = STATE.with_borrow(|state| {
+        let (space, engine, name, spaces, profiles) = STATE.with_borrow(|state| {
             let sidebar = &state.sidebar;
             let space = sidebar.displayed();
             let profile = sidebar.profiles().iter().find(|p| p.id == little.profile);
             let engine = profile.map(|p| p.search_engine).unwrap_or_default();
             let name = profile.map(|p| p.name.clone()).unwrap_or_default();
+            // What its chevron moves its page into, and its profile's menu offers.
+            let spaces: Vec<_> = sidebar
+                .spaces()
+                .iter()
+                .map(|s| json!({ "id": s.id, "title": s.title, "emoji": s.emoji }))
+                .collect();
+            let profiles: Vec<_> = sidebar
+                .profiles()
+                .iter()
+                .map(|p| json!({ "id": p.id, "name": p.name, "current": p.id == little.profile }))
+                .collect();
             (
                 json!({ "title": space.title, "emoji": space.emoji }),
                 engine,
                 name,
+                spaces,
+                profiles,
             )
         });
         let search = json!({ "name": engine.name(), "url": engine.url() });
@@ -2987,7 +3042,9 @@ fn send_little(id: u32) {
             "url": little.url,
             "title": little.title,
             "profile": name,
+            "profiles": profiles,
             "space": space,
+            "spaces": spaces,
             "search": search,
         });
         Some(detail)
@@ -5901,6 +5958,21 @@ wrap_task! {
 
 #[cfg(target_os = "macos")]
 wrap_task! {
+    struct RemoveLittlePage {
+        view: usize,
+    }
+
+    impl Task {
+        /// Takes a Little Arbalete window's page out of it, another profile's having taken its
+        /// place, which destroys its browser.
+        fn execute(&self) {
+            crate::native::little_page_closed(self.view as *mut std::ffi::c_void);
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+wrap_task! {
     struct RemoveLittle {
         id: u32,
     }
@@ -6356,7 +6428,7 @@ fn run_command(command: Command) {
         (Command::Little(id, action), _) => little_action(id, action),
         (Command::OpenLittleInSpace, _) => {
             if let Some(id) = focused_little() {
-                little_action(id, LittleAction::OpenInSpace);
+                little_action(id, LittleAction::OpenInSpace(None));
             }
         }
         (Command::HideSettings, _) => close_settings(),
@@ -8005,9 +8077,20 @@ wrap_life_span_handler! {
             if self.profile.is_none() {
                 // A Little Arbalete window's page closes its window; Peek's leaves its card.
                 #[cfg(target_os = "macos")]
-                if let Some(id) = browser.as_deref().and_then(little_of) {
-                    post_task(ThreadId::UI, Some(&mut RemoveLittle::new(id)));
-                    return 1;
+                if let Some(browser) = browser.as_deref() {
+                    let replaced = REPLACED_LITTLE_PAGES.with_borrow_mut(|pages| {
+                        let at = pages.iter().position(|&page| page == browser.identifier())?;
+                        Some(pages.remove(at))
+                    });
+                    if let (Some(_), Some(host)) = (replaced, browser.host()) {
+                        let view = host.window_handle() as usize;
+                        post_task(ThreadId::UI, Some(&mut RemoveLittlePage::new(view)));
+                        return 1;
+                    }
+                    if let Some(id) = little_of(browser) {
+                        post_task(ThreadId::UI, Some(&mut RemoveLittle::new(id)));
+                        return 1;
+                    }
                 }
                 let Some((id, window)) = PEEK_CLOSING.get() else { return 0 };
                 if browser.is_none_or(|browser| browser.identifier() != id) {

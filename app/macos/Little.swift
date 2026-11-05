@@ -12,12 +12,25 @@ struct LittleDetail: Decodable {
         var title: String
         var emoji: String?
     }
+    struct SpaceChoice: Decodable, Identifiable {
+        var id: UInt64
+        var title: String
+        var emoji: String?
+    }
+    struct ProfileChoice: Decodable, Identifiable {
+        var id: UInt64
+        var name: String
+        var current: Bool
+    }
     var url: String
     var title: String
-    /// The profile its page is in.
+    /// The profile its page is in, and the others it may move to.
     var profile: String?
-    /// The displayed Space, which "Open in" moves the page into.
+    var profiles: [ProfileChoice]?
+    /// The displayed Space, which "Open in" moves the page into, and the others its chevron
+    /// offers.
     var space: SpaceName
+    var spaces: [SpaceChoice]?
     var search: SearchEngine
 }
 
@@ -251,27 +264,48 @@ struct LittleBarView: View {
             let empty = page.url.isEmpty || page.url == "about:blank"
             HStack(spacing: 9) {
                 address(page, empty: empty)
-                Button {
-                    bar.app.run("little/\(bar.id)/open")
-                } label: {
-                    HStack(spacing: 5) {
-                        Text("Open in").foregroundStyle(.secondary)
-                        Text(page.space.title).fontWeight(.semibold).lineLimit(1)
-                        Text("⌘O").font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 4)
-                            .frame(height: 18)
-                            .background(RoundedRectangle(cornerRadius: 4).fill(.primary.opacity(0.1)))
+                // Like Little Arc's: the displayed Space, or another from the chevron.
+                HStack(spacing: 0) {
+                    Button {
+                        bar.app.run("little/\(bar.id)/open")
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text("Open in").foregroundStyle(.secondary)
+                            Text(page.space.title).fontWeight(.semibold).lineLimit(1)
+                            Text("⌘O").font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 4)
+                                .frame(height: 18)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 4).fill(.primary.opacity(0.1)))
+                        }
+                        .padding(.leading, 10)
+                        .padding(.trailing, 8)
+                        .frame(maxHeight: .infinity)
+                        .contentShape(Rectangle())
                     }
-                    .font(.system(size: 13))
-                    .padding(.horizontal, 10)
-                    .frame(height: 30)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(.black.opacity(0.3)))
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .help("Open in \(page.space.title) (⌘O)")
+                    Rectangle().fill(.primary.opacity(0.15)).frame(width: 1, height: 16)
+                    Menu {
+                        ForEach(page.spaces ?? []) { space in
+                            Button((space.emoji.map { "\($0) " } ?? "") + space.title) {
+                                bar.app.run("little/\(bar.id)/open/\(space.id)")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .frame(width: 26)
+                    .help("Open in Another Space")
                 }
-                .buttonStyle(.plain)
+                .font(.system(size: 13))
+                .frame(height: 30)
+                .background(RoundedRectangle(cornerRadius: 6).fill(.black.opacity(0.3)))
                 .fixedSize()
-                .help("Open in \(page.space.title) (⌘O)")
                 .disabled(empty)
             }
             .padding(.leading, littleAddressLeading)
@@ -291,15 +325,33 @@ struct LittleBarView: View {
                 .padding(.horizontal, 90)
             HStack(spacing: 0) {
                 if let profile = page.profile, !profile.isEmpty {
-                    HStack(spacing: 4) {
-                        Image(systemName: "face.smiling").font(.system(size: 11))
-                        Text(profile).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                    // Like Little Arc's, a menu opening the page again in another profile.
+                    Menu {
+                        ForEach(page.profiles ?? []) { choice in
+                            Toggle(
+                                choice.name,
+                                isOn: Binding(
+                                    get: { choice.current },
+                                    set: { _ in
+                                        bar.app.run("little/\(bar.id)/profile/\(choice.id)")
+                                    }))
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "face.smiling").font(.system(size: 11))
+                            Text(profile).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                        }
+                        .padding(.horizontal, 6)
+                        .frame(height: 21)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4).fill(
+                                Color.ink((0x0E0F10, 0.06), (0xFAFBFF, 0.08))))
                     }
-                    .padding(.horizontal, 6)
-                    .frame(height: 21)
-                    .background(
-                        RoundedRectangle(cornerRadius: 4).fill(
-                            Color.ink((0x0E0F10, 0.06), (0xFAFBFF, 0.08))))
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .disabled((page.profiles?.count ?? 0) < 2)
+                    .help("Profile")
                 }
                 Spacer(minLength: 0)
                 if !empty {
@@ -350,6 +402,30 @@ public func openLittle(_ id: UInt32) -> UnsafeMutableRawPointer? {
 @_cdecl("arbalete_ui_little_closed")
 public func littleClosed(_ id: UInt32) {
     MainActor.assumeIsolated { littles.removeValue(forKey: Int(id))?.window.close() }
+}
+
+/// The view the Little Arbalete window `id`'s page is drawn in.
+@_cdecl("arbalete_ui_little_page")
+public func littlePage(_ id: UInt32) -> UnsafeMutableRawPointer? {
+    let address: UInt = MainActor.assumeIsolated {
+        guard let page = littles[Int(id)]?.page else { return 0 }
+        return UInt(bitPattern: Unmanaged.passUnretained(page).toOpaque())
+    }
+    return UnsafeMutableRawPointer(bitPattern: address)
+}
+
+/// Takes a Little Arbalete window's page closing out of it, by CEF's view of it: only its
+/// address, as CEF may have destroyed it since.
+@_cdecl("arbalete_ui_little_page_closed")
+public func littlePageClosed(_ view: UnsafeMutableRawPointer) {
+    let address = UInt(bitPattern: view)
+    MainActor.assumeIsolated {
+        for little in littles.values {
+            little.page.subviews
+                .first { UInt(bitPattern: Unmanaged.passUnretained($0).toOpaque()) == address }?
+                .removeFromSuperview()
+        }
+    }
 }
 
 /// The Little Arbalete window that has the keyboard, or -1.

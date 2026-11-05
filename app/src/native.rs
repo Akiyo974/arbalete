@@ -33,6 +33,8 @@ unsafe extern "C" {
     fn arbalete_ui_little_closed(id: u32);
     fn arbalete_ui_focused_little() -> i64;
     fn arbalete_ui_little_bar();
+    fn arbalete_ui_little_page(id: u32) -> *mut c_void;
+    fn arbalete_ui_little_page_closed(view: *mut c_void);
     fn arbalete_ui_settings_focused() -> bool;
     fn arbalete_ui_make_default_browser();
     fn arbalete_ui_split(window: u32, stacked: bool, frames: *const f64, count: usize);
@@ -312,6 +314,19 @@ pub fn little_closed(id: u32) {
 pub fn little_bar() {
     // SAFETY: no arguments.
     unsafe { arbalete_ui_little_bar() };
+}
+
+/// The view the Little Arbalete window `id`'s page is drawn in, which CEF makes a page in.
+pub fn little_page(id: u32) -> Option<*mut c_void> {
+    // SAFETY: a plain value; the view lives until little_closed.
+    let view = unsafe { arbalete_ui_little_page(id) };
+    (!view.is_null()).then_some(view)
+}
+
+/// Takes a Little Arbalete window's page out of it, its browser, whose view is `view`, closing.
+pub fn little_page_closed(view: *mut c_void) {
+    // SAFETY: CEF's view of a browser closing, which the call only compares.
+    unsafe { arbalete_ui_little_page_closed(view) };
 }
 
 /// The Little Arbalete window that has the keyboard, if any.

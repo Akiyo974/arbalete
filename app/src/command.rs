@@ -21,8 +21,11 @@ pub enum LittleAction {
     Ready,
     /// Loads an address in the window's page.
     Navigate(String),
-    /// Moves the page into the displayed Space, as a tab, and closes the window.
-    OpenInSpace,
+    /// Moves the page into a Space, the displayed one without, as a tab, and closes the window:
+    /// `open` or `open/<space id>`.
+    OpenInSpace(Option<SpaceId>),
+    /// Opens the page again in another profile: `profile/<profile id>`.
+    SetProfile(ProfileId),
 }
 
 /// What Peek's bar asks of its page (Command::PeekPage).
@@ -1017,7 +1020,13 @@ impl Command {
                     let id = id.parse().ok()?;
                     let action = match action {
                         "ready" => LittleAction::Ready,
-                        "open" => LittleAction::OpenInSpace,
+                        "open" => LittleAction::OpenInSpace(None),
+                        _ if action.starts_with("open/") => LittleAction::OpenInSpace(Some(
+                            serde_json::from_str(action.strip_prefix("open/")?).ok()?,
+                        )),
+                        _ if action.starts_with("profile/") => LittleAction::SetProfile(
+                            serde_json::from_str(action.strip_prefix("profile/")?).ok()?,
+                        ),
                         _ => LittleAction::Navigate(percent_decode(
                             action.strip_prefix("navigate/")?,
                         )?),
@@ -1812,8 +1821,16 @@ mod tests {
         );
         assert_eq!(
             Command::parse("little/3/open"),
-            Some(Command::Little(3, LittleAction::OpenInSpace))
+            Some(Command::Little(3, LittleAction::OpenInSpace(None)))
         );
+        assert!(matches!(
+            Command::parse("little/3/open/7"),
+            Some(Command::Little(3, LittleAction::OpenInSpace(Some(_))))
+        ));
+        assert!(matches!(
+            Command::parse("little/3/profile/2"),
+            Some(Command::Little(3, LittleAction::SetProfile(_)))
+        ));
         assert_eq!(
             Command::parse("little/3/navigate/example.com%2Fa"),
             Some(Command::Little(
