@@ -197,8 +197,6 @@ final class AppModel: ObservableObject {
             openLibrary(.downloads)
         case "arbalete:show-history":
             openLibrary(.history)
-        case "arbalete:show-extensions":
-            openLibrary(.extensions)
         default:
             break
         }
@@ -446,7 +444,6 @@ final class AppModel: ObservableObject {
         run(section.wide ? "library/wide" : "library/narrow")
         // Their page may have changed them.
         switch section {
-        case .extensions: run("extension/reload")
         case .archive: run("archive/list")
         case .history: searchHistory()
         default: break

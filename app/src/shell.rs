@@ -903,7 +903,6 @@ impl UiState {
             // buttons show by the address.
             "extensions": self.pinned_extensions(),
             // All of them, which the library lists.
-            "installed": self.installed_extensions(),
             "closed": self.closed.iter().rev().take(RECENTLY_CLOSED).map(|closed| json!({
                 "url": closed.tab.url,
                 "title": closed.tab.label(),
@@ -932,42 +931,6 @@ impl UiState {
                     .find(|extension| &extension.id == id && extension.enabled)
             })
             .map(|extension| extension_json(profile, extension))
-            .collect()
-    }
-
-    /// The displayed Space's profile's extensions, by name, with what the library shows of them.
-    fn installed_extensions(&self) -> Vec<serde_json::Value> {
-        let profile = self.sidebar.displayed().profile;
-        let profiles = self.sidebar.profiles();
-        let pinned = profiles
-            .iter()
-            .find(|p| p.id == profile)
-            .map(|p| &p.pinned_extensions);
-        extensions::list(profile)
-            .iter()
-            .map(|extension| {
-                let mut json = extension_json(profile, extension);
-                json["enabled"] = extension.enabled.into();
-                json["pinned"] = pinned
-                    .is_some_and(|pinned| pinned.contains(&extension.id))
-                    .into();
-                json["options"] = extension.options.is_some().into();
-                json["optionsInTab"] = extension.options_in_tab.into();
-                json["description"] = extension.description.clone().into();
-                json["version"] = extension.version.clone().into();
-                let details = &extension.details;
-                json["details"] = json!({
-                    "permissions": details.permissions,
-                    "sites": details.sites,
-                    "homepage": details.homepage,
-                    "manifestVersion": details.manifest_version,
-                    "fromStore": details.from_store,
-                    "unpacked": details.unpacked,
-                    "installedAt": details.installed_at,
-                    "updatedAt": details.updated_at,
-                });
-                json
-            })
             .collect()
     }
 
@@ -3568,6 +3531,8 @@ wrap_window_delegate! {
 
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
             CHROME_PAGE.set(None);
+            // What the extensions page changed shows.
+            extensions::reload(self.profile);
         }
 
         fn can_close(&self, _window: Option<&mut Window>) -> i32 { 1 }
@@ -6781,13 +6746,8 @@ fn run_command(command: Command) {
         (Command::OpenExtensionPopup(id), _) => open_extension_popup(&id),
         (Command::ShowStore, _) => show_store(),
         (Command::ShowCertificate, _) => show_certificate(),
-        (Command::ShowExtensionsPage, _) => extensions::load_unpacked(displayed_profile()),
-        (Command::UpdateExtensions, _) => extensions::update(displayed_profile()),
         // Like Arc's, Chromium's extensions page.
         (Command::ManageExtensions, _) => open_chrome_page("chrome://extensions"),
-        (Command::ReloadExtensions, _) => {
-            extensions::reload(STATE.with_borrow(|state| state.sidebar.displayed().profile));
-        }
         (Command::SiteTargets(targets), _) => win().site_targets.set(targets),
         (Command::RemoveExtension(id), _) => {
             let profile = displayed_profile();

@@ -1,12 +1,12 @@
 // The library (ui/src/Library.tsx), which the sidebar shows instead of a Space's page: a rail of
 // sections, the one picked last kept until the app quits, and the picked section under a field
-// searching it, but for the Spaces and the extensions, which fill the window.
+// searching it, but for the Spaces, which fill the window.
 
 import AppKit
 import SwiftUI
 
 enum LibrarySection: String, CaseIterable, Identifiable {
-    case spaces, closed, archive, history, media, downloads, extensions
+    case spaces, closed, archive, history, media, downloads
 
     var id: String { rawValue }
 
@@ -18,7 +18,6 @@ enum LibrarySection: String, CaseIterable, Identifiable {
         case .history: "History"
         case .media: "Media"
         case .downloads: "Downloads"
-        case .extensions: "Extensions"
         }
     }
 
@@ -30,13 +29,11 @@ enum LibrarySection: String, CaseIterable, Identifiable {
         case .history: "clock"
         case .media: "photo"
         case .downloads: "arrow.down.circle"
-        case .extensions: "puzzlepiece.extension"
         }
     }
 
-    /// The Spaces and the extensions fill the window, the page hidden; the other sections rest
-    /// beside it.
-    var wide: Bool { self == .spaces || self == .extensions }
+    /// The Spaces fill the window, the page hidden; the other sections rest beside it.
+    var wide: Bool { self == .spaces }
 }
 
 struct ClosedTab: Decodable {
@@ -70,18 +67,6 @@ struct Download: Decodable, Identifiable {
     var state: String
     var startedAt: Double
     var missing: Bool
-}
-
-struct InstalledExtension: Decodable, Identifiable {
-    var id: String
-    var name: String
-    var icon: String?
-    var popup: Bool
-    var enabled: Bool
-    var pinned: Bool
-    var options: Bool
-    var description: String
-    var version: String
 }
 
 /// How long ago a time was, both in milliseconds since the epoch, in a few words: "2 min ago".
@@ -187,7 +172,6 @@ struct LibraryView: View {
                             case .history: HistoryList(model: model)
                             case .media: MediaGrid(model: model)
                             case .downloads: DownloadsList(model: model)
-                            case .extensions: ExtensionsList(model: model)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -512,86 +496,6 @@ struct SpaceColumn: View {
             model.run("space/move/\(id)/\(index)")
             return true
         }
-    }
-}
-
-/// The displayed Space's profile's extensions: each with its switch, pin, options and removal;
-/// the Chrome Web Store to add more, a folder to load one from, and updates.
-struct ExtensionsList: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        HStack {
-            Button("Add Extensions") { model.run("site/store") }
-            Button("Load Unpacked…") { model.run("extension/load-unpacked") }
-            Button("Update") { model.run("extension/update") }
-        }
-        .padding(.bottom, 8)
-        let installed = model.state?.installed ?? []
-        if installed.isEmpty { Empty(text: "No extensions yet") }
-        ForEach(installed) { ext in
-            // Too narrow for the controls beside the text, they go under it.
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) {
-                    ExtensionSummary(ext: ext)
-                    Spacer(minLength: 0)
-                    ExtensionControls(model: model, ext: ext)
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    ExtensionSummary(ext: ext)
-                    ExtensionControls(model: model, ext: ext)
-                }
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 10).fill(.primary.opacity(0.06)))
-        }
-    }
-}
-
-/// An installed extension's icon, name, description and version.
-private struct ExtensionSummary: View {
-    let ext: InstalledExtension
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Favicon(url: ext.icon, size: 24)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(ext.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                Text(ext.description).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
-                Text(ext.version).font(.system(size: 10)).foregroundStyle(.tertiary)
-            }
-            .frame(minWidth: 140, alignment: .leading)
-        }
-    }
-}
-
-/// An installed extension's pin, options, removal and switch.
-private struct ExtensionControls: View {
-    @ObservedObject var model: AppModel
-    let ext: InstalledExtension
-
-    var body: some View {
-        HStack(spacing: 10) {
-            IconButton(symbol: ext.pinned ? "pin.fill" : "pin", label: ext.pinned ? "Unpin" : "Pin", size: 24) {
-                model.run("extension/\(ext.pinned ? "unpin" : "pin")/\(ext.id)")
-            }
-            if ext.options {
-                IconButton(symbol: "gearshape", label: "Options", size: 24) {
-                    model.run("extension/options/\(ext.id)")
-                }
-            }
-            IconButton(symbol: "trash", label: "Remove", size: 24) {
-                model.run("extension/remove/\(ext.id)")
-            }
-            Toggle("", isOn: Binding(
-                get: { ext.enabled },
-                set: { _ in model.run("extension/\(ext.enabled ? "off" : "on")/\(ext.id)") }))
-                .toggleStyle(.switch)
-                .labelsHidden()
-                .controlSize(.small)
-        }
-        .fixedSize()
     }
 }
 

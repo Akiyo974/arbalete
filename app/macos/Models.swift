@@ -18,8 +18,6 @@ struct AppState: Decodable {
     var extensions: [Extension]
     /// The tabs closed since launch, the last closed first.
     var closed: [ClosedTab]
-    /// All of that profile's extensions, which the library lists.
-    var installed: [InstalledExtension]
 }
 
 /// The loading state of the shown page.

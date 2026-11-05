@@ -156,16 +156,8 @@ pub enum Command {
     ShowStore,
     /// Shows the shown page's certificate, like Arc's: `site/certificate`.
     ShowCertificate,
-    /// Opens Chromium's extensions page, to load an extension from a folder:
-    /// `extension/load-unpacked`.
-    ShowExtensionsPage,
-    /// Updates the displayed Space's profile's extensions from the Web Store now:
-    /// `extension/update`.
-    UpdateExtensions,
-    /// Opens the library on the extensions, from the site controls' panel: `extension/manage`.
+    /// Opens Chromium's extensions page, like Arc's Manage Extensions: `extension/manage`.
     ManageExtensions,
-    /// Reads the displayed Space's profile's extensions again: `extension/reload`.
-    ReloadExtensions,
     /// Where the site controls' panel shows its extensions, where a right-click opens their menu:
     /// `site/targets/<percent-encoded JSON array>`, like
     /// `[{"id":"abc","x":12,"y":80,"width":64,"height":40}]`.
@@ -605,10 +597,7 @@ impl Command {
             "theme/hide" => Some(Self::HideThemePicker),
             "site/store" => Some(Self::ShowStore),
             "site/certificate" => Some(Self::ShowCertificate),
-            "extension/load-unpacked" => Some(Self::ShowExtensionsPage),
-            "extension/update" => Some(Self::UpdateExtensions),
             "extension/manage" => Some(Self::ManageExtensions),
-            "extension/reload" => Some(Self::ReloadExtensions),
             "history/show" => Some(Self::ShowHistory),
             "downloads/show" => Some(Self::ShowDownloads),
             "archive/list" => Some(Self::SendArchive),
@@ -1186,10 +1175,6 @@ mod tests {
         assert_eq!(
             Command::parse("site/certificate"),
             Some(Command::ShowCertificate)
-        );
-        assert_eq!(
-            Command::parse("extension/load-unpacked"),
-            Some(Command::ShowExtensionsPage)
         );
         assert_eq!(
             Command::parse("extension/manage"),

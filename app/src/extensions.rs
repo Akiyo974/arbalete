@@ -859,16 +859,6 @@ enum ChromeTask {
         profile: ProfileId,
         id: String,
     },
-    /// Loading an extension from a folder the user picks, in Chromium's folder picker: only its
-    /// extensions page can, in developer mode, which it turns on.
-    LoadUnpacked {
-        profile: ProfileId,
-    },
-    /// Checking the Web Store for updates of a profile's extensions now, as Chromium does on its
-    /// own every few hours: only its extensions page can.
-    Update {
-        profile: ProfileId,
-    },
 }
 
 thread_local! {
@@ -937,17 +927,6 @@ pub fn uninstall(profile: ProfileId, id: &str) {
     crate::shell::open_chrome_task_window(profile, &url, "Remove Extension", false);
 }
 
-/// Loads an extension from a folder the user picks, in a profile. Only Chromium's extensions
-/// page loads one, and shows its folder picker: the app opens it in an invisible window, which
-/// only the picker shows over.
-pub fn load_unpacked(profile: ProfileId) {
-    if CHROME_TASK.with_borrow(Option::is_some) {
-        return;
-    }
-    CHROME_TASK.set(Some(ChromeTask::LoadUnpacked { profile }));
-    crate::shell::open_chrome_task_window(profile, "chrome://extensions", "Load Unpacked", true);
-}
-
 /// Asks Chromium, with a user gesture, once the window's page has loaded: Chromium shows its
 /// prompt in it.
 pub fn chrome_task_page_loaded(browser: &Browser) {
@@ -962,11 +941,6 @@ pub fn chrome_task_page_loaded(browser: &Browser) {
                 "chrome.management.uninstall({id}).then(() => true, () => false)"
             ))
         }
-        // The extension the folder loaded is the one the page lists afterwards only.
-        ChromeTask::LoadUnpacked { .. } => Some(LOAD_UNPACKED.to_string()),
-        ChromeTask::Update { .. } => {
-            Some("chrome.developerPrivate.autoUpdate().then(() => true)".to_string())
-        }
     });
     let Some(action) = action else { return };
     let registration = host.add_dev_tools_message_observer(Some(&mut ChromeTaskObserver::new()));
@@ -978,43 +952,10 @@ pub fn chrome_task_page_loaded(browser: &Browser) {
     host.send_dev_tools_message(Some(message.to_string().as_bytes()));
 }
 
-/// Loads an extension from a folder, from Chromium's extensions page: the id and path of the one
-/// added, or nothing when the user cancels or the folder holds none.
-const LOAD_UNPACKED: &str = "(async () => {
-  const developer = chrome.developerPrivate;
-  await developer.updateProfileConfiguration({ inDeveloperMode: true });
-  const before = new Set((await developer.getExtensionsInfo()).map(({ id }) => id));
-  await new Promise((done) => developer.loadUnpacked({ failQuietly: true }, done));
-  const added = (await developer.getExtensionsInfo()).find(({ id }) => !before.has(id));
-  return added ? { id: added.id, path: added.prettifiedPath } : null;
-})()";
-
-/// Updates a profile's extensions from the Web Store now, from Chromium's extensions page in an
-/// invisible window.
-pub fn update(profile: ProfileId) {
-    if CHROME_TASK.with_borrow(Option::is_some) {
-        return;
-    }
-    CHROME_TASK.set(Some(ChromeTask::Update { profile }));
-    crate::shell::open_chrome_task_window(
-        profile,
-        "chrome://extensions",
-        "Update Extensions",
-        true,
-    );
-}
-
 /// Ends the task with the user's answer, `value`, and closes the window.
 fn finish_chrome_task(value: &Value) {
     let yes = *value == true;
     match CHROME_TASK.take() {
-        Some(ChromeTask::LoadUnpacked { profile }) => {
-            if let (Some(id), Some(path)) = (value["id"].as_str(), value["path"].as_str()) {
-                loaded(profile, id, &expand_home(path));
-            }
-        }
-        // The versions updated show once read again.
-        Some(ChromeTask::Update { profile }) => reload(profile),
         Some(ChromeTask::Permissions {
             caller, request, ..
         }) => {
@@ -1024,38 +965,6 @@ fn finish_chrome_task(value: &Value) {
         Some(ChromeTask::Uninstall { .. }) | None => {}
     }
     crate::shell::close_chrome_task_window();
-}
-
-/// A path that may start with the home folder's `~`, in full.
-fn expand_home(path: &str) -> PathBuf {
-    match path.strip_prefix("~/") {
-        Some(rest) => crate::user_home().join(rest),
-        None => PathBuf::from(path),
-    }
-}
-
-/// Adds an extension just loaded from a folder, `dir`, to a profile's: Chromium lists it in its
-/// preferences only seconds later.
-fn loaded(profile: ProfileId, id: &str, dir: &Path) {
-    let Some(extension) = read_manifest(id, dir) else {
-        return;
-    };
-    let details = Details {
-        unpacked: Some(dir.to_path_buf()),
-        ..extension.details.clone()
-    };
-    INSTALLED.with_borrow_mut(|installed| {
-        if let Some((_, list)) = installed.get_mut(&profile) {
-            list.retain(|known| known.id != id);
-            list.push(Installed {
-                details,
-                ..extension
-            });
-            list.sort_by_key(|extension| extension.name.to_lowercase());
-        }
-    });
-    update_icons(profile);
-    crate::shell::extensions_changed();
 }
 
 /// Forgets a profile's extension just removed.
