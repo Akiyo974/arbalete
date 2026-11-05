@@ -764,19 +764,26 @@ fn attached(session: &str, context: String, helper: bool) {
         ask_tab_ids(&context);
         return;
     }
-    BRIDGE.with_borrow_mut(|bridge| bridge.workers.insert(session.to_string(), context.clone()));
+    BRIDGE.with_borrow_mut(|bridge| bridge.workers.insert(session.to_string(), context));
+    // A worker that stops and starts again keeps its session, with no new target: the binding
+    // stays only while the Runtime domain is enabled, which also reports the running execution
+    // context and each new start's (context_created).
     send_in(
         session,
         "Runtime.addBinding",
         json!({ "name": "__arbalete" }),
         None,
     );
-    send_in(
-        session,
-        "Runtime.evaluate",
-        json!({ "expression": SHIM }),
-        None,
-    );
+    send_in(session, "Runtime.enable", json!({}), None);
+}
+
+/// Shims a worker's new execution context, then gives it its profile's active tab.
+fn context_created(session: &str, id: &Value) {
+    let Some(context) = BRIDGE.with_borrow(|bridge| bridge.workers.get(session).cloned()) else {
+        return;
+    };
+    let params = json!({ "expression": SHIM, "contextId": id });
+    send_in(session, "Runtime.evaluate", params, None);
     push_state(&context);
 }
 
@@ -1120,6 +1127,11 @@ fn message_received(message: &Value) {
                     bridge.workers.remove(session);
                     bridge.helpers.retain(|_, helper| helper != session);
                 });
+            }
+        }
+        Some("Runtime.executionContextCreated") => {
+            if let Some(session) = message["sessionId"].as_str() {
+                context_created(session, &message["params"]["context"]["id"]);
             }
         }
         Some("Runtime.bindingCalled") if message["params"]["name"] == "__arbalete" => {

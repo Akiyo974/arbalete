@@ -5,7 +5,12 @@
 // into an extension's popup too, with the active tab as it opens (__arbaleteInitial): the popup
 // closes on Escape, or when it closes itself.
 (() => {
-  if (self.__arbaleteSync) return;
+  if (self.__arbaleteShimmed) return;
+  // Each API is patched on its own, so that one Chromium has not added yet as the worker starts
+  // cannot keep the others native: those missing are tried again, and the shim is done only once
+  // all are patched.
+  const patches = new Map();
+  const patch = (api, apply) => patches.set(api, apply);
   const window_ = {
     id: 1,
     focused: true,
@@ -37,12 +42,14 @@
     answers.get(request)?.(granted);
     answers.delete(request);
   };
-  chrome.permissions.request = (permissions, ...rest) => {
-    asked += 1;
-    const granted = new Promise((resolve) => answers.set(asked, resolve));
-    ask({ method: "permissions", request: asked, extension: chrome.runtime.id, permissions });
-    return granted.then((value) => reply(rest, value));
-  };
+  patch("permissions", () => {
+    chrome.permissions.request = (permissions, ...rest) => {
+      asked += 1;
+      const granted = new Promise((resolve) => answers.set(asked, resolve));
+      ask({ method: "permissions", request: asked, extension: chrome.runtime.id, permissions });
+      return granted.then((value) => reply(rest, value));
+    };
+  });
   // A popup's page, rather than a service worker.
   if (typeof window !== "undefined") {
     const close = () => ask({ method: "close" });
@@ -52,9 +59,11 @@
     });
     // Chromium takes the popup's page for a tab's: extensions that size themselves by where they
     // show, like Bitwarden, would fill a tab. It is the popup, as in Chrome.
-    const getViews = chrome.extension.getViews.bind(chrome.extension);
-    chrome.extension.getViews = (info = {}) =>
-      info.type === "popup" ? [window] : getViews(info).filter((view) => view !== window);
+    patch("extension", () => {
+      const getViews = chrome.extension.getViews.bind(chrome.extension);
+      chrome.extension.getViews = (info = {}) =>
+        info.type === "popup" ? [window] : getViews(info).filter((view) => view !== window);
+    });
   }
   // chrome.windows.WINDOW_ID_CURRENT.
   const CURRENT = -2;
@@ -63,27 +72,44 @@
     (info.windowId === undefined || info.windowId === CURRENT || info.windowId === tab.windowId);
   const withTabs = (info) =>
     info && typeof info === "object" && info.populate ? { ...window_, tabs } : window_;
-  const get = chrome.tabs.get.bind(chrome.tabs);
-  Object.assign(chrome.tabs, {
-    query: (info = {}, ...rest) => reply(rest, tabs.filter((tab) => fits(tab, info))),
-    get: (id, ...rest) => {
-      const tab = tabs.find((tab) => tab.id === id);
-      return tab ? reply(rest, tab) : get(id, ...rest);
-    },
-    create: (props = {}, ...rest) => {
-      ask({ method: "create", props });
-      return reply(rest, { id: -1, index: 0, windowId: window_.id, active: true, url: props.url });
-    },
-    update: (...args) => {
-      const [tabId, props] = typeof args[0] === "number" ? args : [undefined, args[0]];
-      ask({ method: "update", tabId, props });
-      return reply(args.slice(typeof args[0] === "number" ? 2 : 1), tabs[0]);
-    },
+  patch("tabs", () => {
+    const get = chrome.tabs.get.bind(chrome.tabs);
+    Object.assign(chrome.tabs, {
+      query: (info = {}, ...rest) => reply(rest, tabs.filter((tab) => fits(tab, info))),
+      get: (id, ...rest) => {
+        const tab = tabs.find((tab) => tab.id === id);
+        return tab ? reply(rest, tab) : get(id, ...rest);
+      },
+      create: (props = {}, ...rest) => {
+        ask({ method: "create", props });
+        return reply(rest, { id: -1, index: 0, windowId: window_.id, active: true, url: props.url });
+      },
+      update: (...args) => {
+        const [tabId, props] = typeof args[0] === "number" ? args : [undefined, args[0]];
+        ask({ method: "update", tabId, props });
+        return reply(args.slice(typeof args[0] === "number" ? 2 : 1), tabs[0]);
+      },
+    });
   });
-  Object.assign(chrome.windows, {
-    get: (id, ...rest) => reply(rest, withTabs(rest[0])),
-    getCurrent: (...args) => reply(args, withTabs(args[0])),
-    getLastFocused: (...args) => reply(args, withTabs(args[0])),
-    getAll: (...args) => reply(args, [withTabs(args[0])]),
+  patch("windows", () => {
+    Object.assign(chrome.windows, {
+      get: (id, ...rest) => reply(rest, withTabs(rest[0])),
+      getCurrent: (...args) => reply(args, withTabs(args[0])),
+      getLastFocused: (...args) => reply(args, withTabs(args[0])),
+      getAll: (...args) => reply(args, [withTabs(args[0])]),
+    });
   });
+  const run = (tries) => {
+    for (const [api, apply] of patches) {
+      try {
+        apply();
+        patches.delete(api);
+      } catch (error) {
+        if (!tries) console.error(`Arbalete could not patch chrome.${api}:`, error);
+      }
+    }
+    if (!patches.size) self.__arbaleteShimmed = true;
+    else if (tries) setTimeout(run, 10, tries - 1);
+  };
+  run(100);
 })();
