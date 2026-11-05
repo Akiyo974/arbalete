@@ -67,6 +67,7 @@ struct Download: Decodable, Identifiable {
     var name: String
     var path: String
     var url: String
+    var profile: Int?
     var received: Double
     var total: Double
     var speed: Double
@@ -164,7 +165,7 @@ struct LibraryView: View {
             .padding(.trailing, 1)
             VStack(alignment: .leading, spacing: 10) {
                 if !model.section.wide {
-                    LibrarySearch(model: model)
+                    LibraryHeader(model: model)
                 }
                 if model.section == .spaces {
                     ManageSpacesView(model: model)
@@ -201,13 +202,225 @@ struct LibrarySearch: View {
             Image(systemName: "magnifyingglass").font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Ink.secondary)
                 .frame(width: 20)
-            TextField("Search \(model.section.searchName)...", text: model.queryBinding)
+            // Like Arc's, a filter on makes the field search what it leaves.
+            TextField(
+                model.filters.isEmpty ? "Search \(model.section.searchName)..." : "Search...",
+                text: model.queryBinding)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
         }
         .padding(.horizontal, 12)
         .frame(height: 36)
         .background(RoundedRectangle(cornerRadius: 10).fill(Ink.item))
+    }
+}
+
+/// A chip of the library's filter: a profile for the downloads, a Space for the tabs archived.
+enum FilterChip: Hashable {
+    case profile(Int)
+    case space(String)
+}
+
+extension LibrarySection {
+    /// Like Arc's, the downloads and the tabs archived can be filtered.
+    var filterable: Bool { self == .downloads || self == .archive }
+}
+
+extension AppModel {
+    /// The chips the filter offers on the section shown, with their names, in groups.
+    var filterGroups: [(title: String, chips: [(FilterChip, String)])] {
+        switch section {
+        case .downloads:
+            let profiles = (state?.profiles ?? []).map { (FilterChip.profile($0.id), $0.name) }
+            return [("Profiles", profiles)]
+        case .archive:
+            var names: [String] = []
+            for tab in archive { if let space = tab.space, !names.contains(space) { names.append(space) } }
+            return [("Where was the tab?", names.map { (FilterChip.space($0), $0) })]
+        default:
+            return []
+        }
+    }
+
+    /// The name of a chip picked.
+    func filterName(_ chip: FilterChip) -> String {
+        filterGroups.flatMap(\.chips).first { $0.0 == chip }?.1 ?? ""
+    }
+
+    /// Whether a download passes the filter: with no profile picked, every one does. Those
+    /// saved before downloads kept their profile count as the first profile's.
+    func passes(_ download: Download) -> Bool {
+        let picked = filters.compactMap { if case .profile(let id) = $0 { id } else { nil } }
+        let profile = download.profile ?? state?.profiles.first?.id
+        return picked.isEmpty || profile.map(picked.contains) == true
+    }
+
+    func passes(_ tab: ArchivedTab) -> Bool {
+        let picked = filters.compactMap { if case .space(let name) = $0 { name } else { nil } }
+        return picked.isEmpty || tab.space.map(picked.contains) == true
+    }
+}
+
+/// The top of a narrow section, like Arc's: its search field, a Filter button beside it for the
+/// downloads and the tabs archived, which turns the top into the filter's panel, and the chips
+/// picked under it as tokens.
+struct LibraryHeader: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if model.filterShown {
+                FilterPanel(model: model).transition(.opacity)
+            } else {
+                HStack(spacing: 3) {
+                    LibrarySearch(model: model)
+                    if model.section.filterable {
+                        LibraryButton(label: "Filter", symbol: "line.3.horizontal.decrease.circle") {
+                            model.filterShown = true
+                        }
+                    }
+                }
+                .transition(.opacity)
+                if !model.filters.isEmpty {
+                    FlowLayout(spacing: 6) {
+                        ForEach(Array(model.filters), id: \.self) { chip in
+                            Button {
+                                model.filters.remove(chip)
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "xmark.circle.fill")
+                                    Text(model.filterName(chip))
+                                }
+                                .font(.system(size: 14))
+                                .foregroundStyle(Ink.secondary)
+                                .padding(.horizontal, 10)
+                                .frame(height: 32)
+                                .background(RoundedRectangle(cornerRadius: 10).fill(Ink.item))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+        // Measured on Arc's: a quarter of a second to cross-fade.
+        .animation(.easeInOut(duration: 0.25), value: model.filterShown)
+    }
+}
+
+/// A button of the library's top, like Arc's: a light pill as tall as the search field.
+struct LibraryButton: View {
+    let label: String
+    var symbol: String? = nil
+    let action: () -> Void
+    private let hovered = State(initialValue: false)
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if let symbol { Image(systemName: symbol) }
+                Text(label)
+            }
+            .font(.system(size: 14))
+            .foregroundStyle(Ink.secondary)
+            .padding(.horizontal, 10)
+            .frame(height: 36)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Ink.item.opacity(hovered.wrappedValue ? 1.4 : 0.8)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered.wrappedValue = $0 }
+    }
+}
+
+/// The filter's panel, like Arc's: its title and Done, then each group's chips, light when
+/// picked.
+struct FilterPanel: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(model.section == .downloads ? "Filter Downloads..." : "Filter Archived Tabs")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Ink.secondary)
+                    .padding(.leading, 5)
+                Spacer()
+                LibraryButton(label: "Done") { model.filterShown = false }
+            }
+            ForEach(model.filterGroups, id: \.title) { group in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(group.title).font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Ink.secondary)
+                        .padding(.leading, 3)
+                    FlowLayout(spacing: 7) {
+                        ForEach(group.chips, id: \.0) { chip, name in
+                            let on = model.filters.contains(chip)
+                            Button {
+                                if on { model.filters.remove(chip) } else { model.filters.insert(chip) }
+                            } label: {
+                                Text(name).font(.system(size: 14))
+                                    .foregroundStyle(on ? Color(white: 0.1) : Ink.secondary)
+                                    .padding(.horizontal, 11)
+                                    .frame(height: 32)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .fill(on ? Color(white: 0.6) : Ink.item))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            Rectangle().fill(Ink.divider).frame(height: 1)
+        }
+    }
+}
+
+/// Lays its views out in rows, wrapping onto the next one when a row is full.
+struct FlowLayout: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        let rows = arrange(subviews, width: width)
+        let height = rows.last.map { $0.y + $0.height } ?? 0
+        return CGSize(width: proposal.width ?? rows.map(\.width).max() ?? 0, height: height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        for row in arrange(subviews, width: bounds.width) {
+            var x = bounds.minX
+            for index in row.items {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: bounds.minY + row.y), proposal: .init(size))
+                x += size.width + spacing
+            }
+        }
+    }
+
+    private func arrange(_ subviews: Subviews, width: CGFloat)
+        -> [(items: [Int], y: CGFloat, width: CGFloat, height: CGFloat)]
+    {
+        var rows: [(items: [Int], y: CGFloat, width: CGFloat, height: CGFloat)] = []
+        var x: CGFloat = 0
+        for (index, subview) in subviews.enumerated() {
+            let size = subview.sizeThatFits(.unspecified)
+            if rows.isEmpty || (x > 0 && x + size.width > width) {
+                let y = rows.last.map { $0.y + $0.height + spacing } ?? 0
+                rows.append(([], y, 0, 0))
+                x = 0
+            }
+            rows[rows.count - 1].items.append(index)
+            rows[rows.count - 1].width = x + size.width
+            rows[rows.count - 1].height = max(rows[rows.count - 1].height, size.height)
+            x += size.width + spacing
+        }
+        return rows
     }
 }
 
@@ -304,7 +517,7 @@ struct ArchivedTabs: View {
 
     var body: some View {
         let found = Array(model.archive.enumerated())
-            .filter { matches(model.query, $0.element.title, $0.element.url) }
+            .filter { model.passes($0.element) && matches(model.query, $0.element.title, $0.element.url) }
         if model.archive.isEmpty {
             Empty(text: "No archived tabs yet")
         } else if found.isEmpty {
@@ -398,8 +611,24 @@ struct DownloadsList: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        let found = model.downloads.reversed().filter { matches(model.query, $0.name, $0.url) }
-        if found.isEmpty { Empty(text: model.downloads.isEmpty ? "No downloads yet" : "No download matches") }
+        let found = model.downloads.reversed().filter {
+            model.passes($0) && matches(model.query, $0.name, $0.url)
+        }
+        if found.isEmpty {
+            // Like Arc's, an arrow's outline over what to come back for, in the middle.
+            VStack(spacing: 14) {
+                Image(systemName: "arrow.down.circle").font(.system(size: 44, weight: .light))
+                    .foregroundStyle(Ink.secondary.opacity(0.6))
+                Text("Nothing here yet!").font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(Ink.primary)
+                Text("Come back after you've downloaded some files.").font(.system(size: 13))
+                    .foregroundStyle(Ink.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 30)
+            .padding(.top, 180)
+        }
         DayGroups(items: Array(found), time: { $0.startedAt }) { download in
             DownloadRow(model: model, download: download)
         }
@@ -494,7 +723,7 @@ func downloadKind(_ download: Download) -> String {
     case .video: kind = "Video"
     case nil:
         kind = UTType(filenameExtension: (download.name as NSString).pathExtension)?
-            .localizedDescription?.capitalized ?? "File"
+            .localizedDescription.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? "File"
     }
     guard let host = URL(string: download.url)?.host() else { return kind }
     let site = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host

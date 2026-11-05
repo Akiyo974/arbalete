@@ -86,8 +86,18 @@ final class AppModel: ObservableObject {
     @Published var carouselShare: CGFloat = 0
     /// The last page the app sent of each Space, which a carousel shows passing by.
     private var seenPages: [Int: SpacePage] = [:]
-    @Published var section = LibrarySection.spaces
+    @Published var section = LibrarySection.spaces {
+        didSet {
+            if section != oldValue {
+                filterShown = false
+                filters = []
+            }
+        }
+    }
     @Published var query = ""
+    /// The library's filter panel shows, and the chips picked in it (LibraryFilter).
+    @Published var filterShown = false
+    @Published var filters: Set<FilterChip> = []
     /// The window the model is the interface of, which its commands come from.
     let window: UInt32
     /// Whether the sidebar floats above the page, which then shows the window's buttons.

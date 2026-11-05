@@ -7769,7 +7769,7 @@ wrap_download_handler! {
             1
         }
 
-        fn on_before_download(&self, _browser: Option<&mut Browser>, item: Option<&mut DownloadItem>, suggested_name: Option<&CefString>, callback: Option<&mut BeforeDownloadCallback>) -> i32 {
+        fn on_before_download(&self, browser: Option<&mut Browser>, item: Option<&mut DownloadItem>, suggested_name: Option<&CefString>, callback: Option<&mut BeforeDownloadCallback>) -> i32 {
             let (Some(item), Some(callback)) = (item, callback) else { return 0 };
             let name = suggested_name.map(CefString::to_string).unwrap_or_default();
             // The Web Store's extensions, which Chromium installs once downloaded: kept out of the
@@ -7797,7 +7797,11 @@ wrap_download_handler! {
             let url = CefString::from(&item.url()).to_string();
             DOWNLOADS.with_borrow_mut(|list| {
                 let id = downloads::next_id(list);
-                list.push(Download::new(id, item.id(), path, url, now()));
+                let mut download = Download::new(id, item.id(), path, url, now());
+                download.profile = browser.and_then(|browser| page_tab(browser)).and_then(|tab| {
+                    STATE.with_borrow(|state| state.sidebar.profile_of(tab))
+                });
+                list.push(download);
             });
             save_downloads();
             send_downloads();

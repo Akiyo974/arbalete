@@ -1,6 +1,7 @@
 //! Downloads: where they are saved, the list kept across sessions, and what the UI shows of
 //! them.
 
+use arbalete_core::sidebar::ProfileId;
 use serde::{Deserialize, Serialize};
 use std::{fs, io, path::Path, path::PathBuf};
 
@@ -27,6 +28,10 @@ pub struct Download {
     #[serde(default)]
     pub speed: i64,
     pub state: State,
+    /// The profile of the page it came from, which the library filters by: none for the
+    /// downloads saved before it was kept.
+    #[serde(default)]
+    pub profile: Option<ProfileId>,
     /// When it started, in milliseconds since the Unix epoch.
     pub started_at: i64,
     /// The file is gone since it was saved: checked when the list is loaded.
@@ -60,6 +65,7 @@ impl Download {
             total: 0,
             speed: 0,
             state: State::InProgress,
+            profile: None,
             started_at,
             missing: false,
         }
