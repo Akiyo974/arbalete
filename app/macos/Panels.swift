@@ -292,9 +292,24 @@ struct DeveloperBar: View {
             } else if model.state?.toolbar == true, !asToolbar {
                 NavButtons(model: model)
             }
-            Image(systemName: url.hasPrefix("https://") ? "lock.fill" : "info")
-                .font(.system(size: 13, weight: .bold))
-                .frame(width: 24)
+            // Like the site controls' Secure, the lock shows the site's certificate.
+            if url.hasPrefix("https://") {
+                Button {
+                    focus()
+                    model.run("site/certificate")
+                } label: {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Show Certificate")
+            } else {
+                Image(systemName: "info")
+                    .font(.system(size: 13, weight: .bold))
+                    .frame(width: 24)
+            }
             address
                 .font(.system(size: 13, design: .monospaced))
                 .foregroundStyle(dark ? Color.white : Ink.primary)
