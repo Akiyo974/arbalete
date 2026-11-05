@@ -317,15 +317,15 @@ struct DeveloperBar: View {
             Spacer(minLength: 8)
             tool("link", "Copy URL") { model.run("menu/choose/site/any/copy-link") }
             separator
-            tool("rectangle.dashed", "Capture Part of the Page") { model.run("page/capture/area") }
-            // Its panel framing the page shows under it.
+            // Like Arc's: Portrait Mode, whose panel shows under it, then a part of the page.
             GeometryReader { geometry in
-                tool("camera", "Capture the Page") {
+                tool("photo.artframe", "Capture in Portrait Mode") {
                     nativeWindows[model.window]?.capture.button = geometry.frame(in: .global)
                     model.run("page/capture")
                 }
             }
             .frame(width: 28, height: 28)
+            tool("camera", "Capture Part of the Page") { model.run("page/capture/area") }
             separator
             tool("apple.terminal", "Console") { model.run("page/devtools/console") }
             tool("network", "Network") { model.run("page/devtools/network") }

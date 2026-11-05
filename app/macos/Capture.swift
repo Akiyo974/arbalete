@@ -70,10 +70,10 @@ final class CaptureChrome {
         host.sizingOptions = []
         note = Overlay(view: host)
         let framing = framing
-        framePanel = Surface(in: parent, radius: 12) { FramingView(model: framing) }
+        framePanel = Surface(in: parent, radius: 16) { FramingView(model: framing) }
         framePanel.takesKeyboard = true
         framePanel.resigned = { [weak self] in self?.closeFraming() }
-        framing.changed = { [weak self] in self?.copyFramed() }
+        framing.capture = { [weak self] in self?.copyFramed() }
         noteModel.save = { [weak self] in self?.saveFramed() }
         veil.picked = { [weak self] rect in self?.picked(rect) }
         veil.done = { [weak self] in self?.closeVeil() }
@@ -86,7 +86,7 @@ final class CaptureChrome {
     private var title: String { model.activeTab?.label ?? "Capture" }
 
     /// Shows the page's picture, `png`, over the page at `frame`: in the veil to pick a part of,
-    /// or framed on a color, copied at once.
+    /// or framed on a color in the panel under the button, like Arc's Portrait Mode.
     func show(_ png: Data, area: Bool, frame: NSRect) {
         guard let image = NSBitmapImageRep(data: png)?.cgImage else { return }
         self.frame = frame
@@ -99,16 +99,14 @@ final class CaptureChrome {
             closeVeil()
             framing.shot = image
             framing.websiteColor = topColor(image)
-            framing.hue = nil
-            copyFramed()
-            let size = NSSize(width: 250, height: 206)
-            let anchor = button ?? NSRect(x: frame.maxX - 60, y: frame.minY, width: 28, height: 28)
+            // Measured on Arc's: 258 points wide, its beak 10 points tall over its body.
+            let size = NSSize(width: 258, height: 219 + Surface.beakHeight)
+            let anchor = button ?? NSRect(x: frame.maxX - 60, y: frame.minY - 30, width: 28, height: 28)
             let x = min(max(frame.minX + 8, anchor.midX - size.width / 2), frame.maxX - size.width - 8)
+            framePanel.beak = anchor.midX - x
+            framePanel.pops = true
             framePanel.place(
-                true, NSRect(x: x, y: anchor.maxY + 6, width: size.width, height: size.height))
-            tell(
-                "Screenshot Copied to Clipboard", saving: true,
-                at: NSPoint(x: frame.maxX, y: frame.minY + 6))
+                true, NSRect(x: x, y: anchor.maxY + 2, width: size.width, height: size.height))
         }
     }
 
@@ -174,8 +172,12 @@ final class CaptureChrome {
 
     // MARK: The whole page, framed
 
+    /// Copies the framed page, like Arc's "Capture in Portrait Mode", which a note in the bar
+    /// tells, with a button saving it.
     private func copyFramed() {
-        if let image = framing.framed { copyImage(image) }
+        guard let image = framing.framed else { return }
+        copyImage(image)
+        tell("Screenshot Copied to Clipboard", saving: true, at: NSPoint(x: frame.maxX - 4, y: frame.minY - 33))
     }
 
     private func saveFramed() {
@@ -194,7 +196,7 @@ final class CaptureChrome {
     func tell(_ text: String, saving: Bool = false, at corner: NSPoint) {
         noteModel.text = text
         noteModel.saving = saving
-        let size = NSSize(width: 380, height: 42)
+        let size = NSSize(width: 380, height: saving ? 33 : 42)
         note.place(
             in: parent,
             NSRect(x: corner.x - size.width, y: corner.y, width: size.width, height: size.height),
@@ -460,29 +462,48 @@ private struct CaptureMenuRow: View {
 @MainActor
 final class FramingModel: ObservableObject {
     @Published var shot: CGImage?
-    /// The frame's hue, from 0 to 1, or the website's color without.
-    @Published var hue: Double? {
-        didSet { changed() }
-    }
-    var websiteColor = NSColor.systemIndigo
-    var changed: () -> Void = {}
+    /// The frame's color: from the hue track, from 0 to 1; or the website's; or grey.
+    enum Choice: Equatable { case hue(Double), website, grey }
+    @Published var choice = Choice.website
+    /// Whether it says what captured it, under the page.
+    @Published var signed = true
+    var websiteColor = NSColor.black
+    var capture: () -> Void = {}
 
-    var color: NSColor {
-        guard let hue else { return websiteColor }
-        return NSColor(hue: hue, saturation: 0.55, brightness: 0.85, alpha: 1)
+    /// The gradient the frame takes, from its top left corner to its bottom right.
+    var colors: (NSColor, NSColor) {
+        switch choice {
+        case .hue(let t):
+            let hue = trackHue(t)
+            return (
+                NSColor(hue: (hue + 0.97).truncatingRemainder(dividingBy: 1), saturation: 0.45, brightness: 1, alpha: 1),
+                NSColor(hue: (hue + 0.04).truncatingRemainder(dividingBy: 1), saturation: 0.65, brightness: 0.95, alpha: 1)
+            )
+        case .website:
+            return (websiteColor.blended(withFraction: 0.12, of: .white) ?? websiteColor, websiteColor)
+        case .grey:
+            return (NSColor(white: 0.36, alpha: 1), NSColor(white: 0.22, alpha: 1))
+        }
     }
 
-    /// The page's picture on its frame's color, like Arc's captures.
+    /// The page's picture on its frame, like Arc's Portrait Mode.
     var framed: CGImage? {
-        shot.flatMap { frameImage($0, color: color) }
+        shot.flatMap { frameImage($0, colors: colors, signed: signed) }
     }
 }
 
-/// `image` framed on a gradient of `color`, rounded, with what captured it under it.
-func frameImage(_ image: CGImage, color: NSColor) -> CGImage? {
+/// The hue at `t` along the track, like Arc's: from pink, through red, orange, yellow, green and
+/// cyan, to blue.
+private func trackHue(_ t: Double) -> CGFloat {
+    CGFloat((0.92 + t * 0.70).truncatingRemainder(dividingBy: 1))
+}
+
+/// `image` framed on a gradient from `colors.0` to `colors.1`, rounded and edged in white, with
+/// what captured it under it if `signed`.
+func frameImage(_ image: CGImage, colors: (NSColor, NSColor), signed: Bool) -> CGImage? {
     let width = CGFloat(image.width)
     let height = CGFloat(image.height)
-    let pad = (width * 0.06).rounded()
+    let pad = (width * 0.085).rounded()
     let size = CGSize(width: width + 2 * pad, height: height + 2 * pad)
     guard
         let context = CGContext(
@@ -490,19 +511,18 @@ func frameImage(_ image: CGImage, color: NSColor) -> CGImage? {
             bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
     else { return nil }
-    let base = color.usingColorSpace(.sRGB) ?? color
-    let light = base.blended(withFraction: 0.35, of: .white) ?? base
-    let colors = [light.cgColor, base.cgColor] as CFArray
-    if let gradient = CGGradient(colorsSpace: nil, colors: colors, locations: [0, 1]) {
+    let gradient = [colors.0, colors.1].map { ($0.usingColorSpace(.sRGB) ?? $0).cgColor } as CFArray
+    if let gradient = CGGradient(colorsSpace: nil, colors: gradient, locations: [0, 1]) {
         context.drawLinearGradient(
             gradient, start: CGPoint(x: 0, y: size.height), end: CGPoint(x: size.width, y: 0),
             options: [])
     }
     let rect = CGRect(x: pad, y: pad, width: width, height: height)
-    let radius = width * 0.012
+    let radius = width * 0.015
     let path = CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
     context.saveGState()
-    context.setShadow(offset: CGSize(width: 0, height: -width * 0.004), blur: width * 0.02,
+    context.setShadow(
+        offset: CGSize(width: 0, height: -width * 0.004), blur: width * 0.02,
         color: NSColor.black.withAlphaComponent(0.3).cgColor)
     context.addPath(path)
     context.setFillColor(NSColor.black.cgColor)
@@ -513,61 +533,116 @@ func frameImage(_ image: CGImage, color: NSColor) -> CGImage? {
     context.clip()
     context.draw(image, in: rect)
     context.restoreGState()
+    // A light edge, like Arc's.
     context.addPath(path)
-    context.setStrokeColor(NSColor.white.withAlphaComponent(0.15).cgColor)
-    context.setLineWidth(max(1, width * 0.001))
+    context.setStrokeColor(NSColor.white.withAlphaComponent(0.35).cgColor)
+    context.setLineWidth(max(1.5, width * 0.003))
     context.strokePath()
-    // What captured it, small, centered under it.
-    let caption = NSAttributedString(
-        string: "Captured with Arbalete",
-        attributes: [
-            .font: NSFont.systemFont(ofSize: max(10, width * 0.011), weight: .medium),
-            .foregroundColor: NSColor.white.withAlphaComponent(0.65),
-        ])
-    let line = CTLineCreateWithAttributedString(caption)
-    let bounds = CTLineGetBoundsWithOptions(line, [])
-    context.textPosition = CGPoint(x: (size.width - bounds.width) / 2, y: pad / 2 - bounds.height / 2)
-    CTLineDraw(line, context)
+    if signed {
+        let caption = NSAttributedString(
+            string: "Captured with Arbalete",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: max(10, width * 0.011), weight: .medium),
+                .foregroundColor: NSColor.white.withAlphaComponent(0.65),
+            ])
+        let line = CTLineCreateWithAttributedString(caption)
+        let bounds = CTLineGetBoundsWithOptions(line, [])
+        context.textPosition = CGPoint(x: (size.width - bounds.width) / 2, y: pad / 2 - bounds.height / 2)
+        CTLineDraw(line, context)
+    }
     return context.makeImage()
 }
 
-/// The panel under the capture button, like Arc's: the framed page, and its frame's color, from
-/// a hue slider or the website's.
+/// The panel under the Portrait Mode button, like Arc's, measured: a button capturing the page,
+/// a preview of it on its frame, which a badge signs, then its frame's color: the website's, a
+/// hue along a track, or grey.
 private struct FramingView: View {
     @ObservedObject var model: FramingModel
+    private let _hovered = State(initialValue: false)
 
     var body: some View {
-        VStack(spacing: 8) {
-            Text("Capture in Portrait Mode").font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-            if let framed = model.framed {
-                Image(decorative: framed, scale: 1)
+        VStack(spacing: 0) {
+            Button(action: model.capture) {
+                Text("Capture in Portrait Mode")
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(Color(white: 0.85))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 31)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8).fill(
+                            Color(white: _hovered.wrappedValue ? 0.18 : 0.11)))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { _hovered.wrappedValue = $0 }
+            preview
+                .padding(.top, 8)
+            HStack(spacing: 0) {
+                dot(.website, Color(nsColor: model.websiteColor), help: "Use Website Color")
+                FrameHueTrack(choice: $model.choice)
+                    .padding(.horizontal, 10)
+                dot(.grey, Color(white: 0.24), help: "Grey")
+            }
+            .frame(height: 24)
+            .padding(.top, 13)
+        }
+        .padding(.horizontal, 9)
+        .padding(.top, 11)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .environment(\.colorScheme, .dark)
+    }
+
+    /// The page, small, centered on its frame's gradient, with the badge at the bottom left.
+    private var preview: some View {
+        let colors = model.colors
+        return ZStack(alignment: .bottomLeading) {
+            LinearGradient(
+                colors: [Color(nsColor: colors.0), Color(nsColor: colors.1)],
+                startPoint: .topLeading, endPoint: .bottomTrailing)
+            if let shot = model.shot {
+                Image(decorative: shot, scale: 1)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: .infinity, maxHeight: 120)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(.white.opacity(0.35), lineWidth: 1.5))
+                    .padding(.vertical, 14)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            HStack(spacing: 8) {
-                Button {
-                    model.hue = nil
-                } label: {
-                    Circle().fill(Color(nsColor: model.websiteColor))
-                        .overlay(Circle().stroke(.white, lineWidth: model.hue == nil ? 2 : 0))
-                        .frame(width: 16, height: 16)
-                }
-                .buttonStyle(.plain)
-                .help("Use Website Color")
-                HueSlider(hue: Binding(get: { model.hue ?? -1 }, set: { model.hue = $0 }))
+            Button {
+                model.signed.toggle()
+            } label: {
+                Image(systemName: "signature")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white.opacity(model.signed ? 0.9 : 0.4))
+                    .frame(width: 32, height: 32)
+                    .background(RoundedRectangle(cornerRadius: 7).fill(.white.opacity(0.16)))
             }
+            .buttonStyle(.plain)
+            .help(model.signed ? "Remove \"Captured with Arbalete\"" : "Add \"Captured with Arbalete\"")
+            .padding(4)
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(height: 128)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func dot(_ choice: FramingModel.Choice, _ color: Color, help: String) -> some View {
+        Button {
+            model.choice = choice
+        } label: {
+            Circle().fill(color)
+                .overlay(Circle().stroke(.white, lineWidth: model.choice == choice ? 3 : 0))
+                .frame(width: 18, height: 18)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 }
 
-/// A rainbow track whose knob picks a hue.
-private struct HueSlider: View {
-    @Binding var hue: Double
+/// The rainbow track, like Arc's: pink to blue, its white knob on the hue picked.
+private struct FrameHueTrack: View {
+    @Binding var choice: FramingModel.Choice
 
     var body: some View {
         GeometryReader { geometry in
@@ -576,25 +651,24 @@ private struct HueSlider: View {
                 Capsule()
                     .fill(
                         LinearGradient(
-                            colors: stride(from: 0.0, through: 1.0, by: 0.1).map {
-                                Color(hue: $0, saturation: 0.55, brightness: 0.85)
+                            colors: stride(from: 0.0, through: 1.0, by: 0.05).map {
+                                Color(hue: Double(trackHue($0)), saturation: 0.5, brightness: 1)
                             }, startPoint: .leading, endPoint: .trailing)
                     )
-                    .frame(height: 6)
-                if hue >= 0 {
-                    Circle().fill(.white).frame(width: 14, height: 14)
+                    .frame(height: 10)
+                if case .hue(let t) = choice {
+                    Circle().fill(.white).frame(width: 22, height: 22)
                         .shadow(color: .black.opacity(0.3), radius: 2)
-                        .offset(x: hue * (width - 14))
+                        .offset(x: t * (width - 22))
                 }
             }
             .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0).onChanged { value in
-                    hue = min(max(Double(value.location.x / width), 0), 1)
+                    choice = .hue(min(max(Double((value.location.x - 11) / (width - 22)), 0), 1))
                 })
         }
-        .frame(height: 16)
     }
 }
 

@@ -92,8 +92,9 @@ private func textFont(_ face: Int, size: CGFloat) -> NSFont {
 struct Mark {
     enum Kind { case text, ellipse, rectangle, arrow, pen, image }
     var kind: Kind
-    /// Its box; an arrow's from its tail, at its origin, to its head.
+    /// Its box: a shape's, a text's or a picture's.
     var rect: CGRect
+    /// A line's points; an arrow's tail and head.
     var points: [CGPoint] = []
     var color: NSColor
     /// Its line's width, in the picture's pixels.
@@ -107,12 +108,12 @@ struct Mark {
     var pixelsPerPoint: CGFloat = 1
     var image: CGImage?
 
-    var tail: CGPoint { rect.origin }
-    var head: CGPoint { CGPoint(x: rect.maxX, y: rect.maxY) }
+    var tail: CGPoint { points.first ?? .zero }
+    var head: CGPoint { points.last ?? .zero }
 
     /// The box it takes.
     var bounds: CGRect {
-        guard kind == .pen else { return rect.standardized }
+        guard kind == .pen || kind == .arrow else { return rect.standardized }
         guard let first = points.first else { return .zero }
         return points.reduce(CGRect(origin: first, size: .zero)) {
             $0.union(CGRect(origin: $1, size: .zero))
@@ -174,8 +175,10 @@ struct Mark {
             context.setLineWidth(line)
             context.strokePath()
         case .arrow:
-            drawArrow(in: context, from: CGPoint(x: r.minX, y: r.minY), to: CGPoint(x: r.maxX, y: r.maxY),
-                width: line, color: color.cgColor, arms: 33 * pixelsPerPoint * scale)
+            drawArrow(
+                in: context, from: CGPoint(x: tail.x * scale, y: tail.y * scale),
+                to: CGPoint(x: head.x * scale, y: head.y * scale), width: line, color: color.cgColor,
+                arms: 33 * pixelsPerPoint * scale)
         case .pen:
             context.addPath(smoothPath(points.map { CGPoint(x: $0.x * scale, y: $0.y * scale) }))
             context.setStrokeColor(color.cgColor)
@@ -689,17 +692,18 @@ final class EditorCanvas: NSView {
                     }
                 }
             }
-        case .text, .ellipse, .rectangle, .arrow:
+        case .text, .ellipse, .rectangle:
             let kind: Mark.Kind =
                 switch model.tool {
                 case .text: .text
                 case .ellipse: .ellipse
-                case .rectangle: .rectangle
-                default: .arrow
+                default: .rectangle
                 }
             drawing = Mark(kind: kind, rect: CGRect(origin: at, size: .zero), color: .clear)
         case .pen:
             drawing = Mark(kind: .pen, rect: .zero, points: [at], color: .clear)
+        case .arrow:
+            drawing = Mark(kind: .arrow, rect: .zero, points: [at, at], color: .clear)
         }
         needsDisplay = true
     }
@@ -712,7 +716,7 @@ final class EditorCanvas: NSView {
             switch drawing.kind {
             case .pen: drawing.points.append(at)
             case .arrow:
-                drawing.rect = CGRect(x: start.x, y: start.y, width: at.x - start.x, height: at.y - start.y)
+                drawing.points = [start, at]
             default:
                 drawing.rect = CGRect(
                     x: min(start.x, at.x), y: min(start.y, at.y), width: abs(at.x - start.x),
@@ -733,9 +737,7 @@ final class EditorCanvas: NSView {
     private func resize(_ index: Int, handle: Int, to at: CGPoint) {
         var mark = model.marks[index]
         if mark.kind == .arrow {
-            let tail = handle == 0 ? at : mark.tail
-            let head = handle == 1 ? at : mark.head
-            mark.rect = CGRect(x: tail.x, y: tail.y, width: head.x - tail.x, height: head.y - tail.y)
+            mark.points = [handle == 0 ? at : mark.tail, handle == 1 ? at : mark.head]
         } else {
             let box = mark.rect.standardized
             let fixed = [
@@ -782,7 +784,7 @@ final class EditorCanvas: NSView {
             mark.weight = 2.75 * pixelsPerPoint
             model.marks.append(mark)
         default:
-            guard hypot(mark.rect.width, mark.rect.height) > 3 * pixelsPerPoint else {
+            guard hypot(mark.bounds.width, mark.bounds.height) > 3 * pixelsPerPoint else {
                 return needsDisplay = true
             }
             mark.color = model.colors[tool] ?? hex(0xF32F13)
