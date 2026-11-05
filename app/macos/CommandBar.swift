@@ -9,12 +9,14 @@
 import AppKit
 import SwiftUI
 
-/// The search row's height and a result's, and the space around the results, like Arc's: the
-/// app fits the Command Bar to them (place_overlay in app/src/shell.rs).
-private let searchRow: CGFloat = 50
+/// The search row's height and a result's, and the space around the results, measured on Arc's:
+/// the app fits the Command Bar to them (place_overlay in app/src/shell.rs).
+private let searchRow: CGFloat = 64
 private let resultRow: CGFloat = 50
 private let resultsPadding: CGFloat = 8
 private let resultsInset: CGFloat = 10
+private let resultsTop: CGFloat = 3
+private let resultsBottom: CGFloat = 11.5
 /// How many results show at once, like Arc's: the others scroll.
 private let visibleRows = 5
 /// How many of the search engine's suggestions show.
@@ -161,6 +163,8 @@ final class CommandBar: ObservableObject {
     @Published var search = SearchEngine(name: "Google", url: "https://www.google.com/search?q=")
     @Published var results: Results?
     @Published var picked = 0
+    /// The row under the pointer, which Arc tints without picking it.
+    @Published var hovered: Int?
     @Published var completing = false
     @Published var switching: Switching?
     /// The field, to focus it once the bar shows.
@@ -255,9 +259,8 @@ final class CommandBar: ObservableObject {
         } else if let url = toURL(typed) {
             go = .go(url: url, title: typed, search: false)
         } else {
-            go = .go(
-                url: search.url + percentEncoded(typed),
-                title: "\(typed) — Search \(search.name)", search: true)
+            // Like Arc's, the text alone.
+            go = .go(url: search.url + percentEncoded(typed), title: typed, search: true)
         }
         let suggestions = (results?.suggestions ?? [])
             .filter { $0.lowercased() != typed.lowercased() }
@@ -280,7 +283,7 @@ final class CommandBar: ObservableObject {
             if let switching {
                 CGFloat(switching.tabs.count) * resultRow + 2 * resultsInset
             } else if shown > 0 {
-                searchRow + CGFloat(shown) * resultRow + 2 * resultsInset
+                searchRow + CGFloat(shown) * resultRow + resultsTop + resultsBottom
             } else {
                 searchRow
             }
@@ -371,30 +374,35 @@ struct CommandBarView: View {
         if let switching = bar.switching {
             VStack(spacing: 0) {
                 ForEach(Array(switching.tabs.enumerated()), id: \.element.id) { index, tab in
-                    ResultRow(row: .tab(tab), picked: index == switching.picked, label: nil)
+                    ResultRow(row: .tab(tab), picked: index == switching.picked, hovered: false, label: nil)
                 }
             }
             .padding(.horizontal, resultsPadding)
             .padding(.vertical, resultsInset)
             .frame(maxHeight: .infinity, alignment: .top)
         } else {
+            let rows = bar.rows
             VStack(spacing: 0) {
-                HStack(spacing: 12) {
-                    if bar.editing, let favicon = bar.favicon {
-                        Favicon(url: favicon, size: 18)
-                    } else {
-                        Image(systemName: "magnifyingglass").font(.system(size: 17))
-                            .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    // Like Arc's, the picked row's icon.
+                    Group {
+                        if bar.editing, rows.isEmpty, let favicon = bar.favicon {
+                            Favicon(url: favicon, size: 16)
+                        } else if bar.picked < rows.count {
+                            RowIcon(row: rows[bar.picked], picked: false, field: true)
+                        } else {
+                            Image(systemName: "magnifyingglass").font(.system(size: 12, weight: .medium))
+                        }
                     }
+                    .frame(width: 24, height: 24)
                     CommandField(bar: bar)
                 }
                 .padding(.horizontal, 20)
                 .frame(height: searchRow)
-                let rows = bar.rows
                 if !rows.isEmpty {
                     // A hairline under the field while results show, like Arc's.
-                    Rectangle().fill(Color.ink((0x000000, 0.10), (0xFFFFFF, 0.10)))
-                        .frame(height: 1)
+                    Rectangle().fill(Color.ink((0x000000, 0.08), (0xFFFFFF, 0.08)))
+                        .frame(height: 0.5)
                         .padding(.horizontal, 12)
                     ScrollViewReader { scroll in
                         ScrollView {
@@ -402,15 +410,23 @@ struct CommandBarView: View {
                                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                                     ResultRow(
                                         row: row, picked: index == bar.picked,
-                                        label: label(row)
+                                        hovered: index == bar.hovered, label: label(row)
                                     )
                                     .id(index)
-                                    .onHover { if $0 { bar.picked = index } }
+                                    // Like Arc's, the pointer tints a row without picking it.
+                                    .onHover { over in
+                                        if over {
+                                            bar.hovered = index
+                                        } else if bar.hovered == index {
+                                            bar.hovered = nil
+                                        }
+                                    }
                                     .onTapGesture { bar.open(row) }
                                 }
                             }
                             .padding(.horizontal, resultsPadding)
-                            .padding(.vertical, resultsInset)
+                            .padding(.top, resultsTop - 0.5)
+                            .padding(.bottom, resultsBottom)
                         }
                         .scrollIndicators(.never)
                         .onChange(of: bar.picked) { _, picked in scroll.scrollTo(picked) }
@@ -423,9 +439,45 @@ struct CommandBarView: View {
 
     private func label(_ row: CommandRow) -> String? {
         switch row {
-        case .tab: "Switch to Tab →"
+        case .tab: "Switch to Tab"
         case .action: "Action"
         default: nil
+        }
+    }
+}
+
+/// A result's icon, like Arc's: a search's magnifier, an address's globe or an action's bolt, 12
+/// points; a page's site icon, on a white tile while it is picked; or, in the field, the picked
+/// row's.
+struct RowIcon: View {
+    let row: CommandRow
+    let picked: Bool
+    var field = false
+
+    var body: some View {
+        let glyph: String? =
+            switch row {
+            case .action: "bolt"
+            case .go(_, _, true): "magnifyingglass"
+            case .go(_, _, false): "globe"
+            default: nil
+            }
+        if let glyph {
+            Image(systemName: glyph).font(.system(size: 12, weight: .medium))
+                .foregroundStyle(picked ? Color.white : field ? Color.primary : Color.ink((0x000000, 0.65), (0xFFFFFF, 0.65)))
+        } else {
+            let favicon: String? =
+                switch row {
+                case .tab(let tab): tab.favicon
+                case .page(_, _, let favicon): favicon
+                default: nil
+                }
+            if let favicon {
+                Favicon(url: favicon, size: 16)
+                    .frame(width: 24, height: 24)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5).fill(.white.opacity(picked && !field ? 0.99 : 0)))
+            }
         }
     }
 }
@@ -433,45 +485,49 @@ struct CommandBarView: View {
 struct ResultRow: View {
     let row: CommandRow
     let picked: Bool
+    let hovered: Bool
     let label: String?
 
-    /// A page's site, as Arc shows it after its title.
+    /// A page's site, as Arc shows it after its title: its address without scheme nor "www.".
     private var site: String? {
         guard case .page(let url, let title, _) = row, title != url else { return nil }
-        return domain(url)
+        let address = url.replacingOccurrences(
+            of: "^[a-z][a-z0-9+.-]*://(www\\.)?", with: "", options: [.regularExpression, .caseInsensitive])
+        return address.hasSuffix("/") ? String(address.dropLast()) : address
     }
 
     var body: some View {
         HStack(spacing: 8) {
-            Group {
-                switch row {
-                case .action: Image(systemName: "bolt")
-                case .tab(let tab) where tab.favicon != nil: Favicon(url: tab.favicon, size: 16)
-                case .page(_, _, let favicon?): Favicon(url: favicon, size: 16)
-                case .go(_, _, true): Image(systemName: "magnifyingglass")
-                default: Image(systemName: "globe")
-                }
-            }
-            .frame(width: 24, height: 24)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-            // Like Arc's, a page's site after its title.
-            (Text(row.title).foregroundStyle(picked ? Color.white : Color.ink((0x000000, 0.80), (0xFFFFFF, 0.80)))
+            RowIcon(row: row, picked: picked)
+                .frame(width: 24, height: 24)
+            // Like Arc's, a page's site after its title, periwinkle while it is picked.
+            (Text(row.title).foregroundStyle(picked ? Color.white : Color.ink((0x000000, 0.8), (0xFFFFFF, 0.8)))
                 + Text(site.map { " — \($0)" } ?? "")
-                .foregroundStyle(picked ? Color.white.opacity(0.6) : Color.ink((0x000000, 0.4), (0xFFFFFF, 0.4))))
+                .foregroundStyle(picked ? color("#979bff") : Color.ink((0x000000, 0.31), (0xFFFFFF, 0.31))))
                 .lineLimit(1)
                 .font(.system(size: 13, weight: .medium))
             Spacer(minLength: 8)
             if let label {
                 Text(label).font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(picked ? Color.white : Color.ink((0x000000, 0.33), (0xFFFFFF, 0.33)))
+                    .foregroundStyle(picked ? Color.white : Color.ink((0x000000, 0.27), (0xFFFFFF, 0.27)))
+                // An arrow on a tile, like Arc's "Switch to Tab".
+                Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(picked ? color("#6066fa") : Color(white: 0.67))
+                    .frame(width: 24, height: 24)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5).fill(
+                            picked ? Color.white.opacity(0.99) : Color.ink((0x000000, 0.04), (0xFFFFFF, 0.04))))
+                    .padding(.leading, 1)
             }
         }
         .padding(.leading, 12)
-        .padding(.trailing, label == nil ? 12 : 20)
+        .padding(.trailing, 15)
         .frame(height: resultRow)
-        // Inset 2 points within the row, rounded 6, in Arc's indigo, measured.
+        // Inset 2 points within the row, rounded 6, in Arc's indigo while picked; tinted under
+        // the pointer, measured.
         .background(
-            RoundedRectangle(cornerRadius: 6).fill(color("#4549d3").opacity(picked ? 1 : 0))
+            RoundedRectangle(cornerRadius: 6)
+                .fill(picked ? color("#373dd0") : Color.ink((0x000000, 0.035), (0xFFFFFF, 0.035)).opacity(hovered ? 1 : 0))
                 .padding(2))
         .contentShape(Rectangle())
     }
@@ -503,7 +559,7 @@ struct CommandField: NSViewRepresentable {
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.font = .systemFont(ofSize: 18)
+        field.font = .systemFont(ofSize: 18, weight: .medium)
         field.placeholderString = "Search or Enter URL…"
         field.delegate = context.coordinator
         field.cell?.isScrollable = true

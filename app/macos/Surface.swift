@@ -55,6 +55,8 @@ final class Surface {
     private let effect = NSVisualEffectView()
     /// Its edge, a line just inside its outline.
     private let border = CAShapeLayer()
+    /// A light line inside the edge, like a macOS panel's, for the surfaces that ask for it.
+    private let inner = CAShapeLayer()
     private let host: NSView
     /// A color over its blur, under its content, which lightens it like Arc's site controls.
     private let tintView = NSView()
@@ -117,6 +119,11 @@ final class Surface {
         border.strokeColor = NSColor.separatorColor.cgColor
         border.lineWidth = 1
         border.mask = CAShapeLayer()
+        inner.fillColor = nil
+        inner.lineWidth = 3
+        inner.mask = CAShapeLayer()
+        inner.isHidden = true
+        holder.layer?.addSublayer(inner)
         holder.layer?.addSublayer(border)
         overlay = Overlay(view: holder)
         resignedKey = NotificationCenter.default.addObserver(
@@ -137,6 +144,21 @@ final class Surface {
     }
 
     var isShown: Bool { overlay.isVisible }
+
+    /// Edges it like a macOS panel, as Arc's Command Bar: a black line outside a light one.
+    func panelEdge() {
+        border.strokeColor = NSColor.black.cgColor
+        inner.strokeColor = NSColor.white.withAlphaComponent(0.19).cgColor
+        inner.isHidden = false
+    }
+
+    /// Casts its shadow `radius` points around it, `drop` points down, at `opacity`.
+    func shadow(opacity: Float, radius: CGFloat, drop: CGFloat) {
+        holder.layer?.shadowOpacity = opacity
+        holder.layer?.shadowRadius = radius
+        // AppKit's layers count up.
+        holder.layer?.shadowOffset = CGSize(width: 0, height: -drop)
+    }
 
     /// Whether `event` is a click in it.
     func contains(_ event: NSEvent) -> Bool {
@@ -253,6 +275,9 @@ final class Surface {
         border.frame = bounds
         border.path = outline
         (border.mask as? CAShapeLayer)?.path = outline
+        inner.frame = bounds
+        inner.path = outline
+        (inner.mask as? CAShapeLayer)?.path = outline
         holder.layer?.shadowPath = outline
         tintView.frame = bounds
         let mask = CAShapeLayer()

@@ -582,7 +582,10 @@ final class NativeWindow {
         sidebar = SidebarHost(window: window, model: app)
         let bar = CommandBar(app: app)
         commandBar = bar
-        let overlay = Surface(in: window, radius: 14) { CommandBarView(bar: bar) }
+        // Measured on Arc's: rounded 12, edged like a panel, its shadow large and dropped.
+        let overlay = Surface(in: window, radius: 12) { CommandBarView(bar: bar) }
+        overlay.panelEdge()
+        overlay.shadow(opacity: 0.5, radius: 45, drop: 18)
         overlay.takesKeyboard = true
         overlay.shown = { [weak bar] in
             guard let field = bar?.field, field.currentEditor() == nil else { return }
