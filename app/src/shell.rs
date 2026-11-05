@@ -16,8 +16,8 @@ use arbalete_core::import::browsers::{self, Family};
 use arbalete_core::import::{self, Choice, safari};
 use arbalete_core::search::SearchEngine;
 use arbalete_core::sidebar::{
-    ArchiveAfter, Color, Error, MAX_SPLIT_TABS, NodeId, NodeKind, ProfileId, Sidebar, Space,
-    SpaceId, SplitLayout, Tab, View as WindowView,
+    ArchiveAfter, Color, Error, NodeId, NodeKind, ProfileId, Sidebar, Space, SpaceId, SplitLayout,
+    Tab, View as WindowView,
 };
 use arbalete_core::url_routing::Destination;
 use arbalete_core::{favicon, store};
@@ -221,11 +221,6 @@ thread_local! {
     static WINDOWS: RefCell<Vec<Rc<Win>>> = RefCell::new(vec![Rc::new(Win::new(0))]);
     /// The window commands and events are about, by its id.
     static FOCUSED: Cell<u32> = const { Cell::new(0) };
-    /// Whether the split shown lays its pages one above the other, and each page's slot's
-    /// length along it (SlotDelegate).
-    static SLOT_LENGTHS: RefCell<(bool, Vec<i32>)> = const { RefCell::new((false, Vec::new())) };
-    /// A page's place moved, which its container follows soon (SendPanes).
-    static PANES_DUE: Cell<bool> = const { Cell::new(false) };
     /// The sidebar's width as a drag of its edge began, while it goes on.
     static SIDEBAR_DRAG: Cell<Option<i32>> = const { Cell::new(None) };
     /// The extensions' bridge's browser (make_bridge).
@@ -261,18 +256,9 @@ struct Win {
     /// Beside the card, at the window's left edge. It must not reach under the card: a web view
     /// below the overlays receives no real mouse event on macOS, only synthesized ones.
     sidebar: RefCell<Option<Panel>>,
-    /// Holds the content views, inset from the window's edges and from the sidebar. An overlay, as
-    /// macOS only rounds the corners of a window of its own. Without a selected tab, its own
-    /// color paints an empty Space's panel.
-    card: RefCell<Option<OverlayController>>,
-    /// Under the bar above the page, in the card: the shown page's developer tools, under the
-    /// stage; it paints an empty Space's panel.
-    body: RefCell<Option<Panel>>,
-    /// Over the developer tools, filling the body but while they are docked, when it spans the
-    /// room they leave the page alone: over them, it would take their clicks. It holds the stage.
-    stage_frame: RefCell<Option<Panel>>,
-    /// The tabs' pages, one shown at a time, or a split.
-    stage: RefCell<Option<Panel>>,
+    /// The card while the sidebar slides, on its way to where the sidebar's mode puts it
+    /// (card_rect).
+    sliding_card: RefCell<Option<Rect>>,
     /// Where the pages show, as last sent to the native interface (send_panes).
     #[cfg(target_os = "macos")]
     panes_sent: RefCell<Option<String>>,
@@ -284,13 +270,6 @@ struct Win {
     /// A second sidebar, shown above the page while the sidebar is hidden.
     reveal_view: RefCell<Option<Panel>>,
     reveal: RefCell<Option<OverlayController>>,
-    /// The bar above the page, at the card's top while it is shown (View › Show Toolbar).
-    toolbar_view: RefCell<Option<Panel>>,
-    /// Holds a split's pages in the card, side by side or one above the other, each in a slot
-    /// of `slots` under room for its bar: views of one window, which resize together, like
-    /// Arc's.
-    split_view: RefCell<Option<Panel>>,
-    slots: RefCell<Vec<Panel>>,
     /// The tabs of the split shown, in order, and how it lays them out: empty while none shows.
     split: RefCell<(Vec<NodeId>, Option<SplitLayout>)>,
     /// The find bar, at the card's top right corner; created the first time it is shown.
@@ -329,7 +308,6 @@ struct Win {
     /// Where among the split's pages a tab dragged over it would open, and the empty page that
     /// stands there meanwhile, like Arc's.
     pane_preview: Cell<Option<usize>>,
-    drop_slot: RefCell<Option<Panel>>,
     /// The tabs selected last, the most recent first, which the tab switcher lists.
     recent: RefCell<Vec<NodeId>>,
     /// The tab switcher's tabs and the picked one's index, while ⌃ is held.
@@ -364,10 +342,7 @@ impl Win {
             card_view: Cell::new(None),
             window: RefCell::new(None),
             sidebar: RefCell::new(None),
-            card: RefCell::new(None),
-            body: RefCell::new(None),
-            stage_frame: RefCell::new(None),
-            stage: RefCell::new(None),
+            sliding_card: RefCell::new(None),
             #[cfg(target_os = "macos")]
             panes_sent: RefCell::new(None),
             shown: Cell::new(None),
@@ -375,9 +350,6 @@ impl Win {
             overlay: RefCell::new(None),
             reveal_view: RefCell::new(None),
             reveal: RefCell::new(None),
-            toolbar_view: RefCell::new(None),
-            split_view: RefCell::new(None),
-            slots: RefCell::new(Vec::new()),
             split: RefCell::default(),
             find_view: RefCell::new(None),
             find: RefCell::new(None),
@@ -398,7 +370,6 @@ impl Win {
             adding_pane: Cell::new(false),
             drop_preview: Cell::new(None),
             pane_preview: Cell::new(None),
-            drop_slot: RefCell::new(None),
             recent: RefCell::new(Vec::new()),
             switch: RefCell::new(None),
             colored: Cell::new(false),
@@ -560,29 +531,7 @@ const CASCADE: i32 = 22;
 
 /// Moves the pages of the window `id`, which closes, into another window, hidden.
 fn hand_pages_over(id: u32) {
-    let Some(card) = window_by_id(id).and_then(|win| win.stage.with_borrow(Clone::clone)) else {
-        return;
-    };
-    let other = WINDOWS.with_borrow(|windows| {
-        windows
-            .iter()
-            .find(|win| win.id != id)
-            .and_then(|win| win.stage.with_borrow(Clone::clone))
-    });
-    let Some(other) = other else { return };
-    let pages: Vec<_> =
-        PAGES.with_borrow(|pages| pages.values().map(|live| live.place.clone()).collect());
-    for place in pages {
-        let here = place
-            .parent_view()
-            .is_some_and(|parent| parent.is_same(Some(&mut View::from(&card))) == 1);
-        if here {
-            place.set_visible(0);
-            card.remove_child_view(Some(&mut View::from(&place)));
-            other.add_child_view(Some(&mut View::from(&place)));
-        }
-    }
-    // Their containers too, out of the window closing with them.
+    // Their containers, out of the window closing with them.
     #[cfg(target_os = "macos")]
     if let Some(to) =
         WINDOWS.with_borrow(|windows| windows.iter().find(|win| win.id != id).map(|win| win.id))
@@ -1095,7 +1044,6 @@ fn send_state() {
         let event = format!(r#"new CustomEvent("arbalete:state", {{ detail: {json} }})"#);
         dispatch(&win().sidebar, &event);
         dispatch(&win().reveal_view, &event);
-        dispatch(&win().toolbar_view, &event);
     });
     // Extensions see the displayed Space's selected tab as their profile's active tab.
     let active = STATE.with_borrow(|state| {
@@ -1149,19 +1097,7 @@ fn toolbar_height() -> i32 {
 /// Shows or hides the bar above the page as `page_toolbar` says, but over a split, which shows
 /// its pages' own bars.
 fn sync_page_toolbar() {
-    let Some(toolbar) = win().toolbar_view.with_borrow(Clone::clone) else {
-        return;
-    };
-    let shown = page_toolbar() && split_shown().is_none();
-    // Shown or hidden, or as high as its mode wants it.
-    let height = toolbar_height();
-    if (toolbar.is_visible() == 1) != shown || (shown && toolbar.bounds().height != height) {
-        toolbar.set_visible(shown.into());
-        if let Some(card) = card_frame() {
-            card.layout();
-        }
-        send_panes();
-    }
+    send_panes();
 }
 
 /// Whether a page's site is in developer mode, like Arc's: as it was turned, or else for
@@ -1715,7 +1651,12 @@ fn set_sidebar(mode: SidebarMode) {
         win()
             .window
             .with_borrow(|window| window.as_ref().map(|w| w.size())),
-        win().card.with_borrow(Clone::clone),
+        // Where it stands now: on its way, or where the mode it leaves put it.
+        win().sliding_card.borrow().clone().or_else(|| {
+            win()
+                .window
+                .with_borrow(|window| Some(before.layout(&window.as_ref()?.size()).card))
+        }),
         win().reveal.with_borrow(Clone::clone),
     ) else {
         return;
@@ -1750,7 +1691,7 @@ fn set_sidebar(mode: SidebarMode) {
         reveal.set_visible((!cfg!(target_os = "macos")).into());
     }
     let from = Layout {
-        card: card.bounds(),
+        card,
         reveal: reveal.bounds(),
     };
     let slide = Slide {
@@ -1813,6 +1754,7 @@ fn step_slide() {
         .with_borrow(|window| window.as_ref().map(|w| w.size()));
     let (Some(size), true) = (size, progress < 1.0) else {
         win().slide.set(None);
+        win().sliding_card.replace(None);
         settle_sidebar();
         // The bar over the page, which the card hid while it moved.
         send_panes();
@@ -1820,9 +1762,10 @@ fn step_slide() {
     };
     let eased = crate::motion::ease_out(progress);
     let to = win().sidebar_mode.get().layout(&size);
-    if let Some(card) = win().card.with_borrow(Clone::clone) {
-        card.set_bounds(Some(&lerp_rect(&from.card, &to.card, eased)));
-    }
+    win()
+        .sliding_card
+        .replace(Some(lerp_rect(&from.card, &to.card, eased)));
+    place_card();
     if docking && let Some(reveal) = win().reveal.with_borrow(Clone::clone) {
         reveal.set_bounds(Some(&lerp_rect(&from.reveal, &to.reveal, eased)));
         #[cfg(target_os = "macos")]
@@ -1914,49 +1857,6 @@ fn margin_regions(size: &Size, card: &Rect, start: i32) -> Vec<DraggableRegion> 
 
 /// Insets the card from the window's edges, and from the sidebar while it is docked or floating.
 fn place_card() {
-    let Some(card) = win().card.with_borrow(Clone::clone) else {
-        return;
-    };
-    let size = win()
-        .window
-        .with_borrow(|window| window.as_ref().map(|w| w.size()));
-    let Some(size) = size else { return };
-    if fills_window() {
-        card.set_visible(0);
-        send_panes();
-        return;
-    }
-    if split_shown().is_some() {
-        lay_out_split();
-    } else {
-        let mut room = win().sidebar_mode.get().layout(&size).card;
-        // A tab dragged over the page: like Arc's, the page gives it half the room.
-        if let Some((before, stacked)) = win().drop_preview.get() {
-            if stacked {
-                let half = (room.height - SPLIT_GAP) / 2;
-                if before {
-                    room.y += half + SPLIT_GAP;
-                }
-                room.height = half;
-            } else {
-                let half = (room.width - SPLIT_GAP) / 2;
-                if before {
-                    room.x += half + SPLIT_GAP;
-                }
-                room.width = half;
-            }
-        }
-        card.set_bounds(Some(&room));
-        // The page follows the card's corners at once, not at CEF's next layout.
-        if let Some(panel) = card_frame() {
-            panel.layout();
-        }
-    }
-    // Once the sidebar sent the window's colors, which first show it.
-    // Showing it again would bring it to the front, and the panels above it after it.
-    if win().colored.get() && card.is_visible() == 0 {
-        card.set_visible(1);
-    }
     place_split_handles();
     send_empty_card();
     send_panes();
@@ -2032,23 +1932,6 @@ fn relayout_library() {
 #[cfg(target_os = "macos")]
 fn card_window() -> Option<*mut std::ffi::c_void> {
     win().card_view.get()
-}
-
-/// The panel holding the content views, under the bar above the page.
-fn card_panel() -> Option<Panel> {
-    win().stage.with_borrow(Clone::clone)
-}
-
-/// The panel under the stage, which paints an empty Space's panel and holds the developer tools.
-fn card_body() -> Option<Panel> {
-    win().body.with_borrow(Clone::clone)
-}
-
-/// The card's own panel: the bar above the page, then `card_panel`.
-fn card_frame() -> Option<Panel> {
-    win()
-        .card
-        .with_borrow(|card| card.as_ref()?.contents_view()?.as_panel())
 }
 
 /// Places the revealed sidebar above the page, or the strip that reveals it along the window's
@@ -2385,18 +2268,6 @@ fn close_inspector(tab: NodeId) {
     if let Some(host) = inspector.frontend.host() {
         host.close_browser(1);
     }
-}
-
-/// Lays the stage out, the shown page or a split filling the body, and the pages' containers
-/// over it.
-fn place_stage() {
-    let (Some(body), Some(frame)) = (card_body(), win().stage_frame.with_borrow(Clone::clone))
-    else {
-        return;
-    };
-    body.layout();
-    frame.layout();
-    send_panes();
 }
 
 /// Runs a script in a page's developer tools' front end.
@@ -4500,9 +4371,6 @@ struct Live {
     profile: ProfileId,
     /// Drawn in a native container of the interface, rather than in a CEF view (decision 0002).
     browser: Browser,
-    /// Where the page shows in the card, an empty view that the container is placed over
-    /// (send_panes).
-    place: Panel,
     /// Since when it is hidden, in milliseconds since the epoch.
     hidden_since: Option<i64>,
     /// Frozen by Chromium: its scripts and timers stop until it shows again.
@@ -4826,19 +4694,21 @@ fn show_selected() {
             (tabs, Some(sidebar.split_layout(row)))
         }
     });
-    let places: Option<Vec<_>> = tabs.iter().map(|&tab| page(tab)).collect();
-    let Some(places) = places else { return };
+    let opened: Option<Vec<_>> = tabs.iter().map(|&tab| page(tab)).collect();
+    if opened.is_none() {
+        return;
+    }
     match layout {
-        Some(layout) => show_split(tab, &tabs, &places, layout),
-        None => show_content(tab, &places[0]),
+        Some(layout) => show_split(tab, &tabs, layout),
+        None => show_content(tab),
     }
 }
 
 /// A tab's page, opened the first time, hidden, once its profile's web data is ready: until
-/// then, none. Returns where it shows in the card.
-fn page(tab: NodeId) -> Option<Panel> {
-    if let Some(place) = PAGES.with_borrow(|pages| Some(pages.get(&tab)?.place.clone())) {
-        return Some(place);
+/// then, none.
+fn page(tab: NodeId) -> Option<()> {
+    if PAGES.with_borrow(|pages| pages.contains_key(&tab)) {
+        return Some(());
     }
     let (profile, url) = STATE.with_borrow_mut(|state| {
         let profile = state.sidebar.profile_of(tab)?;
@@ -4854,13 +4724,6 @@ fn page(tab: NodeId) -> Option<Panel> {
             let browser = make_page(tab, profile, start, &mut context);
             MAKING.set(None);
             let browser = browser?;
-            // Any size, but not an empty one, which CEF would replace by its own: the layouts
-            // share the room between the pages by their weights alone.
-            let place = panel_create(Some(&mut PagePlaceDelegate::new())).expect("page's place");
-            place.set_visible(0);
-            if let Some(card) = card_panel() {
-                card.add_child_view(Some(&mut View::from(&place)));
-            }
             if let Some(host) = browser.host() {
                 host.was_hidden(1);
             }
@@ -4870,7 +4733,6 @@ fn page(tab: NodeId) -> Option<Panel> {
                     Live {
                         profile,
                         browser,
-                        place: place.clone(),
                         hidden_since: None,
                         frozen: false,
                         capturing: false,
@@ -4878,7 +4740,7 @@ fn page(tab: NodeId) -> Option<Panel> {
                 )
             });
             mute_page(tab);
-            Some(place)
+            Some(())
         }
         // The tab shows once its profile's web data is ready.
         Some(None) => None,
@@ -4948,14 +4810,7 @@ fn focus_page(tab: NodeId) {
 /// Shows or hides a tab's page where the card lays it out; Chromium learns it, which stops
 /// drawing a hidden page.
 fn show_page(tab: NodeId, shown: bool) {
-    let Some((place, host)) = PAGES.with_borrow(|pages| {
-        let live = pages.get(&tab)?;
-        Some((live.place.clone(), live.browser.host()))
-    }) else {
-        return;
-    };
-    place.set_visible(shown.into());
-    if let Some(host) = host {
+    if let Some(host) = PAGES.with_borrow(|pages| pages.get(&tab)?.browser.host()) {
         host.was_hidden((!shown).into());
     }
 }
@@ -4985,60 +4840,33 @@ fn content_created(profile: ProfileId, browser: Option<&mut Browser>) {
     }
 }
 
-/// Puts a tab's page, at `place`, in the window instead of the shown one, if any.
-fn show_content(tab: NodeId, place: &Panel) {
+/// Puts a tab's page in the window instead of the shown one, if any.
+fn show_content(tab: NodeId) {
     if win().shown.get() == Some(tab) && win().split.borrow().0.is_empty() {
         return;
     }
     hide_content();
     take_page(tab);
-    if let Some(card) = card_panel() {
-        move_page(View::from(place), &card);
-    }
     win().shown.set(Some(tab));
     wake_page(tab);
     // Square in full screen, now that a page shows alone.
     place_card();
-    if let Some(panel) = card_panel() {
-        panel.layout();
-    }
     shown_on_card(tab);
 }
 
-/// Shows a split's pages, at `places` for its `tabs`, as `layout` lays them out, `focused`'s with
-/// the keyboard, like Arc's Split View: each its own card, with room between them.
-fn show_split(focused: NodeId, tabs: &[NodeId], places: &[Panel], layout: SplitLayout) {
+/// Shows a split's `tabs` as `layout` lays them out, `focused`'s with the keyboard, like Arc's
+/// Split View: each its own card, with room between them.
+fn show_split(focused: NodeId, tabs: &[NodeId], layout: SplitLayout) {
     let same = *win().split.borrow() == (tabs.to_vec(), Some(layout.clone()));
     if !same {
         hide_content();
-        let (Some(split), slots) = (
-            win().split_view.with_borrow(Clone::clone),
-            win().slots.borrow().clone(),
-        ) else {
-            return;
-        };
-        if slots.len() < tabs.len() {
-            return;
-        }
-        split.remove_all_child_views();
         win().pane_preview.set(None);
-        for ((&tab, place), slot) in tabs.iter().zip(places).zip(&slots) {
+        for &tab in tabs {
             take_page(tab);
-            move_page(View::from(place), slot);
             wake_page(tab);
-            split.add_child_view(Some(&mut View::from(slot)));
-        }
-        split.set_visible(1);
-        // The room between the pages shows the window, like the margins around the card; the
-        // pages' bars stand for the bar above the page.
-        if let Some(panel) = card_body() {
-            panel.set_background_color(0x0000_0001);
-        }
-        if let Some(toolbar) = win().toolbar_view.with_borrow(Clone::clone) {
-            toolbar.set_visible(0);
         }
         *win().split.borrow_mut() = (tabs.to_vec(), Some(layout));
-        lay_out_split();
+        place_card();
     }
     win().shown.set(Some(focused));
     shown_on_card(focused);
@@ -5049,6 +4877,9 @@ fn show_split(focused: NodeId, tabs: &[NodeId], places: &[Panel], layout: SplitL
 fn card_rect() -> Option<Rect> {
     if fills_window() {
         return None;
+    }
+    if let Some(sliding) = win().sliding_card.borrow().clone() {
+        return Some(sliding);
     }
     let size = win()
         .window
@@ -5164,99 +4995,12 @@ fn pane_lengths(room: i32, factors: &[f64]) -> Vec<i32> {
         .collect()
 }
 
-/// Shares the card between the split's pages by their parts, SPLIT_GAP apart, then puts the
-/// handles between them and the bars above them.
-fn lay_out_split() {
-    let (_, Some(layout)) = win().split.borrow().clone() else {
-        return;
-    };
-    let Some(split) = win().split_view.with_borrow(Clone::clone) else {
-        return;
-    };
-    if let (Some(card), Some(size)) = (
-        win().card.with_borrow(Clone::clone),
-        win()
-            .window
-            .with_borrow(|window| window.as_ref().map(|w| w.size())),
-    ) {
-        card.set_bounds(Some(&win().sidebar_mode.get().layout(&size).card));
-    }
-    // Each slot as long as its part of the card, worked out here: the layout's weights did not
-    // share the room by them.
-    let card = win()
-        .card
-        .with_borrow(|card| card.as_ref().map(OverlayController::bounds));
-    let room = card.map_or(0, |card| {
-        if layout.stacked {
-            card.height
-        } else {
-            card.width
-        }
-    });
-    // A tab dragged over the split: like Arc's, an empty page opens where it would go, all the
-    // pages sharing the room evenly.
-    let lengths = match win().pane_preview.get() {
-        Some(_) => {
-            let count = layout.factors.len() + 1;
-            let mut lengths = pane_lengths(room, &vec![1.0 / count as f64; count]);
-            let empty = lengths.pop().unwrap_or(1);
-            lengths.resize(MAX_SPLIT_TABS, 1);
-            lengths.push(empty);
-            lengths
-        }
-        None => pane_lengths(room, &layout.factors),
-    };
-    SLOT_LENGTHS.set((layout.stacked, lengths));
-    split
-        .set_to_box_layout(Some(&BoxLayoutSettings {
-            horizontal: (!layout.stacked).into(),
-            between_child_spacing: SPLIT_GAP,
-            cross_axis_alignment: AxisAlignment::STRETCH,
-            ..Default::default()
-        }))
-        .expect("box layout");
-    let slots = win().slots.borrow().clone();
-    for slot in &slots {
-        slot.invalidate_layout();
-    }
-    if let Some(panel) = card_panel() {
-        panel.layout();
-    }
-    split.layout();
-    for slot in &slots {
-        slot.layout();
-    }
-    place_split_handles();
-    send_panes();
-}
-
 /// Opens the empty page standing where a tab dragged over the split would go, at `index` among
 /// its pages, or closes it.
 fn preview_pane(index: Option<usize>) {
-    if win().pane_preview.replace(index) == index {
-        return;
+    if win().pane_preview.replace(index) != index {
+        place_card();
     }
-    let Some(split) = win().split_view.with_borrow(Clone::clone) else {
-        return;
-    };
-    let slot = win()
-        .drop_slot
-        .borrow_mut()
-        .get_or_insert_with(|| {
-            let slot =
-                panel_create(Some(&mut SlotDelegate::new(MAX_SPLIT_TABS))).expect("drop slot");
-            // It shows the window, the interface drawing the empty page over it.
-            slot.set_background_color(0x0000_0001);
-            slot
-        })
-        .clone();
-    split.remove_child_view(Some(&mut View::from(&slot)));
-    if let Some(index) = index {
-        let count = win().split.borrow().0.len();
-        let at = i32::try_from(index.min(count)).unwrap_or(0);
-        split.add_child_view_at(Some(&mut View::from(&slot)), at);
-    }
-    lay_out_split();
 }
 
 /// Tells the native interface where the card is and where its pages show, a page alone or a
@@ -5361,7 +5105,7 @@ fn send_panes() {
                 crate::mac::round_split(view);
             }
         }
-        // Until the card's window is found, as it shows.
+        // Until the window can show the card, as it opens.
         if view.is_some() || frame.is_none() {
             win().panes_sent.replace(Some(sent));
         }
@@ -5657,21 +5401,7 @@ fn share_panes(index: usize, part: f64) {
     });
     if saved.is_ok() {
         win().split.borrow_mut().1 = Some(layout);
-        lay_out_split();
-    }
-}
-
-/// Moves a view, like a page's place, into `parent`, from wherever it is, without reloading the
-/// page.
-fn move_page(mut view: View, parent: &Panel) {
-    let here = view
-        .parent_view()
-        .is_some_and(|p| p.is_same(Some(&mut View::from(parent))) == 1);
-    if !here {
-        if let Some(from) = view.parent_view().and_then(|p| p.as_panel()) {
-            from.remove_child_view(Some(&mut view));
-        }
-        parent.add_child_view(Some(&mut view));
+        place_card();
     }
 }
 
@@ -5782,17 +5512,6 @@ fn hide_content() {
                 }
             }
         });
-        if let Some(view) = win().split_view.with_borrow(Clone::clone) {
-            view.set_visible(0);
-        }
-        if let Some(toolbar) = win().toolbar_view.with_borrow(Clone::clone) {
-            toolbar.set_visible(page_toolbar().into());
-        }
-        if let (Some(panel), Some((card_color, _, _))) =
-            (card_body(), win().window_colors.with_borrow(Clone::clone))
-        {
-            panel.set_background_color(empty_card(card_color));
-        }
         place_card();
         send_panes();
     }
@@ -5842,14 +5561,6 @@ fn close_page(tab: NodeId) {
     };
     if win().shown.get() == Some(tab) {
         win().shown.set(None);
-    }
-    live.place.set_visible(0);
-    if let Some(parent) = live
-        .place
-        .parent_view()
-        .and_then(|parent| parent.as_panel())
-    {
-        parent.remove_child_view(Some(&mut View::from(&live.place)));
     }
     if let Some(host) = live.browser.host() {
         host.close_browser(1);
@@ -5905,30 +5616,9 @@ fn set_window_colors(card_color: u32, grain: f64, colors: &[u32]) {
         #[cfg(not(target_os = "macos"))]
         window.set_background_color(colors[0]);
     }
-    // A split's pages show the window between them instead.
-    if let Some(panel) = card_body()
-        && split_shown().is_none()
-    {
-        panel.set_background_color(empty_card(card_color));
-    }
-    win().colored.set(true);
-    // Only when it changes: showing an overlay again puts it above the others, like the theme
-    // picker, which would lose the focus and close.
-    if let Some(card) = win().card.with_borrow(Clone::clone) {
-        let visible = (!fills_window()).into();
-        if card.is_visible() != visible {
-            card.set_visible(visible);
-        }
-    }
-}
-
-/// The color an empty card shows, from the card's color: on macOS, none, as the native
-/// interface washes the window's blur under it, like Arc's (send_empty_card).
-fn empty_card(card_color: u32) -> u32 {
-    if cfg!(target_os = "macos") {
-        0x0000_0001
-    } else {
-        card_color
+    // The card first shows once the window has its colors.
+    if !win().colored.replace(true) {
+        place_card();
     }
 }
 
@@ -6708,80 +6398,8 @@ wrap_window_delegate! {
             window.add_child_view(Some(&mut view));
             layout.set_flex_for_view(Some(&mut view), 0);
             win().sidebar.set(Some(sidebar));
-            // The card holds the bar above the page, at the top while it is shown, then the
-            // tabs' pages, one shown at a time in the rest.
-            let card = panel_create(None).expect("card");
-            // Every view shares the card's height, but the bar, which keeps its own.
-            let layout = card
-                .set_to_box_layout(Some(&BoxLayoutSettings {
-                    horizontal: 0,
-                    cross_axis_alignment: AxisAlignment::STRETCH,
-                    default_flex: 1,
-                    ..Default::default()
-                }))
-                .expect("box layout");
-            // Any width: the layout stretches it across the card. A zero one would make its size
-            // "empty", which CEF ignores, with its height.
-            let toolbar = panel_create(Some(&mut ToolbarDelegate::new())).expect("toolbar");
-            toolbar.set_visible(page_toolbar().into());
-            let mut view = View::from(&toolbar);
-            card.add_child_view(Some(&mut view));
-            layout.set_flex_for_view(Some(&mut view), 0);
-            win().toolbar_view.set(Some(toolbar));
-            // The card shows its body, which paints an empty Space's panel.
-            card.set_background_color(0x0000_0001);
-            // The stage, with the page shown or a split; the developer tools are in the pages'
-            // containers (Inspector).
-            let body = panel_create(None).expect("body");
-            body.set_to_fill_layout();
-            card.add_child_view(Some(&mut View::from(&body)));
-            win().body.set(Some(body.clone()));
-            let frame = panel_create(None).expect("stage frame");
-            frame.set_to_fill_layout();
-            body.add_child_view(Some(&mut View::from(&frame)));
-            win().stage_frame.set(Some(frame));
-            let stage = panel_create(None).expect("stage");
-            stage.set_to_box_layout(Some(&BoxLayoutSettings {
-                horizontal: 1,
-                cross_axis_alignment: AxisAlignment::STRETCH,
-                default_flex: 1,
-                ..Default::default()
-            }));
-            win().stage_frame.with_borrow(|frame| {
-                frame.as_ref().expect("stage frame").add_child_view(Some(&mut View::from(&stage)))
-            });
-            win().stage.set(Some(stage.clone()));
-            place_stage();
             #[cfg(target_os = "macos")]
             crate::mac::toolbar_shown(app_settings().show_toolbar);
-            let controller = window
-                .add_overlay_view(Some(&mut View::from(&card)), DockingMode::CUSTOM, 1)
-                .expect("card");
-            controller.set_visible(0);
-            win().card.set(Some(controller));
-            let split = panel_create(None).expect("split");
-            // The room between the pages shows the window, like the margins around the card.
-            split.set_background_color(0x0000_0001);
-            split.set_visible(0);
-            stage.add_child_view(Some(&mut View::from(&split)));
-            win().split_view.set(Some(split));
-            for _ in 0..MAX_SPLIT_TABS {
-                let index = win().slots.borrow().len();
-                let slot = panel_create(Some(&mut SlotDelegate::new(index))).expect("slot");
-                let column = slot
-                    .set_to_box_layout(Some(&BoxLayoutSettings {
-                        horizontal: 0,
-                        cross_axis_alignment: AxisAlignment::STRETCH,
-                        default_flex: 1,
-                        ..Default::default()
-                    }))
-                    .expect("box layout");
-                let bar = place_view(|| 1, PANE_BAR_HEIGHT);
-                let mut view = View::from(&bar);
-                slot.add_child_view(Some(&mut view));
-                column.set_flex_for_view(Some(&mut view), 0);
-                win().slots.borrow_mut().push(slot);
-            }
             // Below the overlay, which is added after it.
             let reveal = place_view(no_width, 1);
             let controller = window
@@ -7179,73 +6797,6 @@ fn no_width() -> i32 {
 /// layout stacks it: an empty view, without a page of its own.
 fn place_view(width: fn() -> i32, height: i32) -> Panel {
     panel_create(Some(&mut PlaceDelegate::new(width, height))).expect("a place")
-}
-
-// The bar above the page: as high as its mode wants it (toolbar_height).
-wrap_panel_delegate! {
-    struct ToolbarDelegate {}
-
-    impl ViewDelegate {
-        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
-            Size { width: 1, height: toolbar_height() }
-        }
-    }
-
-    impl PanelDelegate {}
-}
-
-// A split's slot: as long, along the split, as lay_out_split worked out (SLOT_LENGTHS).
-wrap_panel_delegate! {
-    struct SlotDelegate {
-        index: usize,
-    }
-
-    impl ViewDelegate {
-        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
-            let (stacked, length) = SLOT_LENGTHS.with_borrow(|(stacked, lengths)| {
-                (*stacked, lengths.get(self.index).copied().unwrap_or(1))
-            });
-            if stacked {
-                Size { width: 1, height: length }
-            } else {
-                Size { width: length, height: 1 }
-            }
-        }
-    }
-
-    impl PanelDelegate {}
-}
-
-// Where a tab's page shows in the card: any size, but not an empty one, which CEF would replace by
-// its own, as the layouts share the room by weights. Its container follows it.
-wrap_panel_delegate! {
-    struct PagePlaceDelegate {}
-
-    impl ViewDelegate {
-        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
-            Size { width: 1, height: 1 }
-        }
-
-        fn on_layout_changed(&self, _view: Option<&mut View>, _new_bounds: Option<&Rect>) {
-            if !PANES_DUE.replace(true) {
-                post_task(ThreadId::UI, Some(&mut SendPanes::new()));
-            }
-        }
-    }
-
-    impl PanelDelegate {}
-}
-
-wrap_task! {
-    struct SendPanes {}
-
-    impl Task {
-        /// Tells the native interface where each window's pages show, as they moved.
-        fn execute(&self) {
-            PANES_DUE.set(false);
-            in_each_window(send_panes);
-        }
-    }
 }
 
 wrap_panel_delegate! {

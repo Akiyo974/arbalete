@@ -56,7 +56,7 @@ final class SplitHandleView: NSView {
     private var hovered = false
     private var cursor: NSCursor { stacked ? .resizeUpDown : .resizeLeftRight }
 
-    /// Shows the resize cursor, again once the card's window and the pages under the handle,
+    /// Shows the resize cursor, again once the window and the pages under the handle,
     /// which track the pointer too, have set theirs.
     private func showCursor() {
         cursor.set()

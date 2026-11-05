@@ -268,9 +268,6 @@ private final class Layer: NSView {
 final class PagePlacer {
     private let model: AppModel
     private weak var window: NSWindow?
-    /// The card's window, which CEF makes and lays out: found by its frame, as CEF gives no handle
-    /// to it, and kept out of sight, the card showing in the window instead.
-    private weak var cefCard: NSWindow?
     /// The card, in the window above its content view, which the app rounds; the pages'
     /// containers on its stage, which the library shifts (shift in app/src/mac.rs).
     private let card = Layer()
@@ -371,33 +368,14 @@ final class PagePlacer {
         return container
     }
 
-    /// CEF's card's window, found by its frame, `frame` in the window's points from its top left
-    /// corner.
-    private func cefCard(at frame: NSRect) -> NSWindow? {
-        guard let window else { return nil }
-        func at(_ child: NSWindow) -> Bool {
-            let x = child.frame.minX - window.frame.minX
-            let y = window.frame.maxY - child.frame.maxY
-            return abs(x - frame.minX) < 2 && abs(y - frame.minY) < 2
-                && abs(child.frame.width - frame.width) < 2
-                && abs(child.frame.height - frame.height) < 2
-        }
-        // Found once, it stays, whose frame may lag behind as the window changes size.
-        if let cefCard, cefCard.parent === window { return cefCard }
-        cefCard = window.childWindows?.first { !($0 is NSPanel) && at($0) }
-        return cefCard
-    }
-
-    /// Lays `panes` out in the card at `frame`, or hides them all without it. Returns the card,
-    /// once CEF's card's window is found.
+    /// Lays `panes` out in the card at `frame`, or hides them all without it. Returns the card.
     func place(_ panes: [Pane], card frame: NSRect?) -> NSView? {
         // Out of sight, as the app hides, CEF tells the card is too: it keeps its layout, which
         // nothing would place again as the window shows.
         if frame == nil, window?.isVisible == false, !card.isHidden { return card }
         last = (panes, frame)
-        let cefCard = frame.flatMap(cefCard(at:))
         defer { didPlace() }
-        guard let frame, let cefCard, mount() else {
+        guard let frame, mount() else {
             hide(except: [])
             toolbar.removeFromSuperview()
             outline.removeFromSuperview()
@@ -405,9 +383,6 @@ final class PagePlacer {
             holder = nil
             return nil
         }
-        // Laid out still, but out of sight and out of the way of the clicks.
-        cefCard.alphaValue = 0
-        cefCard.ignoresMouseEvents = true
         card.frame = frame
         card.isHidden = false
         holder = stage
