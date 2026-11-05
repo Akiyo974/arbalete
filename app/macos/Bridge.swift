@@ -24,7 +24,6 @@ final class AppModel: ObservableObject {
     var awaitingDraft: Set<Int>?
     @Published var downloads: [Download] = []
     @Published var archive: [ArchivedTab] = []
-    @Published var history: [Visit] = []
     /// The sidebar shows the library, on a section, under what its field searches.
     @Published var libraryShown = false
     /// The list of profiles shows above the footer.
@@ -81,9 +80,7 @@ final class AppModel: ObservableObject {
     /// The last page the app sent of each Space, which a carousel shows passing by.
     private var seenPages: [Int: SpacePage] = [:]
     @Published var section = LibrarySection.spaces
-    @Published var query = "" {
-        didSet { if section == .history { searchHistory() } }
-    }
+    @Published var query = ""
     /// The window the model is the interface of, which its commands come from.
     let window: UInt32
     /// Whether the sidebar floats above the page, which then shows the window's buttons.
@@ -171,14 +168,6 @@ final class AppModel: ObservableObject {
             downloads = (try? JSONDecoder().decode([Download].self, from: detail)) ?? downloads
         case "arbalete:archive":
             archive = (try? JSONDecoder().decode([ArchivedTab].self, from: detail)) ?? archive
-        case "arbalete:history":
-            struct Found: Decodable {
-                var text: String
-                var entries: [Visit]
-            }
-            if let found = try? JSONDecoder().decode(Found.self, from: detail), found.text == query {
-                history = found.entries
-            }
         case "arbalete:swipe":
             struct Gesture: Decodable {
                 var phase: String
@@ -195,8 +184,6 @@ final class AppModel: ObservableObject {
             openLibrary(nil)
         case "arbalete:show-downloads":
             openLibrary(.downloads)
-        case "arbalete:show-history":
-            openLibrary(.history)
         default:
             break
         }
@@ -445,7 +432,6 @@ final class AppModel: ObservableObject {
         // Their page may have changed them.
         switch section {
         case .archive: run("archive/list")
-        case .history: searchHistory()
         default: break
         }
     }
@@ -456,9 +442,6 @@ final class AppModel: ObservableObject {
         run("card/offset/0")
     }
 
-    private func searchHistory() {
-        run("history/search/200/\(percentEncoded(query))")
-    }
 
     /// Tells the app the card's color, which an empty Space shows, a little tinted by the
     /// displayed Space's leading color (WindowColors in app/src/command.rs).

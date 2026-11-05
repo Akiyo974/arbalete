@@ -6,41 +6,36 @@ import AppKit
 import SwiftUI
 
 enum LibrarySection: String, CaseIterable, Identifiable {
-    case spaces, closed, archive, history, media, downloads
+    // Arc's, in its order: its Easels and Boosts have no counterpart here.
+    case media, downloads, spaces, archive
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .spaces: "Spaces"
-        case .closed: "Recently Closed"
-        case .archive: "Archived Tabs"
-        case .history: "History"
         case .media: "Media"
         case .downloads: "Downloads"
+        case .spaces: "Spaces"
+        case .archive: "Archived Tabs"
         }
     }
 
     var symbol: String {
         switch self {
-        case .spaces: "rectangle.on.rectangle"
-        case .closed: "clock.arrow.circlepath"
-        case .archive: "archivebox"
-        case .history: "clock"
-        case .media: "photo"
+        case .media: "photo.on.rectangle"
         case .downloads: "arrow.down.circle"
+        case .spaces: "rectangle.on.rectangle"
+        case .archive: "archivebox"
         }
     }
 
     /// The symbol of the section shown, filled, like Arc's.
     var filledSymbol: String {
         switch self {
-        case .spaces: "rectangle.fill.on.rectangle.fill"
-        case .closed: "clock.arrow.circlepath"
-        case .archive: "archivebox.fill"
-        case .history: "clock.fill"
-        case .media: "photo.fill"
+        case .media: "photo.fill.on.rectangle.fill"
         case .downloads: "arrow.down.circle.fill"
+        case .spaces: "rectangle.fill.on.rectangle.fill"
+        case .archive: "archivebox.fill"
         }
     }
 
@@ -64,12 +59,6 @@ struct ArchivedTab: Decodable {
     var favicon: String?
     var space: String?
     var archivedAt: Double
-}
-
-struct Visit: Decodable {
-    var url: String
-    var title: String
-    var lastVisit: Double
 }
 
 struct Download: Decodable, Identifiable {
@@ -184,9 +173,7 @@ struct LibraryView: View {
                         VStack(alignment: .leading, spacing: 0) {
                             switch model.section {
                             case .spaces: EmptyView()
-                            case .closed: ClosedTabs(model: model)
                             case .archive: ArchivedTabs(model: model)
-                            case .history: HistoryList(model: model)
                             case .media: MediaGrid(model: model)
                             case .downloads: DownloadsList(model: model)
                             }
@@ -309,31 +296,6 @@ struct Empty: View {
     }
 }
 
-/// The tabs closed since launch, the last closed first, which reopen in the displayed Space.
-struct ClosedTabs: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        let closed = Array((model.state?.closed ?? []).enumerated())
-            .filter { matches(model.query, $0.element.title, $0.element.url) }
-        if model.state?.closed.isEmpty ?? true {
-            Empty(text: "No tab closed yet")
-        } else if closed.isEmpty {
-            Empty(text: "No closed tab matches")
-        }
-        DayGroups(items: closed, time: { $0.element.closedAt }) { item in
-            let (rank, tab) = item
-            LibraryRow(
-                favicon: tab.favicon, title: tab.title.isEmpty ? tab.url : tab.title,
-                detail: shortAddress(tab.url), help: tab.url
-            ) {
-                model.run("reopen/\(rank)")
-                model.closeLibrary()
-            }
-        }
-    }
-}
-
 /// The tabs archived, the most recent first: a click opens one again in its Space.
 struct ArchivedTabs: View {
     @ObservedObject var model: AppModel
@@ -355,27 +317,6 @@ struct ArchivedTabs: View {
                 model.run("archive/restore/\(rank)")
                 model.closeLibrary()
             }
-        }
-    }
-}
-
-/// The displayed Space's profile history, the latest visit first, which the app searches.
-struct HistoryList: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        if model.history.isEmpty {
-            Empty(text: model.query.isEmpty ? "No history yet" : "No page matches")
-        }
-        DayGroups(items: model.history, time: { $0.lastVisit }) { visit in
-            LibraryRow(
-                favicon: nil, title: visit.title.isEmpty ? visit.url : visit.title,
-                detail: shortAddress(visit.url), help: visit.url
-            ) {
-                model.run("open/\(percentEncoded(visit.url))")
-                model.closeLibrary()
-            }
-            .rightClick { model.run("history/remove/\(percentEncoded(visit.url))") }
         }
     }
 }

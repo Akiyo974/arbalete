@@ -6321,33 +6321,9 @@ fn with_history<R>(profile: ProfileId, f: impl FnOnce(&mut History) -> R) -> Opt
     })
 }
 
-/// Sends both sidebars the `limit` latest pages of the displayed Space's profile whose address or
-/// title holds `text`, for the library's history.
-fn search_history(text: &str, limit: usize) {
-    let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
-    let entries = with_history(profile, |history| history.search(text, limit))
-        .and_then(|found| {
-            found
-                .map_err(|error| eprintln!("cannot read the history: {error}"))
-                .ok()
-        })
-        .unwrap_or_default();
-    let entries: Vec<_> = entries
-        .iter()
-        .map(|entry| json!({ "url": entry.url, "title": entry.title, "lastVisit": entry.last_visit }))
-        .collect();
-    let detail = json!({ "text": text, "entries": entries });
-    let event = format!(r#"new CustomEvent("arbalete:history", {{ detail: {detail} }})"#);
-    dispatch(&win().sidebar, &event);
-    dispatch(&win().reveal_view, &event);
-}
-
-/// Opens the library on the history, showing the sidebar first if it is hidden.
+/// Shows the history: Chromium's own page, as the library has none, like Arc's.
 fn show_history() {
-    if win().sidebar_mode.get() == SidebarMode::Hidden {
-        set_sidebar(SidebarMode::Shown);
-    }
-    dispatch(&win().sidebar, r#"new Event("arbalete:show-history")"#);
+    open_chrome_page("chrome://history");
 }
 
 fn now() -> i64 {
@@ -6411,11 +6387,6 @@ fn run_command(command: Command) {
         (Command::SwitchTab(forward), _) => switch_tab(forward),
         (Command::EndTabSwitch, _) => end_tab_switch(),
         (Command::ShowHistory, _) => show_history(),
-        (Command::SearchHistory { text, limit }, _) => search_history(&text, limit),
-        (Command::RemoveHistory(url), _) => {
-            let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
-            update_history(profile, |history| history.remove(&url));
-        }
         (Command::Select(id), _) => select_tab(id),
         (Command::NextTab, _) => select_found(|s| s.next_tab(s.displayed().id, true)),
         (Command::PreviousTab, _) => select_found(|s| s.next_tab(s.displayed().id, false)),

@@ -193,14 +193,6 @@ pub enum Command {
     SwitchTab(bool),
     /// Shows the tab picked in the switcher once ⌃ is released: from the keyboard monitor.
     EndTabSwitch,
-    /// Asks for the `limit` latest pages of the history whose address or title holds `text`:
-    /// `history/search/<limit>/<percent-encoded text>`.
-    SearchHistory {
-        text: String,
-        limit: usize,
-    },
-    /// Forgets a page of the history: `history/remove/<percent-encoded url>`.
-    RemoveHistory(String),
     /// Shows a tab in the content view: `select/<tab id>`.
     Select(NodeId),
     /// Shows the next tab in the sidebar, `next`, or the previous one, `previous`.
@@ -641,19 +633,6 @@ impl Command {
                 }
                 if let Some(id) = path.strip_prefix("site/extension/") {
                     return Some(Self::OpenExtensionPopup(id.to_string()));
-                }
-                if let Some((limit, text)) = path
-                    .strip_prefix("history/search/")
-                    .and_then(|r| r.split_once('/'))
-                {
-                    let text = percent_decode(text)?;
-                    return limit
-                        .parse()
-                        .ok()
-                        .map(|limit| Self::SearchHistory { text, limit });
-                }
-                if let Some(url) = path.strip_prefix("history/remove/") {
-                    return percent_decode(url).map(Self::RemoveHistory);
                 }
                 if let Some((action, id)) = path
                     .strip_prefix("download/")
@@ -1329,29 +1308,6 @@ mod tests {
         );
         assert_eq!(Command::parse("open/%zz"), None);
         assert_eq!(Command::parse("open/%C3"), None);
-    }
-
-    #[test]
-    fn parses_history_commands() {
-        assert_eq!(
-            Command::parse("history/search/200/caf%C3%A9%2F"),
-            Some(Command::SearchHistory {
-                text: "café/".to_string(),
-                limit: 200
-            })
-        );
-        assert_eq!(
-            Command::parse("history/search/50/"),
-            Some(Command::SearchHistory {
-                text: String::new(),
-                limit: 50
-            })
-        );
-        assert_eq!(Command::parse("history/search/many/a"), None);
-        assert_eq!(
-            Command::parse("history/remove/https%3A%2F%2Fexample.com%2F"),
-            Some(Command::RemoveHistory("https://example.com/".to_string()))
-        );
     }
 
     #[test]
