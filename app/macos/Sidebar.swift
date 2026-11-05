@@ -83,6 +83,8 @@ struct SidebarToolbar: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
+        // In toolbar mode, the bar above the page has them, but in developer mode, like Arc's.
+        let navigates = !(model.state?.toolbar ?? false) || model.activeTab?.developer == true
         // Like Arc's, too narrow for them all, the toggle and reload go into a "⋯" menu.
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 2) {
@@ -92,13 +94,13 @@ struct SidebarToolbar: View {
                     model.run("sidebar/toggle")
                 }
                 Spacer(minLength: 0)
-                if !(model.state?.toolbar ?? false) {
+                if navigates {
                     NavButtons(model: model)
                 }
             }
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
-                if !(model.state?.toolbar ?? false) {
+                if navigates {
                     NavButtons(model: model, compact: true)
                 }
             }

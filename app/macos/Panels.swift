@@ -262,9 +262,10 @@ struct BarEnd: View {
 
 /// The bar above a page in developer mode, like Arc's, measured: in the dark, indigo with faint
 /// diagonal stripes; in the light, white with its buttons in the accent. The lock, or an "i"
-/// without one, and the full address in a monospaced font, then buttons to copy it, open the
-/// developer tools, the site controls and Split View; in toolbar mode, the navigation buttons
-/// first. On a split's page, like Arc's, the page's own, with × to close it.
+/// without one, and the full address in a monospaced font, then buttons to copy it, capture the
+/// page, open the developer tools, a menu of the extensions, the site controls (not in Arc's)
+/// and Split View; in toolbar mode, the navigation buttons first while the sidebar is not docked.
+/// On a split's page, like Arc's, the page's own, with × to close it.
 struct DeveloperBar: View {
     @ObservedObject var model: AppModel
     let url: String
@@ -274,14 +275,17 @@ struct DeveloperBar: View {
 
     private var dark: Bool { isDark(model.space?.theme) }
 
-    /// In toolbar mode, over a page alone, its ends are the plain bar's.
+    /// In toolbar mode, over a page alone, its end is the plain bar's.
     private var asToolbar: Bool { model.state?.toolbar == true && close == nil }
+    /// Its start is the plain bar's: in toolbar mode, like Arc's, the navigation buttons go to the
+    /// sidebar's top while it is docked (SidebarToolbar).
+    private var navigates: Bool { asToolbar && !model.sidebarDocked }
 
     var body: some View {
         HStack(spacing: 2) {
-            if asToolbar {
+            if navigates {
                 BarStart(model: model)
-            } else if model.state?.toolbar == true {
+            } else if model.state?.toolbar == true, !asToolbar {
                 NavButtons(model: model)
             }
             Image(systemName: url.hasPrefix("https://") ? "lock.fill" : "info")
@@ -303,9 +307,14 @@ struct DeveloperBar: View {
             tool("network", "Network") { model.run("page/devtools/network") }
             tool("scope", "Inspect Element") { model.run("page/devtools/elements") }
             separator
-            ForEach(model.state?.extensions ?? []) { ext in
-                PinnedExtension(model: model, extension: ext, view: "toolbar")
+            // Like Arc's, a menu of the extensions in place of the pinned ones.
+            GeometryReader { geometry in
+                tool("puzzlepiece.extension", "Extensions") {
+                    model.run("extension/menu/toolbar/\(inMainWindow(geometry.frame(in: .global)))")
+                }
             }
+            .frame(width: 28, height: 28)
+            // The site controls stay, between the extensions and Split View.
             if asToolbar {
                 BarEnd(model: model)
             } else {
@@ -317,7 +326,8 @@ struct DeveloperBar: View {
             }
         }
         .foregroundStyle(dark ? Color.white : model.accent)
-        .padding(.horizontal, asToolbar ? 2.25 : 10)
+        .padding(.leading, navigates ? 2.25 : 10)
+        .padding(.trailing, asToolbar ? 2.25 : 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
             if dark { stripes } else { color("#f8f8fd") }

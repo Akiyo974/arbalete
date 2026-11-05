@@ -4336,6 +4336,21 @@ fn show_menu(target: Target) {
     let _ = entries;
 }
 
+/// Shows the developer bar's extensions menu at the pointer, like Arc's: the displayed Space's
+/// profile's extensions turned on, then adding and managing them.
+fn show_extensions_menu() {
+    let extensions: Vec<_> = extensions::list(displayed_profile())
+        .into_iter()
+        .filter(|extension| extension.enabled)
+        .map(|extension| (extension.id, extension.name))
+        .collect();
+    let entries = menu::extensions_menu(&extensions);
+    #[cfg(target_os = "macos")]
+    crate::mac::pop_up(entries);
+    #[cfg(not(target_os = "macos"))]
+    let _ = entries;
+}
+
 /// Shows the menu of an extension of the displayed Space's profile, by its id.
 fn show_extension_menu(id: Option<&String>) {
     let profile = displayed_profile();
@@ -6375,6 +6390,12 @@ fn run_command(command: Command) {
             if let Some(button) = button_in_window(button) {
                 win().site_button.set(Some(button));
                 open_extension_popup(&id);
+            }
+        }
+        (Command::ExtensionsMenu(button), _) => {
+            if let Some(button) = button_in_window(button) {
+                win().site_button.set(Some(button));
+                show_extensions_menu();
             }
         }
         (Command::CloseExtensionPopup, _) => close_extension_popup(),

@@ -516,6 +516,35 @@ fn favorite(sidebar: &Sidebar, tab: NodeId, url: &str) -> Vec<Entry> {
     ]
 }
 
+/// The developer bar's extensions menu, like Arc's: the profile's extensions turned on, by id and
+/// name, whose popup each opens, then adding and managing them.
+pub fn extensions_menu(extensions: &[(String, String)]) -> Vec<Entry> {
+    let mut menu: Vec<Entry> = extensions
+        .iter()
+        .map(|(id, name)| {
+            item(
+                id,
+                name,
+                Action::Run(Command::OpenExtensionPopup(id.clone())),
+            )
+        })
+        .collect();
+    if !menu.is_empty() {
+        menu.push(Entry::Separator);
+    }
+    menu.push(item(
+        "add",
+        "Add Extension…",
+        Action::Run(Command::ShowStore),
+    ));
+    menu.push(item(
+        "manage",
+        "Manage Extensions…",
+        Action::Run(Command::ManageExtensions),
+    ));
+    menu
+}
+
 fn copy_link(url: &str) -> Entry {
     item("copy-link", "Copy Link", Action::CopyLink(url.to_string()))
 }
@@ -533,6 +562,23 @@ fn item(id: &str, title: &str, action: Action) -> Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extensions_menu_opens_their_popups_then_adds_and_manages() {
+        let menu = extensions_menu(&[("a".into(), "Dark Reader".into())]);
+        assert_eq!(
+            titles(&menu),
+            ["Dark Reader", "-", "Add Extension…", "Manage Extensions…"]
+        );
+        assert!(matches!(
+            find(menu, "a"),
+            Some(Action::Run(Command::OpenExtensionPopup(id))) if id == "a"
+        ));
+        assert_eq!(
+            titles(&extensions_menu(&[])),
+            ["Add Extension…", "Manage Extensions…"]
+        );
+    }
 
     /// The titles of a menu, a submenu's items after its title, `-` for a separator, `✓` before
     /// a checked item.

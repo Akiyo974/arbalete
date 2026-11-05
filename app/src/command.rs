@@ -170,6 +170,9 @@ pub enum Command {
     /// Opens a pinned extension's popup under its button:
     /// `extension/popup/<id>/<docked, revealed or toolbar>/<x>/<y>/<width>/<height>`.
     OpenPinnedExtension(String, Button),
+    /// Shows the developer bar's extensions menu, whose popups open under its button:
+    /// `extension/menu/<docked, revealed or toolbar>/<x>/<y>/<width>/<height>`.
+    ExtensionsMenu(Button),
     /// Acts on a download from the sidebar: `download/<cancel, open, show or remove>/<id>`.
     Download(DownloadAction, u32),
     /// Opens the library on the downloads, from the menu.
@@ -593,7 +596,7 @@ impl Command {
                 if let Some((action, id)) = path
                     .strip_prefix("extension/")
                     .and_then(|r| r.split_once('/'))
-                    .filter(|(action, _)| *action != "popup")
+                    .filter(|(action, _)| !["popup", "menu"].contains(action))
                 {
                     let id = id.to_string();
                     return match action {
@@ -608,6 +611,9 @@ impl Command {
                 }
                 if let Some(button) = path.strip_prefix("site/show/") {
                     return Button::parse(button).map(Self::ShowSiteControls);
+                }
+                if let Some(button) = path.strip_prefix("extension/menu/") {
+                    return Button::parse(button).map(Self::ExtensionsMenu);
                 }
                 if let Some((id, button)) = path
                     .strip_prefix("extension/popup/")
@@ -1115,6 +1121,16 @@ mod tests {
             }))
         );
         assert_eq!(Command::parse("site/show/menu/10/4/28/28"), None);
+        assert_eq!(
+            Command::parse("extension/menu/toolbar/1/2/3/4"),
+            Some(Command::ExtensionsMenu(Button {
+                view: ButtonView::Toolbar,
+                x: 1,
+                y: 2,
+                width: 3,
+                height: 4,
+            }))
+        );
         assert_eq!(
             Command::parse("extension/popup/abc/docked/1/2/3/4"),
             Some(Command::OpenPinnedExtension(
