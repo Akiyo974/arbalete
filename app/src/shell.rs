@@ -108,6 +108,9 @@ const FIND_SIZE: Size = Size {
 };
 const FIND_MARGIN: i32 = 10;
 
+/// The height of Peek's bar, over its page (app/macos/Peek.swift).
+const PEEK_BAR: i32 = 32;
+
 /// The import assistant's size, at most (ui/src/Import.tsx).
 const IMPORT_SIZE: Size = Size {
     width: 560,
@@ -336,7 +339,8 @@ struct Win {
     reveal: RefCell<Option<Spot>>,
     /// The tabs of the split shown, in order, and how it lays them out: empty while none shows.
     split: RefCell<(Vec<NodeId>, Option<SplitLayout>)>,
-    /// The find bar, at the card's top right corner; created the first time it is shown.
+    /// The find bar, at the top right corner of the card or Peek's; created the first time it is
+    /// shown.
     find_view: RefCell<Option<Panel>>,
     find: RefCell<Option<Spot>>,
     /// The text last searched for, which ⌘G searches again.
@@ -3400,7 +3404,8 @@ fn make_find() {
     }
 }
 
-/// Keeps the find bar at the card's top right corner.
+/// Keeps the find bar at the top right corner of the page it searches: Peek's, under its bar, or
+/// the card's.
 fn place_find() {
     let Some(controller) = win().find.with_borrow(Clone::clone) else {
         return;
@@ -3411,7 +3416,16 @@ fn place_find() {
     else {
         return;
     };
-    let card = win().sidebar_mode.get().layout(&size).card;
+    let card = if peek_shown() {
+        let frame = peek_frame(&size);
+        Rect {
+            y: frame.y + PEEK_BAR,
+            height: frame.height - PEEK_BAR,
+            ..frame
+        }
+    } else {
+        win().sidebar_mode.get().layout(&size).card
+    };
     let width = FIND_SIZE.width.min(card.width - 2 * FIND_MARGIN);
     controller.set_bounds(Some(&Rect {
         x: card.x + card.width - width - FIND_MARGIN,
@@ -3421,8 +3435,14 @@ fn place_find() {
     }));
 }
 
-/// Finds text in the shown page; the same text again goes to the next match. `None` searches the
-/// last text again, or shows the find bar when there is none.
+/// The page find in page acts on: Peek's while it shows, or the shown one.
+fn find_page() -> Option<Browser> {
+    PEEK.with_borrow(|peek| peek.as_ref().map(|peek| peek.browser.clone()))
+        .or_else(content)
+}
+
+/// Finds text in `browser`, find_page's; the same text again goes to the next match. `None`
+/// searches the last text again, or shows the find bar when there is none.
 fn find(browser: &Browser, text: Option<String>, forward: bool) {
     let text = text.unwrap_or_else(|| win().find_text.with_borrow(Clone::clone));
     if text.is_empty() {
@@ -3454,16 +3474,23 @@ fn show_find_if_hidden() {
 }
 
 /// Hides the find bar and the page's highlights, keeping the active match selected and the text,
-/// which ⌘G searches again.
-fn hide_find(browser: Option<&Browser>) {
+/// which ⌘G searches again; the page gets the keyboard back.
+fn hide_find() {
+    close_find();
+    if let Some(host) = PEEK.with_borrow(|peek| peek.as_ref()?.browser.host()) {
+        host.set_focus(1);
+    } else if let Some(tab) = win().shown.get() {
+        focus_page(tab);
+    }
+}
+
+/// Hides the find bar and the highlights of the page it searches, as Peek opens or closes.
+fn close_find() {
     if let Some(controller) = win().find.with_borrow(Clone::clone) {
         controller.set_visible(0);
     }
-    if let Some(host) = browser.and_then(Browser::host) {
+    if let Some(host) = find_page().and_then(|browser| browser.host()) {
         host.stop_finding(0);
-    }
-    if let Some(tab) = win().shown.get() {
-        focus_page(tab);
     }
 }
 
@@ -5205,6 +5232,7 @@ fn peek_frame(size: &Size) -> Rect {
 
 /// Shows `url` in Peek, in the displayed Space's profile, instead of what it showed.
 fn peek(url: &str) {
+    close_find();
     close_peek();
     let Some(window) = win().window.with_borrow(Clone::clone) else {
         return;
@@ -5328,6 +5356,10 @@ pub fn peek_shown() -> bool {
 
 /// Closes Peek, its page with it.
 fn close_peek() {
+    if !peek_shown() {
+        return;
+    }
+    close_find();
     let Some(peek) = PEEK.take() else { return };
     #[cfg(target_os = "macos")]
     crate::native::peek(win().id, None);
@@ -6187,8 +6219,12 @@ fn run_command(command: Command) {
             }
         }
         (Command::ShowFind, _) => show_find(),
-        (Command::Find { text, forward }, Some(browser)) => find(&browser, text, forward),
-        (Command::HideFind, browser) => hide_find(browser.as_ref()),
+        (Command::Find { text, forward }, _) => {
+            if let Some(browser) = find_page() {
+                find(&browser, text, forward);
+            }
+        }
+        (Command::HideFind, _) => hide_find(),
         (Command::ShowSiteControls(button), _) => show_site_controls(button),
         (Command::HideSiteControls, _) => hide_site_controls(),
         (Command::ShowThemePicker(id), _) => show_theme_picker(id),
@@ -7314,14 +7350,17 @@ wrap_context_menu_handler! {
     }
 }
 
-// Tells the find bar how many matches the shown page has, and which one is active, once the
+// Tells the find bar how many matches the page it searches has, and which one is active, once the
 // search ends: the updates before it count matches without an active one.
 wrap_find_handler! {
     struct ContentFindHandler {}
 
     impl FindHandler {
         fn on_find_result(&self, browser: Option<&mut Browser>, _identifier: i32, count: i32, _selection_rect: Option<&Rect>, active_match_ordinal: i32, final_update: i32) {
-            if final_update == 1 && is_shown(browser) {
+            let searched = find_page().is_some_and(|mut page| {
+                browser.is_some_and(|browser| browser.is_same(Some(&mut page)) == 1)
+            });
+            if final_update == 1 && searched {
                 dispatch(
                     &win().find_view,
                     &format!(r#"new CustomEvent("arbalete:found", {{ detail: {{ "count": {count}, "active": {active_match_ordinal} }} }})"#),
