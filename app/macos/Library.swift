@@ -32,6 +32,21 @@ enum LibrarySection: String, CaseIterable, Identifiable {
         }
     }
 
+    /// The symbol of the section shown, filled, like Arc's.
+    var filledSymbol: String {
+        switch self {
+        case .spaces: "rectangle.fill.on.rectangle.fill"
+        case .closed: "clock.arrow.circlepath"
+        case .archive: "archivebox.fill"
+        case .history: "clock.fill"
+        case .media: "photo.fill"
+        case .downloads: "arrow.down.circle.fill"
+        }
+    }
+
+    /// What the section's search field says it searches, like Arc's "Search Archive...".
+    var searchName: String { self == .archive ? "Archive" : label }
+
     /// The Spaces fill the window, the page hidden; the other sections rest beside it.
     var wide: Bool { self == .spaces }
 }
@@ -117,54 +132,56 @@ struct LibraryView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // Like Arc's, measured: the sections in a column of their own, a little lighter than
-            // the window, centered, each a large icon over its name; the one shown tinted.
+            // Like Arc's, measured: the sections in a rail 111 points wide, a little lighter than
+            // the window, centered on it, each a large icon over its name, 100 points apart; the
+            // one shown filled and tinted.
             VStack(spacing: 21) {
-                Spacer(minLength: 40)
                 ForEach(LibrarySection.allCases) { section in
                     let shown = model.section == section
                     Button {
                         model.pick(section)
                     } label: {
-                        VStack(spacing: 8) {
-                            Image(systemName: section.symbol).font(.system(size: 22))
+                        VStack(spacing: 9) {
+                            Image(systemName: shown ? section.filledSymbol : section.symbol)
+                                .font(.system(size: 22))
                                 .foregroundStyle(shown ? model.accent : Ink.secondary)
                                 .frame(height: 26)
-                            Text(section.label).font(.system(size: 12, weight: .semibold))
+                            Text(section.label).font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(shown ? Ink.primary : Ink.secondary)
                                 .multilineTextAlignment(.center)
                         }
-                        .frame(width: 100, height: 82)
+                        .frame(width: 97, height: 79)
                         .background(
                             RoundedRectangle(cornerRadius: 10).fill(shown ? Ink.item : .clear))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
-                Spacer(minLength: 0)
-                HStack {
-                    IconButton(symbol: "arrow.left", label: "Back to the Space") { model.closeLibrary() }
-                    Spacer()
-                }
-                .padding(.bottom, 10)
             }
-            .padding(.horizontal, 6)
-            .frame(width: 113)
+            .frame(maxHeight: .infinity)
+            .overlay(alignment: .bottomLeading) {
+                IconButton(symbol: "arrow.left", label: "Back to the Space") { model.closeLibrary() }
+                    .padding(.leading, 9)
+                    .padding(.bottom, 10)
+            }
+            .frame(width: 111)
             .background(Color.ink((0x000000, 0.03), (0xFFFFFF, 0.035)))
             .overlay(alignment: .trailing) {
                 Rectangle().fill(Color.ink((0x000000, 0.08), (0xFFFFFF, 0.06))).frame(width: 1)
+                    .offset(x: 1)
             }
-            VStack(alignment: .leading, spacing: 8) {
-                Spacer().frame(height: 36)
+            .padding(.trailing, 1)
+            VStack(alignment: .leading, spacing: 10) {
+                // Like Arc's, the field 9 points from the window's top.
+                Spacer().frame(height: 9)
                 if !model.section.wide {
-                    TextField("Search \(model.section.label)…", text: model.queryBinding)
-                        .textFieldStyle(.roundedBorder)
+                    LibrarySearch(model: model)
                 }
                 if model.section == .spaces {
                     ManageSpacesView(model: model)
                 } else {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 0) {
                             switch model.section {
                             case .spaces: EmptyView()
                             case .closed: ClosedTabs(model: model)
@@ -176,15 +193,84 @@ struct LibraryView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .scrollIndicators(.never)
                 }
             }
-            .padding(.leading, model.section == .spaces ? 0 : 10)
-            .padding(.trailing, 10)
+            .padding(.leading, model.section == .spaces ? 0 : 7)
+            .padding(.trailing, 8)
         }
     }
 }
 
-/// A row opening something: an icon, a title and a detail at its right.
+/// The library's search field, like Arc's, measured: a 36-point pill, a magnifier, and "Search
+/// <section>...".
+struct LibrarySearch: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass").font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Ink.secondary)
+                .frame(width: 20)
+            TextField("Search \(model.section.searchName)...", text: model.queryBinding)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 36)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Ink.item))
+    }
+}
+
+/// Items grouped under the day they belong to, like Arc's library: "Today", "Yesterday", then how
+/// long ago, as the system says it.
+struct DayGroups<Item, Row: View>: View {
+    let items: [Item]
+    let time: (Item) -> Double
+    @ViewBuilder let row: (Item) -> Row
+
+    var body: some View {
+        let groups = items.reduce(into: [(String, [Item])]()) { groups, item in
+            let label = dayLabel(time(item))
+            if groups.last?.0 == label { groups[groups.count - 1].1.append(item) } else {
+                groups.append((label, [item]))
+            }
+        }
+        ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
+            Text(group.0).font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Ink.secondary)
+                .padding(.leading, 3)
+                .padding(.top, 12)
+                .padding(.bottom, 4)
+            ForEach(Array(group.1.enumerated()), id: \.offset) { _, item in row(item) }
+        }
+    }
+}
+
+/// The day a time, in milliseconds since the epoch, belongs to, in words.
+func dayLabel(_ time: Double) -> String {
+    let date = Date(timeIntervalSince1970: time / 1000)
+    let calendar = Calendar.current
+    if calendar.isDateInToday(date) { return "Today" }
+    if calendar.isDateInYesterday(date) { return "Yesterday" }
+    let days = calendar.dateComponents(
+        [.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: Date())
+    ).day ?? 0
+    let formatter = RelativeDateTimeFormatter()
+    formatter.unitsStyle = .full
+    return formatter.localizedString(
+        from: days < 7 ? DateComponents(day: -days) : DateComponents(weekOfYear: -(days / 7)))
+}
+
+/// An address as the library shows it under a title: without scheme nor "www.".
+func shortAddress(_ url: String) -> String {
+    let address = url.replacingOccurrences(
+        of: "^[a-z][a-z0-9+.-]*://(www\\.)?", with: "", options: [.regularExpression, .caseInsensitive])
+    return address.hasSuffix("/") ? String(address.dropLast()) : address
+}
+
+/// A row opening something, like Arc's library's, measured: 56 points tall, an icon, a title
+/// over its address.
 struct LibraryRow: View {
     let favicon: String?
     let title: String
@@ -195,16 +281,18 @@ struct LibraryRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: 14) {
                 Favicon(url: favicon, size: 16)
-                Text(title).lineLimit(1)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.system(size: 14)).foregroundStyle(Ink.primary).lineLimit(1)
+                    Text(detail).font(.system(size: 12)).foregroundStyle(Ink.secondary).lineLimit(1)
+                }
                 Spacer(minLength: 6)
-                Text(detail).font(.system(size: 11)).foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 8)
-            .frame(height: 32)
+            .padding(.horizontal, 14)
+            .frame(height: 56)
             .background(
-                RoundedRectangle(cornerRadius: 7).fill(.primary.opacity(hovered.wrappedValue ? 0.08 : 0)))
+                RoundedRectangle(cornerRadius: 10).fill(Ink.item.opacity(hovered.wrappedValue ? 1 : 0)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -233,10 +321,11 @@ struct ClosedTabs: View {
         } else if closed.isEmpty {
             Empty(text: "No closed tab matches")
         }
-        ForEach(closed, id: \.offset) { rank, tab in
+        DayGroups(items: closed, time: { $0.element.closedAt }) { item in
+            let (rank, tab) = item
             LibraryRow(
                 favicon: tab.favicon, title: tab.title.isEmpty ? tab.url : tab.title,
-                detail: ago(tab.closedAt), help: tab.url
+                detail: shortAddress(tab.url), help: tab.url
             ) {
                 model.run("reopen/\(rank)")
                 model.closeLibrary()
@@ -257,10 +346,11 @@ struct ArchivedTabs: View {
         } else if found.isEmpty {
             Empty(text: "No archived tab matches")
         }
-        ForEach(found, id: \.offset) { rank, tab in
+        DayGroups(items: found, time: { $0.element.archivedAt }) { item in
+            let (rank, tab) = item
             LibraryRow(
                 favicon: tab.favicon, title: tab.title.isEmpty ? tab.url : tab.title,
-                detail: ago(tab.archivedAt), help: tab.space.map { "\(tab.url)\nin \($0)" } ?? tab.url
+                detail: shortAddress(tab.url), help: tab.space.map { "\(tab.url)\nin \($0)" } ?? tab.url
             ) {
                 model.run("archive/restore/\(rank)")
                 model.closeLibrary()
@@ -277,10 +367,10 @@ struct HistoryList: View {
         if model.history.isEmpty {
             Empty(text: model.query.isEmpty ? "No history yet" : "No page matches")
         }
-        ForEach(Array(model.history.enumerated()), id: \.offset) { _, visit in
+        DayGroups(items: model.history, time: { $0.lastVisit }) { visit in
             LibraryRow(
                 favicon: nil, title: visit.title.isEmpty ? visit.url : visit.title,
-                detail: ago(visit.lastVisit), help: visit.url
+                detail: shortAddress(visit.url), help: visit.url
             ) {
                 model.run("open/\(percentEncoded(visit.url))")
                 model.closeLibrary()
