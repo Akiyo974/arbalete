@@ -23,8 +23,8 @@ pub struct Download {
     pub received: i64,
     /// 0 while the size is unknown.
     pub total: i64,
-    /// Bytes per second.
-    #[serde(skip)]
+    /// Bytes per second, while it runs: the library shows the time left from it.
+    #[serde(default)]
     pub speed: i64,
     pub state: State,
     /// When it started, in milliseconds since the Unix epoch.
