@@ -272,6 +272,10 @@ struct DeveloperBar: View {
     /// On a split's page: it is focused before any action, and closed by ×.
     var focus: () -> Void = {}
     var close: (() -> Void)?
+    /// Its address edited in place, like Arc's: selected as a click starts it.
+    private let _editing = State(initialValue: false)
+    private let _typed = State(initialValue: "")
+    private let _focused = FocusState<Bool>()
 
     private var dark: Bool { isDark(model.space?.theme) }
 
@@ -291,11 +295,9 @@ struct DeveloperBar: View {
             Image(systemName: url.hasPrefix("https://") ? "lock.fill" : "info")
                 .font(.system(size: 13, weight: .bold))
                 .frame(width: 24)
-            Text(url)
+            address
                 .font(.system(size: 13, design: .monospaced))
                 .foregroundStyle(dark ? Color.white : Ink.primary)
-                .lineLimit(1)
-                .truncationMode(.middle)
                 .padding(.leading, 6)
             Spacer(minLength: 8)
             tool("link", "Copy URL") { model.run("menu/choose/site/any/copy-link") }
@@ -338,18 +340,54 @@ struct DeveloperBar: View {
         .environment(\.colorScheme, dark ? .dark : .light)
     }
 
+    /// The full address, which a click edits in place, like Arc's: Enter loads what is typed,
+    /// Escape or a click elsewhere gives it up.
+    @ViewBuilder private var address: some View {
+        if _editing.wrappedValue {
+            TextField("", text: _typed.projectedValue)
+                .textFieldStyle(.plain)
+                .focused(_focused.projectedValue)
+                .onSubmit {
+                    let typed = _typed.wrappedValue.trimmingCharacters(in: .whitespaces)
+                    _editing.wrappedValue = false
+                    guard !typed.isEmpty, typed != url else { return }
+                    let engine = nativeWindows[model.window]?.commandBar.search.url
+                        ?? "https://www.google.com/search?q="
+                    let target = toURL(typed) ?? engine + percentEncoded(typed)
+                    focus()
+                    model.run("navigate/\(percentEncoded(target))")
+                }
+                .onExitCommand { _editing.wrappedValue = false }
+                .onChange(of: _focused.wrappedValue) { _, focused in
+                    if !focused { _editing.wrappedValue = false }
+                }
+                .onAppear { _focused.wrappedValue = true }
+        } else {
+            Text(url)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    _typed.wrappedValue = url
+                    _editing.wrappedValue = true
+                }
+                .help(url)
+        }
+    }
+
     private var stripes: some View {
             Canvas { context, size in
-                context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(color("#363ccc")))
-                // Stripes 12 points wide, every 24, leaning right.
+                context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(color("#5459d8")))
+                // Stripes 12 points wide, every 24, leaning left, like Arc's.
                 var x: CGFloat = -size.height
                 while x < size.width {
                     var stripe = Path()
-                    stripe.move(to: CGPoint(x: x, y: size.height))
-                    stripe.addLine(to: CGPoint(x: x + size.height, y: 0))
-                    stripe.addLine(to: CGPoint(x: x + size.height + 12, y: 0))
-                    stripe.addLine(to: CGPoint(x: x + 12, y: size.height))
-                    context.fill(stripe, with: .color(color("#3338c9")))
+                    stripe.move(to: CGPoint(x: x, y: 0))
+                    stripe.addLine(to: CGPoint(x: x + size.height, y: size.height))
+                    stripe.addLine(to: CGPoint(x: x + size.height + 12, y: size.height))
+                    stripe.addLine(to: CGPoint(x: x + 12, y: 0))
+                    context.fill(stripe, with: .color(color("#5055d7")))
                     x += 24
                 }
             }
