@@ -33,6 +33,7 @@ unsafe extern "C" {
     fn arbalete_ui_little_closed(id: u32);
     fn arbalete_ui_focused_little() -> i64;
     fn arbalete_ui_little_bar();
+    fn arbalete_ui_little_hotkey(on: bool) -> bool;
     fn arbalete_ui_little_page(id: u32) -> *mut c_void;
     fn arbalete_ui_little_page_closed(view: *mut c_void);
     fn arbalete_ui_settings_focused() -> bool;
@@ -311,6 +312,13 @@ pub fn little_closed(id: u32) {
 }
 
 /// Shows the Command Bar that opens a Little Arbalete window, like Little Arc's.
+/// Registers ⌥⌘N to open Little Arbalete from any app, or unregisters it; false when another app,
+/// like Arc, has it.
+pub fn little_hotkey(on: bool) -> bool {
+    // SAFETY: a plain value.
+    unsafe { arbalete_ui_little_hotkey(on) }
+}
+
 pub fn little_bar() {
     // SAFETY: no arguments.
     unsafe { arbalete_ui_little_bar() };

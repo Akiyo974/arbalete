@@ -12,6 +12,8 @@ pub const FILE_NAME: &str = "settings.json";
 pub struct Settings {
     /// ⌘Q asks before quitting.
     pub warn_before_quit: bool,
+    /// ⌥⌘N opens Little Arbalete from any app, like Arc's Little Arc.
+    pub little_hotkey: bool,
     /// The "Today" tabs open at launch are those left open at the last quit; without, every
     /// Space starts with none, its pinned tabs and favorites kept.
     pub restore_session: bool,
@@ -33,6 +35,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             warn_before_quit: false,
+            little_hotkey: true,
             restore_session: true,
             show_toolbar: false,
             suspend_tabs: true,
@@ -71,6 +74,7 @@ mod tests {
         assert_eq!(load(&path), Settings::default());
         let settings = Settings {
             warn_before_quit: true,
+            little_hotkey: false,
             restore_session: false,
             show_toolbar: true,
             suspend_tabs: false,

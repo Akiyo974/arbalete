@@ -8,6 +8,7 @@ import SwiftUI
 struct SettingsDetail: Decodable {
     struct General: Decodable {
         var warnBeforeQuit: Bool
+        var littleHotkey: Bool
         var restoreSession: Bool
         var suspendTabs: Bool
         var awakeSites: [String]
@@ -31,6 +32,8 @@ struct SettingsDetail: Decodable {
         var profile: String?
     }
     var settings: General
+    /// ⌥⌘N is on but another app, like Arc, has it.
+    var littleHotkeyTaken: Bool
     var engines: [Choice]
     var delays: [Choice]
     var profiles: [ProfileSettings]
@@ -473,6 +476,17 @@ private struct LinksSettings: View {
     var body: some View {
         SettingsPage {
             SettingsText(text: "Little Arbalete is a smaller, simpler Arbalete window. It’s perfect for quick lookups, and for the links other apps open, where Air Traffic Control sends them.")
+            if let detail = settings.detail {
+                SettingsCard {
+                    SettingsSwitch(
+                        label: "Open Little Arbalete when I press ⌥⌘N in any app",
+                        note: detail.littleHotkeyTaken
+                            ? "Another app, like Arc, already uses ⌥⌘N: quit it or turn its shortcut off." : nil,
+                        isOn: Binding(
+                            get: { detail.settings.littleHotkey },
+                            set: { settings.app.run("settings/little-hotkey/\($0)") }))
+                }
+            }
             SettingsCard {
                 SettingsRow(label: "Choose where links from other apps open.", height: 44) {
                     Button("Air Traffic Control…") { shown.wrappedValue = true }

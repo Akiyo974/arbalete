@@ -84,6 +84,7 @@ impl Button {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Setting {
     WarnBeforeQuit,
+    LittleHotkey,
     RestoreSession,
     SuspendTabs,
 }
@@ -744,6 +745,7 @@ impl Command {
                 {
                     let setting = match setting {
                         "warn-before-quit" => Setting::WarnBeforeQuit,
+                        "little-hotkey" => Setting::LittleHotkey,
                         "restore-session" => Setting::RestoreSession,
                         "suspend-tabs" => Setting::SuspendTabs,
                         _ => return None,

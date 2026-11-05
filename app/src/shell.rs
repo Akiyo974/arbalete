@@ -226,6 +226,8 @@ thread_local! {
     /// The incognito windows' profiles, with the temporary folder that stands for their
     /// directory, removed with the window: their web data stays in memory.
     static INCOGNITO: RefCell<HashMap<ProfileId, PathBuf>> = RefCell::default();
+    /// ⌥⌘N is registered to open Little Arbalete from any app (the little_hotkey setting).
+    static LITTLE_HOTKEY: Cell<bool> = const { Cell::new(false) };
     /// Browsers not closed yet: the app quits when the last one closes.
     static OPEN_BROWSERS: Cell<usize> = const { Cell::new(0) };
     /// The window was asked to close, by quitting or its close button.
@@ -3725,9 +3727,17 @@ fn send_settings() {
             .collect();
         (spaces, json!(sidebar.url_routing()))
     });
-    let detail = json!({ "settings": settings, "engines": engines, "delays": delays, "profiles": profiles, "spaces": spaces, "urlRouting": routing });
+    // Like Arc's, the setting says when another app has ⌥⌘N.
+    let taken = settings.little_hotkey && !LITTLE_HOTKEY.get();
+    let detail = json!({ "settings": settings, "littleHotkeyTaken": taken, "engines": engines, "delays": delays, "profiles": profiles, "spaces": spaces, "urlRouting": routing });
     let event = format!(r#"new CustomEvent("arbalete:settings", {{ detail: {detail} }})"#);
     SETTINGS_VIEW.with(|view| dispatch(view, &event));
+}
+
+/// Registers ⌥⌘N as the setting says, which another app may already have.
+fn apply_little_hotkey() {
+    #[cfg(target_os = "macos")]
+    LITTLE_HOTKEY.set(crate::native::little_hotkey(app_settings().little_hotkey));
 }
 
 /// Turns an app setting on or off and saves it.
@@ -3735,11 +3745,15 @@ fn set_setting(setting: Setting, on: bool) {
     let mut settings = app_settings();
     match setting {
         Setting::WarnBeforeQuit => settings.warn_before_quit = on,
+        Setting::LittleHotkey => settings.little_hotkey = on,
         Setting::RestoreSession => settings.restore_session = on,
         Setting::SuspendTabs => settings.suspend_tabs = on,
     }
     SETTINGS.set(settings);
     save_settings();
+    if setting == Setting::LittleHotkey {
+        apply_little_hotkey();
+    }
     send_settings();
     if !on && setting == Setting::SuspendTabs {
         wake_frozen(|_| true);
@@ -6999,6 +7013,7 @@ wrap_browser_process_handler! {
         fn on_context_initialized(&self) {
             DATA_DIR.set(self.data_dir.clone()).expect("one context");
             SETTINGS.set(settings::load(&self.data_dir.join(settings::FILE_NAME)));
+            apply_little_hotkey();
             restore(self.data_dir.join(store::FILE_NAME));
             check_archive();
             DOWNLOADS.set(downloads::load(&self.data_dir.join(downloads::FILE_NAME)));

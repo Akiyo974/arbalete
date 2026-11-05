@@ -5,6 +5,7 @@
 // that Space and closes the window.
 
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 
 struct LittleDetail: Decodable {
@@ -247,7 +248,13 @@ final class LittleNewBar {
     }
 
     private func place(height: CGFloat) {
-        guard let screen = NSScreen.main else { return }
+        // The screen the pointer is on, where the shortcut was pressed, rather than the one with
+        // the key window, maybe another.
+        let pointer = NSEvent.mouseLocation
+        guard
+            let screen = NSScreen.screens.first(where: { NSMouseInRect(pointer, $0.frame, false) })
+                ?? NSScreen.main
+        else { return }
         let visible = screen.visibleFrame
         let frame = NSRect(
             x: visible.maxX - littleBarMargin - littleBarWidth - margin,
@@ -474,5 +481,44 @@ public func showLittleBar() {
         guard let window = nativeWindows.values.first else { return }
         littleNewBar?.close()
         littleNewBar = LittleNewBar(app: window.model, search: window.commandBar.search)
+    }
+}
+
+// MARK: ⌥⌘N in any app
+
+/// The registered ⌥⌘N and the handler that receives it.
+@MainActor private var littleHotKey: EventHotKeyRef?
+@MainActor private var littleHotKeyHandler: EventHandlerRef?
+
+/// Registers ⌥⌘N to open Little Arbalete from any app, like Arc's Little Arc, or unregisters it.
+/// False when another app, like Arc, already has it.
+@_cdecl("arbalete_ui_little_hotkey")
+public func setLittleHotKey(_ on: Bool) -> Bool {
+    MainActor.assumeIsolated {
+        if let key = littleHotKey {
+            UnregisterEventHotKey(key)
+            littleHotKey = nil
+        }
+        guard on else { return true }
+        if littleHotKeyHandler == nil {
+            var pressed = EventTypeSpec(
+                eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+            InstallEventHandler(
+                GetApplicationEventTarget(),
+                { _, _, _ in
+                    MainActor.assumeIsolated {
+                        NSApp.activate(ignoringOtherApps: true)
+                        showLittleBar()
+                    }
+                    return noErr
+                }, 1, &pressed, nil, &littleHotKeyHandler)
+        }
+        // "ARBL", the app's own signature for its hot keys.
+        let id = EventHotKeyID(signature: 0x4152_424C, id: 1)
+        var key: EventHotKeyRef?
+        let status = RegisterEventHotKey(
+            UInt32(kVK_ANSI_N), UInt32(cmdKey | optionKey), id, GetApplicationEventTarget(), 0, &key)
+        littleHotKey = key
+        return status == noErr
     }
 }
