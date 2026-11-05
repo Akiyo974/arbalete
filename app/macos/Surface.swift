@@ -1,6 +1,6 @@
-// A panel above the page, like the Command Bar, which the app shows, places and hides where it
-// would its web counterpart's overlay (mirror in app/src/shell.rs). The page is a window of its
-// own above the main one's, so what shows over it is a child window too.
+// A panel above the page, like the Command Bar, which the app shows, places and hides (Spot and
+// mirror in app/src/shell.rs). One that takes the keyboard is a child window of the main one,
+// whose own keyboard CEF keeps for its views; the others are views of the main window (Overlay).
 
 import AppKit
 import SwiftUI
@@ -42,14 +42,7 @@ final class ChildPanel: NSPanel, NSWindowDelegate {
     }
 
     func windowDidResignKey(_ notification: Notification) {
-        DispatchQueue.main.async {
-            // The web overlay it stands for, out of sight, takes the keyboard as it shows.
-            if NSApp.keyWindow?.alphaValue == 0 {
-                self.makeKey()
-            } else {
-                self.resigned()
-            }
-        }
+        DispatchQueue.main.async { self.resigned() }
     }
 
     /// Shows the panel at `frame`, in `parent`'s points from its content's top left corner, above

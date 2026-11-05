@@ -106,9 +106,9 @@ struct SidebarToolbar: View {
         .frame(height: 40)
         // Past the window's buttons, which take their own clicks.
         .background(WindowDragArea(doubleClicks: true))
-        // Past the window's buttons, the toggle's symbol 5 points into its button; in full
-        // screen, without them, like Arc's, 20 points from the sidebar's edge.
-        .padding(.leading, (model.fullScreen ? 20 : windowButtonsEnd) - Measure.inset - 5)
+        // Past the window's buttons as far as they stand apart, like Arc's, the toggle's symbol 5
+        // points into its button; in full screen, without them, 20 points from the sidebar's edge.
+        .padding(.leading, (model.fullScreen ? 20 : togglePlace) - Measure.inset - 5)
         // Like Arc's, floating, it shows the window's buttons, which it covers, where they stand.
         .overlay(alignment: .leading) {
             if model.sidebarFloating {
@@ -1791,6 +1791,10 @@ struct RightClick: NSViewRepresentable {
         override func mouseDown(with event: NSEvent) { action() }
     }
 }
+
+/// Where the sidebar's toggle's symbol starts beside the window's buttons: past the last one, as
+/// far as they stand apart.
+private let togglePlace: CGFloat = windowButtonsLeading + 3 * windowButtonsSpacing
 
 /// The room behind views' buttons, which moves the window like Arc's, as its titlebar would:
 /// SwiftUI hands it the clicks they do not take. In the tab list's empty room, a double-click

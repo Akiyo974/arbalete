@@ -313,7 +313,12 @@ final class SidebarHost {
         let floated = model.sidebarFloating
         if floated != floats { model.sidebarFloating = floats }
         let docked = frame != nil && !floating
-        if model.sidebarDocked != docked { model.sidebarDocked = docked }
+        if model.sidebarDocked != docked {
+            model.sidebarDocked = docked
+            // Shown again, the window's buttons stand where AppKit puts them: centered again, with
+            // the toggle beside them, once the app showed them.
+            if docked { DispatchQueue.main.async { [window] in centerWindowButtons(window) } }
+        }
         // Over the card, added after it: like Arc's, the floating sidebar passes over the page
         // and its bar.
         guard let frame, let parent = parent() else {

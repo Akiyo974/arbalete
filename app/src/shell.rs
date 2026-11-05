@@ -157,7 +157,9 @@ thread_local! {
     /// The import assistant, shown above the page; created the first time it is shown, as most
     /// sessions never import.
     static IMPORT_VIEW: RefCell<Option<Panel>> = const { RefCell::new(None) };
-    static IMPORT: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
+    static IMPORT: RefCell<Option<Spot>> = const { RefCell::new(None) };
+    /// The native panels' places changed, which the interface learns soon (surfaces_changed).
+    static SURFACES_DUE: Cell<bool> = const { Cell::new(false) };
     /// The Little Arbalete windows open: a page without the sidebar, which links from other apps
     /// open in.
     static LITTLE: RefCell<Vec<Little>> = const { RefCell::new(Vec::new()) };
@@ -236,6 +238,64 @@ thread_local! {
     static RESTORED_WINDOWS: RefCell<Vec<WindowView>> = const { RefCell::new(Vec::new()) };
 }
 
+/// Where a native panel shows over the window, and whether it does, which the app keeps as it
+/// would a CEF overlay's: the interface shows the panel there (sync_native_surfaces), and any
+/// change tells it soon.
+#[derive(Clone, Default)]
+struct Spot(Rc<SpotState>);
+
+#[derive(Default)]
+struct SpotState {
+    visible: Cell<bool>,
+    bounds: RefCell<Rect>,
+}
+
+impl Spot {
+    fn is_visible(&self) -> i32 {
+        self.0.visible.get().into()
+    }
+
+    fn set_visible(&self, visible: i32) {
+        if self.0.visible.replace(visible == 1) != (visible == 1) {
+            surfaces_changed();
+        }
+    }
+
+    fn bounds(&self) -> Rect {
+        self.0.bounds.borrow().clone()
+    }
+
+    fn set_bounds(&self, bounds: Option<&Rect>) {
+        let bounds = bounds.cloned().unwrap_or_default();
+        let same =
+            |a: &Rect, b: &Rect| (a.x, a.y, a.width, a.height) == (b.x, b.y, b.width, b.height);
+        if !same(&self.0.bounds.borrow(), &bounds) {
+            self.0.bounds.replace(bounds);
+            surfaces_changed();
+        }
+    }
+}
+
+/// Tells the interface where its panels show, once the current work is done.
+fn surfaces_changed() {
+    #[cfg(target_os = "macos")]
+    if !SURFACES_DUE.replace(true) {
+        post_task(ThreadId::UI, Some(&mut SyncSurfaces::new()));
+    }
+}
+
+wrap_task! {
+    struct SyncSurfaces {}
+
+    impl Task {
+        fn execute(&self) {
+            SURFACES_DUE.set(false);
+            #[cfg(target_os = "macos")]
+            in_each_window(sync_native_surfaces);
+        }
+    }
+}
+
 /// What a window holds of its own: its views, the page it shows and its panels' state.
 struct Win {
     /// What the native interface knows the window by.
@@ -266,25 +326,25 @@ struct Win {
     shown: Cell<Option<NodeId>>,
     /// Shown above the page, to open tabs.
     overlay_view: RefCell<Option<Panel>>,
-    overlay: RefCell<Option<OverlayController>>,
+    overlay: RefCell<Option<Spot>>,
     /// A second sidebar, shown above the page while the sidebar is hidden.
     reveal_view: RefCell<Option<Panel>>,
-    reveal: RefCell<Option<OverlayController>>,
+    reveal: RefCell<Option<Spot>>,
     /// The tabs of the split shown, in order, and how it lays them out: empty while none shows.
     split: RefCell<(Vec<NodeId>, Option<SplitLayout>)>,
     /// The find bar, at the card's top right corner; created the first time it is shown.
     find_view: RefCell<Option<Panel>>,
-    find: RefCell<Option<OverlayController>>,
+    find: RefCell<Option<Spot>>,
     /// The text last searched for, which ⌘G searches again.
     find_text: RefCell<String>,
     /// A Space's theme picker, beside the sidebar.
     theme_view: RefCell<Option<Panel>>,
-    theme: RefCell<Option<OverlayController>>,
+    theme: RefCell<Option<Spot>>,
     /// How far down the window the pointer was as the theme picker opened, which it centers on.
     theme_at: Cell<Option<i32>>,
     /// The site controls' panel, under their button.
     site_view: RefCell<Option<Panel>>,
-    site: RefCell<Option<OverlayController>>,
+    site: RefCell<Option<Spot>>,
     /// Where the site controls' button was, in the window, when they were last shown: their
     /// panel, and the extension popups opened from it, show under it.
     site_button: RefCell<Option<Rect>>,
@@ -1441,8 +1501,8 @@ fn round_overlay() {
     sync_native_surfaces();
 }
 
-/// Shows the native surfaces where the app shows their web counterparts, after every command
-/// and layout: the overlays above the page, and the bars over the pages.
+/// Shows the native panels where the app places them (Spot), after every command and layout,
+/// and the pages.
 #[cfg(target_os = "macos")]
 fn sync_native_surfaces() {
     let current = win();
@@ -1462,10 +1522,9 @@ fn sync_native_surfaces() {
     send_panes();
 }
 
-/// Shows a native surface where the app shows its web counterpart's overlay, which stays out of
-/// sight and lets clicks through to it.
+/// Shows a native panel where its spot is, if it shows.
 #[cfg(target_os = "macos")]
-fn mirror(view: &RefCell<Option<Panel>>, overlay: &OverlayController) {
+fn mirror(view: &RefCell<Option<Panel>>, overlay: &Spot) {
     if let Some(surface) = native_surface(std::ptr::from_ref(view).cast()) {
         crate::native::surface(
             win().id,
@@ -2033,7 +2092,7 @@ fn show_import() {
         return;
     }
     SOURCES.set(browsers::detect(&crate::user_home()));
-    make_import(&window);
+    make_import();
     let Some(controller) = IMPORT.with_borrow(Clone::clone) else {
         return;
     };
@@ -3291,10 +3350,7 @@ fn save_settings() {
 
 /// Shows the find bar, with the text last searched for selected.
 fn show_find() {
-    let Some(window) = win().window.with_borrow(Clone::clone) else {
-        return;
-    };
-    make_find(&window);
+    make_find();
     place_find();
     let Some(controller) = win().find.with_borrow(Clone::clone) else {
         return;
@@ -3314,14 +3370,11 @@ fn show_find() {
     }
 }
 
-/// Makes the find bar's overlay, once. On macOS, it is made with the window: made later, it would
-/// take the keyboard from the native find bar.
-fn make_find(window: &Window) {
+/// Makes the find bar's place, once.
+fn make_find() {
     if win().find.with_borrow(Option::is_none) {
         let view = place_view(no_width, 1);
-        let controller = window
-            .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
-            .expect("find");
+        let controller = Spot::default();
         controller.set_visible(0);
         win().find_view.set(Some(view));
         win().find.set(Some(controller));
@@ -3755,13 +3808,11 @@ fn send_sources() {
     IMPORT_VIEW.with(|view| dispatch(view, &event));
 }
 
-/// Makes the import assistant's overlay, once: with the window on macOS, like the find bar's.
-fn make_import(window: &Window) {
+/// Makes the import assistant's place, once.
+fn make_import() {
     if IMPORT.with_borrow(Option::is_none) {
         let view = place_view(no_width, 1);
-        let controller = window
-            .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
-            .expect("import");
+        let controller = Spot::default();
         controller.set_visible(0);
         IMPORT_VIEW.set(Some(view));
         IMPORT.set(Some(controller));
@@ -6402,39 +6453,26 @@ wrap_window_delegate! {
             crate::mac::toolbar_shown(app_settings().show_toolbar);
             // Below the overlay, which is added after it.
             let reveal = place_view(no_width, 1);
-            let controller = window
-                .add_overlay_view(Some(&mut View::from(&reveal)), DockingMode::CUSTOM, 1)
-                .expect("reveal");
+            let controller = Spot::default();
             controller.set_visible(0);
             win().reveal_view.set(Some(reveal));
             win().reveal.set(Some(controller));
             let overlay = place_view(no_width, 1);
-            let controller = window
-                .add_overlay_view(Some(&mut View::from(&overlay)), DockingMode::CUSTOM, 1)
-                .expect("overlay");
+            let controller = Spot::default();
             controller.set_visible(0);
             win().overlay_view.set(Some(overlay));
             win().overlay.set(Some(controller));
             // Made with the window, so that its page listens by the first time it shows.
             let site = place_view(no_width, 1);
-            let controller = window
-                .add_overlay_view(Some(&mut View::from(&site)), DockingMode::CUSTOM, 1)
-                .expect("site controls");
+            let controller = Spot::default();
             controller.set_visible(0);
             win().site_view.set(Some(site));
             win().site.set(Some(controller));
             let theme = place_view(no_width, 1);
-            let controller = window
-                .add_overlay_view(Some(&mut View::from(&theme)), DockingMode::CUSTOM, 1)
-                .expect("theme picker");
+            let controller = Spot::default();
             controller.set_visible(0);
             win().theme_view.set(Some(theme));
             win().theme.set(Some(controller));
-            #[cfg(target_os = "macos")]
-            {
-                make_find(&window);
-                make_import(&window);
-            }
             window.show();
             #[cfg(target_os = "macos")]
             {
@@ -6447,6 +6485,7 @@ wrap_window_delegate! {
             }
             win().window.set(Some(window));
             place_card();
+            place_reveal();
             // Only the selected tab loads: the others wait until they are selected.
             show_selected();
             if IMPORT_AT_LAUNCH.take() {
