@@ -66,6 +66,7 @@ struct Results: Decodable {
     struct Page: Decodable {
         var url: String
         var title: String
+        var favicon: String?
     }
     var text: String
     var tabs: [Tab]
@@ -82,20 +83,25 @@ enum CommandRow: Identifiable {
     case go(url: String, title: String, search: Bool)
     case action(command: String, title: String)
     case tab(Tab)
-    case page(url: String, title: String)
+    case page(url: String, title: String, favicon: String?)
 
     var id: String {
         switch self {
         case .go(let url, _, _): "go:\(url)"
         case .action(let command, _): "action:\(command)"
         case .tab(let tab): "tab:\(tab.id)"
-        case .page(let url, _): "page:\(url)"
+        case .page(let url, _, _): "page:\(url)"
         }
+    }
+
+    /// A history page's row, titled with its address while it has no title.
+    init(_ page: Results.Page) {
+        self = .page(url: page.url, title: page.title.isEmpty ? page.url : page.title, favicon: page.favicon)
     }
 
     var title: String {
         switch self {
-        case .go(_, let title, _), .action(_, let title), .page(_, let title): title
+        case .go(_, let title, _), .action(_, let title), .page(_, let title, _): title
         case .tab(let tab): tab.label
         }
     }
@@ -227,9 +233,7 @@ final class CommandBar: ObservableObject {
         let typed = text.trimmingCharacters(in: .whitespaces)
         // Nothing typed, like Arc's: the sites visited most.
         guard !typed.isEmpty else {
-            return (results?.pages ?? []).map {
-                .page(url: $0.url, title: $0.title.isEmpty ? $0.url : $0.title)
-            }
+            return (results?.pages ?? []).map(CommandRow.init)
         }
         let go: CommandRow
         if let completion {
@@ -249,7 +253,7 @@ final class CommandBar: ObservableObject {
             + matchingActions(typed).map { .action(command: $0.command, title: $0.title) }
             + suggestions
             + (results?.tabs ?? []).map { .tab($0) }
-            + (results?.pages ?? []).map { .page(url: $0.url, title: $0.title.isEmpty ? $0.url : $0.title) }
+            + (results?.pages ?? []).map(CommandRow.init)
     }
 
     /// Tells the app the bar's height, which it fits it to.
@@ -310,7 +314,7 @@ final class CommandBar: ObservableObject {
         case .action(let command, _):
             app.run("overlay/hide")
             app.run(command)
-        case .go(let url, _, _), .page(let url, _):
+        case .go(let url, _, _), .page(let url, _, _):
             app.run("\(editing ? "navigate" : "open")/\(percentEncoded(url))")
         }
     }
@@ -398,7 +402,7 @@ struct ResultRow: View {
 
     /// A page's site, as Arc shows it after its title.
     private var site: String? {
-        guard case .page(let url, let title) = row, title != url else { return nil }
+        guard case .page(let url, let title, _) = row, title != url else { return nil }
         return domain(url)
     }
 
@@ -408,6 +412,7 @@ struct ResultRow: View {
                 switch row {
                 case .action: Image(systemName: "bolt")
                 case .tab(let tab) where tab.favicon != nil: Favicon(url: tab.favicon, size: 16)
+                case .page(_, _, let favicon?): Favicon(url: favicon, size: 16)
                 case .go(_, _, true): Image(systemName: "magnifyingglass")
                 default: Image(systemName: "globe")
                 }

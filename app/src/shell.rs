@@ -1041,12 +1041,16 @@ fn tab_json(id: NodeId, tab: &Tab, profile: ProfileId) -> serde_json::Value {
 /// Where the UI loads a tab's icon from: the app serves the profile's cached icons (favicon_file),
 /// from the UI's own origin so that the UI may read their pixels.
 fn favicon_url(profile: ProfileId, tab: &Tab) -> Option<String> {
-    let source = tab.favicon.as_deref()?;
+    Some(icon_url(profile, tab.favicon.as_deref()?))
+}
+
+/// Where the UI loads the cached icon `source` of `profile` from (favicon_url).
+fn icon_url(profile: ProfileId, source: &str) -> String {
     let profile = serde_json::to_string(&profile).expect("an id");
-    Some(format!(
+    format!(
         "{UI_ORIGIN}favicon/{profile}/{}",
         favicon::file_name(source)
-    ))
+    )
 }
 
 /// The loading state of the shown page; its title and url belong to the active tab.
@@ -1605,7 +1609,7 @@ fn search_overlay(text: &str) {
                         || tab.url.to_lowercase().contains(&wanted)
                 })
                 .take(OVERLAY_TABS)
-                .map(|(id, tab)| (id, tab.clone()))
+                .filter_map(|(id, tab)| Some((id, tab.clone(), sidebar.profile_of(id)?)))
                 .collect()
         };
         (tabs, sidebar.displayed().profile)
@@ -1626,15 +1630,26 @@ fn search_overlay(text: &str) {
     } else {
         pages
     };
+    // Like Arc's, each page shows its site's icon: the one Chromium found, if any.
+    let chromium = favicon::chromium(&profile_dir(profile));
     let pages: Vec<_> = pages
         .iter()
-        .filter(|page| tabs.iter().all(|(_, tab)| tab.url != page.url))
+        .filter(|page| tabs.iter().all(|(_, tab, _)| tab.url != page.url))
         .take(OVERLAY_PAGES)
-        .map(|page| json!({ "url": page.url, "title": page.title }))
+        .map(|page| {
+            let icon = chromium
+                .as_ref()
+                .and_then(|db| favicon::of_page(&profile_dir(profile), db, &page.url));
+            let favicon = icon.map(|source| icon_url(profile, &source));
+            json!({ "url": page.url, "title": page.title, "favicon": favicon })
+        })
         .collect();
     let tabs: Vec<_> = tabs
         .iter()
-        .map(|(id, tab)| json!({ "id": id, "url": tab.url, "title": tab.label(), "favicon": tab.favicon }))
+        .map(|(id, tab, profile)| {
+            let favicon = favicon_url(*profile, tab);
+            json!({ "id": id, "url": tab.url, "title": tab.label(), "favicon": favicon })
+        })
         .collect();
     let detail = json!({ "text": text, "tabs": tabs, "pages": pages });
     dispatch(
