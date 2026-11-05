@@ -138,7 +138,8 @@ final class SettingsModel: ObservableObject {
             return
         }
         let window = SettingsWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 684, height: 440),
+            // Like Arc's, measured: 650 points tall in all, whatever the pane, which scrolls.
+            contentRect: NSRect(x: 0, y: 0, width: 684, height: 562),
             styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.title = pane
@@ -156,6 +157,13 @@ final class SettingsModel: ObservableObject {
     }
 
     var isKey: Bool { window?.isKeyWindow ?? false }
+
+    /// Shows another pane, as its toolbar item would.
+    func choose(_ pane: String) {
+        self.pane = pane
+        window?.title = pane
+        window?.toolbar?.selectedItemIdentifier = NSToolbarItem.Identifier(pane)
+    }
 }
 
 /// The settings' panes, in the toolbar like Arc's: a symbol above each title.
@@ -164,6 +172,7 @@ private let panes = [
     (title: "Profiles", symbol: "person"),
     (title: "Links", symbol: "macwindow.on.rectangle"),
     (title: "Shortcuts", symbol: "keyboard"),
+    (title: "Advanced", symbol: "slider.horizontal.3"),
 ]
 
 final class SettingsWindow: NSWindow, NSWindowDelegate, NSToolbarDelegate {
@@ -218,7 +227,10 @@ final class SettingsWindow: NSWindow, NSWindowDelegate, NSToolbarDelegate {
         return item
     }
 
-    @objc private func choose(_ item: NSToolbarItem) { select(item.itemIdentifier.rawValue) }
+    @objc private func choose(_ item: NSToolbarItem) {
+        toolbar?.selectedItemIdentifier = item.itemIdentifier
+        select(item.itemIdentifier.rawValue)
+    }
 }
 
 struct SettingsView: View {
@@ -229,57 +241,151 @@ struct SettingsView: View {
             switch settings.pane {
             case "Profiles": ProfilesSettings(settings: settings)
             case "Links": LinksSettings(settings: settings)
-            case "Shortcuts": ShortcutsList()
-            default: General(settings: settings)
+            case "Shortcuts": ShortcutsSettings()
+            case "Advanced": AdvancedSettings(settings: settings)
+            default: GeneralSettings(settings: settings)
             }
         }
-        .frame(maxHeight: .infinity, alignment: .top)
-        .padding(16)
-        // Every pane 684 points wide, like Arc's.
-        .frame(width: 684)
-        .frame(minHeight: 400)
+        // Like Arc's: every pane 684 points wide, its content 562 tall, changing at once.
+        .frame(width: 684, height: 562, alignment: .top)
     }
 }
 
-private struct General: View {
-    @ObservedObject var settings: SettingsModel
+// MARK: Arc's settings parts, measured
+
+/// A pane that scrolls, its cards 556 points wide between 64-point margins, the first 20 points
+/// under the toolbar, like Arc's.
+struct SettingsPage<Content: View>: View {
+    @ViewBuilder let content: Content
 
     var body: some View {
-        if let general = settings.detail?.settings {
-            Form {
-                Toggle(isOn: binding(general.warnBeforeQuit, "warn-before-quit")) {
-                    Text("Warn before quitting")
-                    Text("⌘Q asks before closing Arbalete.")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) { content }
+                .frame(width: 556, alignment: .leading)
+                .padding(.top, 20)
+                .padding(.bottom, 32)
+                .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+/// A rounded card of rows, like Arc's: a light fill, a hairline edge; SettingsLine between rows.
+struct SettingsCard<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(spacing: 0) { content }
+        .background(RoundedRectangle(cornerRadius: 8).fill(settingsFill))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(settingsEdge))
+    }
+}
+
+/// The line between a card's rows, 10 points inside its edges, like Arc's.
+struct SettingsLine: View {
+    var body: some View {
+        Rectangle().fill(settingsLine).frame(height: 1).padding(.horizontal, 10)
+    }
+}
+
+private let settingsFill = Color.ink((0x000000, 0.025), (0xFFFFFF, 0.015))
+private let settingsEdge = Color.ink((0x000000, 0.1), (0xFFFFFF, 0.1))
+private let settingsLine = Color.ink((0x000000, 0.07), (0xFFFFFF, 0.08))
+
+/// A row of a card: its label, and its control at the right, 10 points inside, like Arc's.
+struct SettingsRow<Control: View>: View {
+    let label: String
+    var note: String? = nil
+    var height: CGFloat = 38
+    @ViewBuilder let control: Control
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(label).font(.system(size: 13))
+                if let note {
+                    Text(note).font(.system(size: 11)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Toggle(isOn: binding(general.restoreSession, "restore-session")) {
-                    Text("Restore the previous session")
-                    Text("Reopens the “Today” tabs left open at the last quit. Pinned tabs and favorites always stay.")
-                }
-                Toggle(isOn: binding(general.suspendTabs, "suspend-tabs")) {
-                    Text("Save memory with tabs left aside")
-                    Text("A tab hidden for 5 minutes is paused, then unloaded after an hour. Tabs playing media, using the camera or the microphone, and the sites kept awake never are.")
-                }
-                if general.suspendTabs && !general.awakeSites.isEmpty {
-                    Section("Sites kept awake") {
-                        ForEach(general.awakeSites, id: \.self) { site in
-                            HStack {
-                                Text(site)
-                                Spacer()
-                                Button {
-                                    settings.app.run("awake/off/\(percentEncoded(site))")
-                                } label: {
-                                    Image(systemName: "xmark")
-                                }
-                                .buttonStyle(.plain)
-                                .foregroundStyle(.secondary)
-                                .help("Let it sleep")
-                                .accessibilityLabel("Let \(site) sleep")
-                            }
+            }
+            Spacer(minLength: 10)
+            control
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(minHeight: height)
+    }
+}
+
+/// A switch row, Arc's small switch at the right.
+struct SettingsSwitch: View {
+    let label: String
+    var note: String? = nil
+    let isOn: Binding<Bool>
+
+    var body: some View {
+        SettingsRow(label: label, note: note) {
+            Toggle("", isOn: isOn).labelsHidden().toggleStyle(.switch).controlSize(.small)
+        }
+    }
+}
+
+/// A paragraph between cards, like Arc's.
+struct SettingsText: View {
+    let text: String
+
+    var body: some View {
+        Text(text).font(.system(size: 13)).foregroundStyle(.secondary)
+            .lineSpacing(3)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
+    }
+}
+
+// MARK: Panes
+
+/// Like Arc's account pane's banner, the browser not being the default one, then the app's own
+/// settings.
+private struct GeneralSettings: View {
+    @ObservedObject var settings: SettingsModel
+    private let isDefault = State(initialValue: isDefaultBrowser())
+
+    var body: some View {
+        SettingsPage {
+            if !isDefault.wrappedValue {
+                HStack(spacing: 16) {
+                    Text("Arbalete isn’t your default browser.").font(.system(size: 13))
+                    Button {
+                        makeDefaultBrowser()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            isDefault.wrappedValue = isDefaultBrowser()
                         }
+                    } label: {
+                        Label("Make Arbalete your default", systemImage: "heart.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+                // Like Arc's banner, centered, as wide as it needs.
+                .padding(.horizontal, 12)
+                .frame(height: 36)
+                .fixedSize()
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.ink((0x000000, 0.08), (0xFFFFFF, 0.25))))
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 12)
+            }
+            if let general = settings.detail?.settings {
+                SettingsCard {
+                    SettingsSwitch(
+                        label: "Warn before quitting",
+                        isOn: binding(general.warnBeforeQuit, "warn-before-quit"))
+                }
+                SettingsCard {
+                    SettingsRow(label: "Manage your default search engine and Auto-Archive in Profile Settings.") {
+                        Button("Profile Settings…") { settings.choose("Profiles") }
                     }
                 }
             }
-            .formStyle(.grouped)
         }
     }
 
@@ -288,16 +394,134 @@ private struct General: View {
     }
 }
 
-/// URL Routing, like Arc's: each route sends the links whose url contains a text, or is it, to a
-/// Space, the Space shown last or a Little Arbalete window; the default takes the others.
-private struct LinksSettings: View {
+/// Like Arc's Advanced pane: rows with a colored tile, each a switch.
+private struct AdvancedSettings: View {
     @ObservedObject var settings: SettingsModel
 
     var body: some View {
-        if let detail = settings.detail {
-            let routing = detail.urlRouting
-            Form {
-                Section {
+        SettingsPage {
+            if let general = settings.detail?.settings {
+                SettingsCard {
+                    TileSwitch(
+                        tile: ("macwindow", Color(red: 0.16, green: 0.79, blue: 0.29)),
+                        label: "When opening Arbalete, restore windows from previous session",
+                        isOn: binding(general.restoreSession, "restore-session"))
+                }
+                SettingsCard {
+                    TileSwitch(
+                        tile: ("leaf", Color(red: 0.0, green: 0.52, blue: 0.99)),
+                        label: "Save memory with tabs left aside",
+                        note: "A tab hidden for 5 minutes is paused, then unloaded after an hour. Tabs playing media, using the camera or the microphone, and the sites kept awake never are.",
+                        isOn: binding(general.suspendTabs, "suspend-tabs"))
+                    if general.suspendTabs {
+                        ForEach(general.awakeSites, id: \.self) { site in
+                            SettingsLine()
+                            SettingsRow(label: site) {
+                                Button("Let It Sleep") {
+                                    settings.app.run("awake/off/\(percentEncoded(site))")
+                                }
+                            }
+                            .padding(.leading, 28)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func binding(_ value: Bool, _ key: String) -> Binding<Bool> {
+        Binding(get: { value }, set: { settings.app.run("settings/\(key)/\($0)") })
+    }
+}
+
+/// A row of Arc's Advanced pane: a colored tile with a white symbol, the label, a switch.
+private struct TileSwitch: View {
+    let tile: (String, Color)
+    let label: String
+    var note: String? = nil
+    let isOn: Binding<Bool>
+
+    var body: some View {
+        HStack(spacing: 8.5) {
+            SettingsTile(symbol: tile.0, color: tile.1, size: 20)
+            SettingsSwitch(label: label, note: note, isOn: isOn).padding(.leading, -10)
+        }
+        .padding(.leading, 10)
+    }
+}
+
+/// A rounded square of a color with a white symbol, like the icons of Arc's settings rows.
+struct SettingsTile: View {
+    let symbol: String
+    let color: Color
+    var size: CGFloat = 24
+
+    var body: some View {
+        Image(systemName: symbol).font(.system(size: size * 0.5, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(RoundedRectangle(cornerRadius: size * 0.22).fill(color))
+    }
+}
+
+/// Like Arc's Links pane: a paragraph, then a card leading to Air Traffic Control, its sheet of
+/// routes for the links other apps open.
+private struct LinksSettings: View {
+    @ObservedObject var settings: SettingsModel
+    private let shown = State(initialValue: false)
+
+    var body: some View {
+        SettingsPage {
+            SettingsText(text: "Little Arbalete is a smaller, simpler Arbalete window. It’s perfect for quick lookups, and for the links other apps open, where Air Traffic Control sends them.")
+            SettingsCard {
+                SettingsRow(label: "Choose where links from other apps open.", height: 44) {
+                    Button("Air Traffic Control…") { shown.wrappedValue = true }
+                }
+            }
+        }
+        .sheet(isPresented: shown.projectedValue) {
+            if let detail = settings.detail {
+                AirTrafficControl(settings: settings, detail: detail) { shown.wrappedValue = false }
+            }
+        }
+    }
+}
+
+/// URL Routing, like Arc's Air Traffic Control: each route sends the links whose url contains a
+/// text, or is it, to a Space, the Space shown last or a Little Arbalete window; the default
+/// takes the others.
+private struct AirTrafficControl: View {
+    @ObservedObject var settings: SettingsModel
+    let detail: SettingsDetail
+    let close: () -> Void
+
+    var body: some View {
+        let routing = settings.detail?.urlRouting ?? detail.urlRouting
+        VStack(spacing: 0) {
+            HStack {
+                Text("Air Traffic Control").font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Button("New Route") {
+                    var changed = routing
+                    changed.routes.append(
+                        .init(matching: "contains", text: "", destination: .mostRecentSpace))
+                    save(changed)
+                }
+                Button(action: close) {
+                    Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .padding(.leading, 20)
+            }
+            .padding(.horizontal, 24)
+            .frame(height: 84)
+            Divider().padding(.horizontal, 24)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
                     ForEach(routing.routes.indices, id: \.self) { index in
                         RouteRow(
                             route: routing.routes[index], spaces: detail.spaces,
@@ -312,35 +536,36 @@ private struct LinksSettings: View {
                                 save(changed)
                             })
                     }
-                } header: {
-                    HStack {
-                        Text("URL Routing")
-                        Spacer()
-                        Button("New Route") {
-                            var changed = routing
-                            changed.routes.append(
-                                .init(matching: "contains", text: "", destination: .mostRecentSpace))
-                            save(changed)
-                        }
-                    }
-                } footer: {
-                    Text("Choose where links from other apps open.")
-                }
-                Section {
-                    Picker("Default", selection: Binding(
-                        get: { routing.default },
-                        set: { destination in
-                            var changed = routing
-                            changed.default = destination
-                            save(changed)
-                        }
-                    )) {
-                        DestinationChoices(spaces: detail.spaces)
+                    if routing.routes.isEmpty {
+                        Text("No routes yet: links from other apps open where the default says.")
+                            .foregroundStyle(.secondary)
                     }
                 }
+                .padding(.horizontal, 32)
+                .padding(.vertical, 24)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .formStyle(.grouped)
+            Divider().padding(.horizontal, 24)
+            HStack(spacing: 16) {
+                Text("Default").frame(width: 72, alignment: .leading)
+                Picker("", selection: Binding(
+                    get: { routing.default },
+                    set: { destination in
+                        var changed = routing
+                        changed.default = destination
+                        save(changed)
+                    }
+                )) {
+                    DestinationChoices(spaces: detail.spaces)
+                }
+                .labelsHidden()
+                .frame(width: 197)
+                Spacer()
+            }
+            .padding(.horizontal, 36)
+            .frame(height: 74)
         }
+        .frame(width: 508, height: 500)
     }
 
     private func save(_ routing: UrlRouting) {
@@ -351,8 +576,6 @@ private struct LinksSettings: View {
     }
 }
 
-/// Whether Arbalete opens the links of other apps, as macOS says, and a button to make it so,
-/// which macOS asks the user to confirm.
 /// A route: how and what it matches in a url, and where those links open.
 private struct RouteRow: View {
     let route: UrlRouting.Route
@@ -361,18 +584,20 @@ private struct RouteRow: View {
     let remove: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Label("URL", systemImage: "link").foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Label("URL", systemImage: "link").foregroundStyle(.secondary).frame(width: 56, alignment: .leading)
+                // Like Arc's, "Is equal to" first.
                 Picker("", selection: binding(\.matching)) {
-                    Text("Contains").tag("contains")
                     Text("Is equal to").tag("isEqualTo")
+                    Text("Contains").tag("contains")
                 }
                 .labelsHidden()
-                .fixedSize()
+                .frame(width: 109)
                 TextField("Text", text: binding(\.text), prompt: Text("example.com"))
                     .labelsHidden()
                     .textFieldStyle(.roundedBorder)
+                    .frame(width: 210)
                 Button(action: remove) {
                     Image(systemName: "minus.circle.fill")
                 }
@@ -381,15 +606,17 @@ private struct RouteRow: View {
                 .help("Remove the route")
                 .accessibilityLabel("Remove the route")
             }
-            HStack {
+            HStack(spacing: 8) {
                 Label("Open in", systemImage: "arrow.turn.down.right").foregroundStyle(.secondary)
+                    .fixedSize()
+                    .frame(width: 77, alignment: .leading)
                 Picker("", selection: binding(\.destination)) {
                     DestinationChoices(spaces: spaces)
                 }
                 .labelsHidden()
-                .fixedSize()
+                .frame(width: 197)
             }
-            .padding(.leading, 20)
+            .padding(.leading, 48)
         }
     }
 
@@ -422,56 +649,270 @@ private struct DestinationChoices: View {
     }
 }
 
+/// Like Arc's Profiles pane: what profiles are for, the list of profiles at the left, the
+/// picked one's settings at the right, then its data in Chromium's own pages.
 private struct ProfilesSettings: View {
     @ObservedObject var settings: SettingsModel
+    private let picked = State<Int?>(initialValue: nil)
 
     var body: some View {
         if let detail = settings.detail {
-            Form {
-                ForEach(detail.profiles) { profile in
-                    Section {
-                        Picker("Search engine", selection: Binding(
-                            get: { profile.searchEngine },
-                            set: { settings.app.run("profile/search/\(profile.id)/\($0)") }
-                        )) {
-                            ForEach(detail.engines) { Text($0.name).tag($0.id) }
-                        }
-                        Toggle("Search suggestions", isOn: Binding(
-                            get: { profile.searchSuggestions },
-                            set: { settings.app.run("profile/suggestions/\(profile.id)/\($0 ? "on" : "off")") }
-                        ))
-                        Picker("Archive tabs after", selection: Binding(
-                            get: { profile.archiveAfter },
-                            set: { settings.app.run("profile/archive/\(profile.id)/\($0)") }
-                        )) {
-                            ForEach(detail.delays) { Text($0.name).tag($0.id) }
-                        }
-                    } header: {
-                        HStack {
-                            Circle().fill(color(profileColors[profile.color] ?? "#8b8d98"))
-                                .frame(width: 10, height: 10)
-                            Text(profile.name)
-                        }
+            let profile = detail.profiles.first { $0.id == picked.wrappedValue } ?? detail.profiles.first
+            SettingsPage {
+                Text("Profiles help keep your data separate across Spaces — like history, logins, cookies, and extensions. You can use any Profile across one or more Spaces.")
+                    .font(.system(size: 13))
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 12)
+                HStack(alignment: .top, spacing: 10) {
+                    ProfileList(detail: detail, picked: profile?.id) { picked.wrappedValue = $0 }
+                        .frame(width: 205)
+                    if let profile {
+                        ProfileDetail(settings: settings, detail: detail, profile: profile)
                     }
                 }
             }
-            .formStyle(.grouped)
         }
     }
 }
 
-private struct ShortcutsList: View {
+/// The profiles, like Arc's list: each with how many Spaces use it.
+private struct ProfileList: View {
+    let detail: SettingsDetail
+    let picked: Int?
+    let pick: (Int) -> Void
+
     var body: some View {
-        Form {
-            ForEach(shortcuts, id: \.0) { group, keys in
-                Section(group) {
-                    ForEach(keys, id: \.0) { action, key in
-                        LabeledContent(action) { Text(key).monospaced() }
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Your Profiles").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+            Rectangle().fill(settingsLine).frame(height: 1)
+            ForEach(detail.profiles) { profile in
+                let used = detail.spaces.filter { $0.profile == profile.name }.count
+                Button {
+                    pick(profile.id)
+                } label: {
+                    HStack {
+                        Circle().fill(color(profileColors[profile.color] ?? "#8b8d98"))
+                            .frame(width: 8, height: 8)
+                        Text(profile.name).font(.system(size: 13))
+                        Spacer()
+                        Text(used == 0 ? "Not used" : used == 1 ? "1 Space" : "\(used) Spaces")
+                            .font(.system(size: 12))
+                            .foregroundStyle(used == 0 ? .tertiary : .secondary)
+                    }
+                    .padding(.horizontal, 8)
+                    .frame(height: 32)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(profile.id == picked ? Color.accentColor.opacity(0.18) : .clear))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(settingsEdge))
+    }
+}
+
+/// A profile's settings, like Arc's: its search, its archiving, then its data and settings,
+/// which Chromium's own pages show.
+private struct ProfileDetail: View {
+    @ObservedObject var settings: SettingsModel
+    let detail: SettingsDetail
+    let profile: SettingsDetail.ProfileSettings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            SettingsCard {
+                SettingsRow(label: "Search engine", height: 43) {
+                    Picker("", selection: Binding(
+                        get: { profile.searchEngine },
+                        set: { settings.app.run("profile/search/\(profile.id)/\($0)") }
+                    )) {
+                        ForEach(detail.engines) { Text($0.name).tag($0.id) }
+                    }
+                    .labelsHidden()
+                    .frame(width: 153)
+                }
+                SettingsLine()
+                SettingsSwitch(
+                    label: "Include search engine suggestions",
+                    isOn: Binding(
+                        get: { profile.searchSuggestions },
+                        set: { settings.app.run("profile/suggestions/\(profile.id)/\($0 ? "on" : "off")") }))
+            }
+            SettingsCard {
+                SettingsRow(label: "Archive tabs after", height: 44) {
+                    Picker("", selection: Binding(
+                        get: { profile.archiveAfter },
+                        set: { settings.app.run("profile/archive/\(profile.id)/\($0)") }
+                    )) {
+                        ForEach(detail.delays) { Text($0.name).tag($0.id) }
+                    }
+                    .labelsHidden()
+                    .frame(width: 153)
+                }
+            }
+            Text("Your Data and Settings").font(.system(size: 12)).foregroundStyle(.tertiary)
+                .padding(.leading, 10)
+                .padding(.top, 10)
+            VStack(spacing: 0) {
+                ForEach(dataPages, id: \.0) { label, symbol, tint, address in
+                    DataRow(label: label, symbol: symbol, tint: tint) {
+                        settings.app.run("open/\(percentEncoded(address))")
                     }
                 }
             }
+            .padding(.vertical, 9)
+            .background(RoundedRectangle(cornerRadius: 8).fill(settingsFill))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(settingsEdge))
         }
-        .formStyle(.grouped)
+    }
+}
+
+/// Like Arc's, a profile's data in Chromium's own settings pages.
+private let dataPages: [(String, String, Color, String)] = [
+    ("Privacy and Security", "lock.fill", Color(red: 0.07, green: 0.45, blue: 0.85), "chrome://settings/privacy"),
+    ("Passwords", "key.fill", Color(red: 0.16, green: 0.67, blue: 0.27), "chrome://password-manager/passwords"),
+    ("Credit Cards", "creditcard.fill", Color(red: 0.85, green: 0.69, blue: 0.09), "chrome://settings/payments"),
+    ("Notifications", "bell.fill", Color(red: 0.85, green: 0.45, blue: 0.16), "chrome://settings/content/notifications"),
+    ("Clear Browsing Data", "trash.fill", Color(red: 0.85, green: 0.2, blue: 0.22), "chrome://settings/clearBrowserData"),
+]
+
+/// A row leading to one of Chromium's pages, like Arc's: a colored tile, the label, an arrow.
+private struct DataRow: View {
+    let label: String
+    let symbol: String
+    let tint: Color
+    let action: () -> Void
+    private let hovered = State(initialValue: false)
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                SettingsTile(symbol: symbol, color: tint)
+                Text(label).font(.system(size: 13, weight: .medium))
+                Spacer()
+                Image(systemName: "arrow.right").font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+            .padding(.horizontal, 6)
+            .frame(height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.accentColor.opacity(hovered.wrappedValue ? 0.12 : 0)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 4)
+        .onHover { hovered.wrappedValue = $0 }
+    }
+}
+
+/// Like Arc's Shortcuts pane: every shortcut in a searchable list of key caps, and what they are
+/// for beside it.
+private struct ShortcutsSettings: View {
+    private let query = State(initialValue: "")
+
+    var body: some View {
+        let typed = query.wrappedValue.trimmingCharacters(in: .whitespaces).lowercased()
+        let found = shortcuts.flatMap(\.1).filter {
+            typed.isEmpty || $0.0.lowercased().contains(typed) || $0.1.lowercased().contains(typed)
+        }
+        .sorted { $0.0 < $1.0 }
+        HStack(alignment: .top, spacing: 16) {
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Type a feature name or shortcut", text: query.projectedValue)
+                        .textFieldStyle(.plain)
+                }
+                .font(.system(size: 13))
+                .padding(.horizontal, 14)
+                .frame(height: 40)
+                .background(Color.ink((0x000000, 0.04), (0xFFFFFF, 0.06)))
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
+                        Section {
+                            ForEach(found, id: \.0) { action, keys in
+                                HStack {
+                                    Text(action).font(.system(size: 13))
+                                    Spacer()
+                                    KeyCap(keys: keys)
+                                }
+                                .padding(.leading, 24)
+                                .padding(.trailing, 16)
+                                .frame(height: 48)
+                                .overlay(alignment: .bottom) {
+                                    Rectangle().fill(settingsLine).frame(height: 1).padding(.leading, 24)
+                                }
+                            }
+                        } header: {
+                            Text("Default Shortcuts").font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.secondary)
+                                .padding(.leading, 16)
+                                .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+                                .background(.background)
+                                .overlay(alignment: .bottom) {
+                                    Rectangle().fill(settingsLine).frame(height: 1)
+                                }
+                        }
+                    }
+                }
+            }
+            .frame(width: 340, height: 450)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(settingsEdge))
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 3) {
+                    KeyTile(symbol: "command")
+                    KeyTile(symbol: "face.smiling")
+                }
+                .padding(.bottom, 16)
+                Text("Shortcuts").font(.system(size: 15, weight: .bold))
+                Text("Every action Arbalete offers from the keyboard. A page keeps the shortcuts Arbalete leaves free.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(width: 193, alignment: .leading)
+        }
+        .padding(.top, 20)
+        .frame(width: 556)
+    }
+}
+
+/// A shortcut's keys on a white cap, like Arc's.
+private struct KeyCap: View {
+    let keys: String
+
+    var body: some View {
+        Text(keys).font(.system(size: 11.5, weight: .medium))
+            .foregroundStyle(Color(white: 0.43))
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .frame(minWidth: 63, minHeight: 24)
+            .background(RoundedRectangle(cornerRadius: 4).fill(Color(white: 0.99)))
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color(white: 0.8), lineWidth: 0.5))
+    }
+}
+
+/// A large blue key, like the ones over Arc's shortcuts' explanation.
+private struct KeyTile: View {
+    let symbol: String
+
+    var body: some View {
+        Image(systemName: symbol).font(.system(size: 24, weight: .medium))
+            .foregroundStyle(Color.accentColor)
+            .frame(width: 65, height: 64)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.accentColor.opacity(0.22)))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.accentColor, lineWidth: 1.5))
     }
 }
 
