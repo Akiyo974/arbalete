@@ -164,11 +164,6 @@ struct KeyField: NSViewRepresentable {
 struct PageToolbar: View {
     @ObservedObject var model: AppModel
 
-    private func tool(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
-        IconButton(symbol: symbol, label: label, size: 37, symbolSize: 14, action: action)
-            .frame(height: 28)
-    }
-
     var body: some View {
         if let tab = model.activeTab, tab.developer == true {
             DeveloperBar(model: model, url: tab.url)
@@ -181,33 +176,15 @@ struct PageToolbar: View {
     /// while it is not docked, the site controls and Split View last.
     private var plain: some View {
         let tab = model.activeTab
-        let page = model.state?.page
         return ZStack {
             HStack(spacing: 0) {
-                if !model.sidebarDocked {
-                    tool("sidebar.left", "Toggle sidebar") { model.run("sidebar/toggle") }
-                }
-                tool("arrow.left", "Back") { model.run("back") }
-                    .disabled(!(page?.canGoBack ?? false))
-                tool("arrow.right", "Forward") { model.run("forward") }
-                    .disabled(!(page?.canGoForward ?? false))
-                // Like Arc's, it stops the page while it loads.
-                if page?.loading == true {
-                    tool("xmark", "Stop") { model.run("stop") }
-                } else {
-                    tool("arrow.clockwise", "Reload") { model.run("reload") }
-                }
+                BarStart(model: model)
                 Spacer()
                 if tab != nil {
                     ForEach(model.state?.extensions ?? []) { ext in
                         PinnedExtension(model: model, extension: ext, view: "toolbar")
                     }
-                    SiteControlsButton(
-                        model: model, view: "toolbar", symbol: "slider.horizontal.2.square",
-                        symbolSize: 15
-                    )
-                    .frame(width: 37)
-                    tool("rectangle.split.2x1", "Add Split View") { model.run("pane/add") }
+                    BarEnd(model: model)
                 }
             }
             if let tab {
@@ -234,6 +211,55 @@ struct PageToolbar: View {
     }
 }
 
+/// A button of the bar above the page in toolbar mode, 37 points wide.
+private func barTool(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
+    IconButton(symbol: symbol, label: label, size: 37, symbolSize: 14, action: action)
+        .frame(height: 28)
+}
+
+/// The start of the bar above the page in toolbar mode, the plain one's and the developer one's,
+/// so that nothing moves as developer mode turns on or off: the sidebar's toggle while it is not
+/// docked, back, forward, and reload.
+struct BarStart: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        let page = model.state?.page
+        HStack(spacing: 0) {
+            if !model.sidebarDocked {
+                barTool("sidebar.left", "Toggle sidebar") { model.run("sidebar/toggle") }
+            }
+            barTool("arrow.left", "Back") { model.run("back") }
+                .disabled(!(page?.canGoBack ?? false))
+            barTool("arrow.right", "Forward") { model.run("forward") }
+                .disabled(!(page?.canGoForward ?? false))
+            // Like Arc's, it stops the page while it loads.
+            if page?.loading == true {
+                barTool("xmark", "Stop") { model.run("stop") }
+            } else {
+                barTool("arrow.clockwise", "Reload") { model.run("reload") }
+            }
+        }
+    }
+}
+
+/// The end of the bar above the page in toolbar mode, the plain one's and the developer one's,
+/// so that the site controls stay under their button as developer mode turns on or off: the
+/// site controls and Split View.
+struct BarEnd: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 0) {
+            SiteControlsButton(
+                model: model, view: "toolbar", symbol: "slider.horizontal.2.square", symbolSize: 15
+            )
+            .frame(width: 37)
+            barTool("rectangle.split.2x1", "Add Split View") { model.run("pane/add") }
+        }
+    }
+}
+
 /// The bar above a page in developer mode, like Arc's, measured: in the dark, indigo with faint
 /// diagonal stripes; in the light, white with its buttons in the accent. The lock, or an "i"
 /// without one, and the full address in a monospaced font, then buttons to copy it, open the
@@ -248,9 +274,14 @@ struct DeveloperBar: View {
 
     private var dark: Bool { isDark(model.space?.theme) }
 
+    /// In toolbar mode, over a page alone, its ends are the plain bar's.
+    private var asToolbar: Bool { model.state?.toolbar == true && close == nil }
+
     var body: some View {
         HStack(spacing: 2) {
-            if model.state?.toolbar == true {
+            if asToolbar {
+                BarStart(model: model)
+            } else if model.state?.toolbar == true {
                 NavButtons(model: model)
             }
             Image(systemName: url.hasPrefix("https://") ? "lock.fill" : "info")
@@ -275,14 +306,18 @@ struct DeveloperBar: View {
             ForEach(model.state?.extensions ?? []) { ext in
                 PinnedExtension(model: model, extension: ext, view: "toolbar")
             }
-            SiteControlsButton(model: model, view: "toolbar")
-            tool("rectangle.split.2x1", "Add Split View") { model.run("pane/add") }
+            if asToolbar {
+                BarEnd(model: model)
+            } else {
+                SiteControlsButton(model: model, view: "toolbar")
+                tool("rectangle.split.2x1", "Add Split View") { model.run("pane/add") }
+            }
             if let close {
                 IconButton(symbol: "xmark", label: "Close", size: 28, symbolSize: 15, action: close)
             }
         }
         .foregroundStyle(dark ? Color.white : model.accent)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, asToolbar ? 2.25 : 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
             if dark { stripes } else { color("#f8f8fd") }
@@ -646,9 +681,19 @@ public func showCertificate(
         let chain = (0..<count).compactMap {
             SecCertificateCreateWithData(nil, Data(bytes: certificates[$0], count: sizes[$0]) as CFData)
         }
-        guard !chain.isEmpty else { return }
-        SFCertificatePanel.shared().beginSheet(
-            for: window, modalDelegate: nil, didEnd: nil, contextInfo: nil, certificates: chain,
-            showGroup: false)
+        // Evaluated, the trust holds the whole chain up to its root, which the site does not send,
+        // like Arc's sheet shows it, and whether it is valid.
+        var trust: SecTrust?
+        guard !chain.isEmpty,
+            SecTrustCreateWithCertificates(chain as CFArray, SecPolicyCreateSSL(true, nil), &trust)
+                == errSecSuccess, let trust
+        else { return }
+        SecTrustEvaluateAsyncWithError(trust, .main) { trust, _, _ in
+            MainActor.assumeIsolated {
+                SFCertificatePanel.shared().beginSheet(
+                    for: window, modalDelegate: nil, didEnd: nil, contextInfo: nil, trust: trust,
+                    showGroup: true)
+            }
+        }
     }
 }

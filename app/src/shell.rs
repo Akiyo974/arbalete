@@ -125,10 +125,10 @@ const LITTLE_SIZE: Size = Size {
 };
 const LITTLE_BAR_HEIGHT: i32 = 47;
 
-/// The height of the bar above the page, in toolbar mode, like Arc's.
-const PAGE_TOOLBAR_HEIGHT: i32 = 40;
-/// The bar above the page in toolbar mode, outside developer mode: lower, measured on Arc's.
-const PLAIN_TOOLBAR_HEIGHT: i32 = 33;
+/// The height of the bar above the page, measured on Arc's in toolbar mode. The developer bar
+/// takes it too, unlike Arc's, taller: switching between them, nothing moves, and the site
+/// controls stay under their button.
+const PAGE_TOOLBAR_HEIGHT: i32 = 33;
 
 /// The height of the settings window's title row, which holds the window buttons
 /// (ui/src/index.css). Not on macOS, whose settings window is native.
@@ -1170,15 +1170,6 @@ fn toggle_toolbar() {
 /// Arc's developer bar.
 fn page_toolbar() -> bool {
     app_settings().show_toolbar || selected_url().is_some_and(|url| developer_mode(&url))
-}
-
-/// The bar above the page's height: the developer bar's, or the lower plain one's, like Arc's.
-fn toolbar_height() -> i32 {
-    if selected_url().is_some_and(|url| developer_mode(&url)) {
-        PAGE_TOOLBAR_HEIGHT
-    } else {
-        PLAIN_TOOLBAR_HEIGHT
-    }
 }
 
 /// Shows or hides the bar above the page as `page_toolbar` says, but over a split, which shows
@@ -5108,7 +5099,7 @@ fn card_rect() -> Option<Rect> {
 /// own bars.
 fn shown_toolbar_height() -> i32 {
     if page_toolbar() && split_shown().is_none() {
-        toolbar_height()
+        PAGE_TOOLBAR_HEIGHT
     } else {
         0
     }
@@ -5277,7 +5268,7 @@ fn send_panes() {
             panes.push(json!({
                 "tab": focused, "split": null,
                 "x": 0, "y": 0, "width": card.width, "height": card.height,
-                "bar": toolbar_height(), "url": selected_url().unwrap_or_default(),
+                "bar": PAGE_TOOLBAR_HEIGHT, "url": selected_url().unwrap_or_default(),
                 "back": false, "forward": false, "loading": false, "focused": true,
                 // Like Arc's, the bar takes the color at the page's top.
                 "color": focused.and_then(|tab| TOP_COLORS.with_borrow(|colors| colors.get(&tab).cloned())),
