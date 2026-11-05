@@ -11,6 +11,7 @@ use crate::downloads::{self, Download};
 use crate::extensions;
 use crate::menu::{self, Action};
 use crate::settings::{self, Settings};
+use crate::strings::{chromium, chromium_with};
 use arbalete_core::history::{self, History};
 use arbalete_core::import::browsers::{self, Family};
 use arbalete_core::import::{self, Choice, safari};
@@ -7905,32 +7906,31 @@ wrap_context_menu_handler! {
             let (Some(params), Some(model)) = (params, model) else { return };
             // Groups of items, separated.
             let mut groups: Vec<Vec<(i32, String)>> = Vec::new();
-            let item = |id: i32, label: &str| (id, label.to_string());
+            let item = |id: i32, english: &str| (id, chromium(english));
             if !CefString::from(&params.link_url()).to_string().is_empty() {
                 groups.push(vec![
-                    item(OPEN_LINK, "Open Link in New Tab"),
-                    item(OPEN_LINK_WINDOW, "Open Link in New Window"),
+                    item(OPEN_LINK, "Open Link in New &Tab"),
+                    item(OPEN_LINK_WINDOW, "Open Link in New &Window"),
                     item(OPEN_LINK_SPLIT, "Open Link in Split View"),
-                    item(OPEN_LINK_LITTLE, "Open Link in Little Arbalete"),
-                    item(OPEN_LINK_INCOGNITO, "Open Link in Incognito Window"),
+                    (OPEN_LINK_LITTLE, chromium_with("Open Link in $1", &["Little Arbalete"])),
+                    item(OPEN_LINK_INCOGNITO, "Open Link in Inco&gnito Window"),
                 ]);
-                groups.push(vec![item(SAVE_LINK, "Save Link As…"), item(COPY_LINK, "Copy Link Address")]);
+                groups.push(vec![item(SAVE_LINK, "Save Lin&k As…"), item(COPY_LINK, "Copy Link Addr&ess")]);
             }
             if params.media_type() == ContextMenuMediaType::IMAGE {
                 groups.push(vec![
-                    item(OPEN_IMAGE, "Open Image in New Tab"),
-                    item(SAVE_IMAGE, "Save Image As…"),
-                    item(COPY_IMAGE, "Copy Image"),
-                    item(COPY_IMAGE_ADDRESS, "Copy Image Address"),
-                    item(SEARCH_IMAGE, "Search Image with Google"),
+                    item(OPEN_IMAGE, "Open &Image in New Tab"),
+                    item(SAVE_IMAGE, "Sa&ve Image As…"),
+                    item(COPY_IMAGE, "Cop&y Image"),
+                    item(COPY_IMAGE_ADDRESS, "C&opy Image Address"),
+                    (SEARCH_IMAGE, chromium_with("Search Image with $1", &["Google"])),
                 ]);
             }
             let selection = CefString::from(&params.selection_text()).to_string();
             if !selection.trim().is_empty() {
-                let label = format!(
-                    "Search {} for “{}”",
-                    displayed_search_engine().name(),
-                    quoted_selection(&selection)
+                let label = chromium_with(
+                    "&Search $1 for “$2”",
+                    &[displayed_search_engine().name(), &quoted_selection(&selection)],
                 );
                 groups.push(vec![(SEARCH_SELECTION, label)]);
             }
@@ -7945,7 +7945,7 @@ wrap_context_menu_handler! {
             if model.count() > 0 {
                 model.add_separator();
             }
-            model.add_item(INSPECT, Some(&CefString::from("Inspect")));
+            model.add_item(INSPECT, Some(&CefString::from(chromium("Inspect").as_str())));
         }
 
         fn on_context_menu_command(&self, browser: Option<&mut Browser>, _frame: Option<&mut Frame>, params: Option<&mut ContextMenuParams>, command_id: i32, _event_flags: EventFlags) -> i32 {

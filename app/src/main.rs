@@ -10,6 +10,7 @@ mod native;
 mod scheme;
 mod settings;
 mod shell;
+mod strings;
 #[cfg(target_os = "macos")]
 mod swipe;
 
