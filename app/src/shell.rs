@@ -2644,33 +2644,26 @@ fn is_app_message(message: &str) -> bool {
 
 /// Where the shown page lies in the window, in points from its top left corner.
 fn page_frame() -> Option<Rect> {
-    let room = place_rect(win().shown.get()?)?;
-    let card = win()
-        .card
-        .with_borrow(|card| card.as_ref().map(OverlayController::bounds))?;
+    let shown = win().shown.get()?;
+    let tabs = win().split.borrow().0.clone();
+    if tabs.is_empty() {
+        let card = card_rect()?;
+        let bar = shown_toolbar_height();
+        return Some(Rect {
+            y: card.y + bar,
+            height: card.height - bar,
+            ..card
+        });
+    }
+    // A split's page, under its bar.
+    let rect = split_rects()
+        .get(tabs.iter().position(|&tab| tab == shown)?)?
+        .clone();
     Some(Rect {
-        x: card.x + room.x,
-        y: card.y + room.y,
-        ..room
+        y: rect.y + PANE_BAR_HEIGHT,
+        height: rect.height - PANE_BAR_HEIGHT,
+        ..rect
     })
-}
-
-/// Where a tab's page shows in the card, from its top left corner, if it does.
-fn place_rect(tab: NodeId) -> Option<Rect> {
-    let place = PAGES.with_borrow(|pages| Some(pages.get(&tab)?.place.clone()))?;
-    if place.is_drawn() == 0 {
-        return None;
-    }
-    // Each view's bounds from its parent's corner, up to the card's own view.
-    let mut rect = place.bounds();
-    let mut parent = place.parent_view();
-    while let Some(view) = parent {
-        let bounds = view.bounds();
-        rect.x += bounds.x;
-        rect.y += bounds.y;
-        parent = view.parent_view();
-    }
-    Some(rect)
 }
 
 /// Shows the veil a drag picks the part of the shown page to capture on, like Arc's.
@@ -5051,36 +5044,102 @@ fn show_split(focused: NodeId, tabs: &[NodeId], places: &[Panel], layout: SplitL
     shown_on_card(focused);
 }
 
-/// Where the split shown puts its pages, in the window, each under its bar: as the card lays
-/// out its slots.
-fn split_rects() -> Vec<Rect> {
-    let count = win().split.borrow().0.len();
-    let card = win()
-        .card
-        .with_borrow(|card| card.as_ref().map(OverlayController::bounds));
-    let split = win()
-        .split_view
-        .with_borrow(|split| split.as_ref().map(|s| s.bounds()));
-    let (Some(card), Some(split)) = (card, split) else {
+/// Where the card is in the window: the page's room, or half of it while a tab dragged over a
+/// page alone would take the other half, like Arc's; none while the library fills the window.
+fn card_rect() -> Option<Rect> {
+    if fills_window() {
+        return None;
+    }
+    let size = win()
+        .window
+        .with_borrow(|window| window.as_ref().map(|w| w.size()))?;
+    let mut room = win().sidebar_mode.get().layout(&size).card;
+    if split_shown().is_none()
+        && let Some((before, stacked)) = win().drop_preview.get()
+    {
+        if stacked {
+            let half = (room.height - SPLIT_GAP) / 2;
+            if before {
+                room.y += half + SPLIT_GAP;
+            }
+            room.height = half;
+        } else {
+            let half = (room.width - SPLIT_GAP) / 2;
+            if before {
+                room.x += half + SPLIT_GAP;
+            }
+            room.width = half;
+        }
+    }
+    Some(room)
+}
+
+/// The height of the bar above a page alone, 0 while it hides: over a split, its pages show their
+/// own bars.
+fn shown_toolbar_height() -> i32 {
+    if page_toolbar() && split_shown().is_none() {
+        toolbar_height()
+    } else {
+        0
+    }
+}
+
+/// The places of the split shown, in the window's points, in order: each of its pages' by its
+/// index, and the empty page a tab dragged over it would open, without one.
+fn split_slots() -> Vec<(Option<usize>, Rect)> {
+    let (tabs, layout) = win().split.borrow().clone();
+    let (Some(layout), Some(card)) = (layout, card_rect()) else {
         return Vec::new();
     };
-    if fills_window() {
-        return Vec::new();
-    }
-    win()
-        .slots
-        .borrow()
-        .iter()
-        .take(count)
-        .map(|slot| {
-            let slot = slot.bounds();
-            Rect {
-                x: card.x + split.x + slot.x,
-                y: card.y + split.y + slot.y,
-                width: slot.width,
-                height: slot.height,
-            }
+    let room = if layout.stacked {
+        card.height
+    } else {
+        card.width
+    };
+    // A tab dragged over the split: like Arc's, an empty page opens where it would go, all the
+    // pages sharing the room evenly.
+    let preview = win().pane_preview.get().map(|index| index.min(tabs.len()));
+    let count = tabs.len() + usize::from(preview.is_some());
+    let lengths = match preview {
+        Some(_) => pane_lengths(room, &vec![1.0 / count as f64; count]),
+        None => pane_lengths(room, &layout.factors),
+    };
+    let mut start = 0;
+    let mut tab = 0;
+    lengths
+        .into_iter()
+        .enumerate()
+        .map(|(at, length)| {
+            let rect = if layout.stacked {
+                Rect {
+                    x: card.x,
+                    y: card.y + start,
+                    width: card.width,
+                    height: length,
+                }
+            } else {
+                Rect {
+                    x: card.x + start,
+                    y: card.y,
+                    width: length,
+                    height: card.height,
+                }
+            };
+            start += length + SPLIT_GAP;
+            let index = (preview != Some(at)).then(|| {
+                tab += 1;
+                tab - 1
+            });
+            (index, rect)
         })
+        .collect()
+}
+
+/// Where each of the split's pages shows, in the window's points, in order.
+fn split_rects() -> Vec<Rect> {
+    split_slots()
+        .into_iter()
+        .filter_map(|(index, rect)| index.map(|_| rect))
         .collect()
 }
 
@@ -5211,10 +5270,7 @@ fn send_panes() {
             .first()
             .map(|&tab| STATE.with_borrow(|state| state.sidebar.row_of(tab)));
         // In the card's view, which holds the pages.
-        let card = win()
-            .card
-            .with_borrow(|card| card.as_ref().map(OverlayController::bounds))
-            .unwrap_or_default();
+        let card = card_rect().unwrap_or_default();
         let mut panes: Vec<_> = tabs
             .iter()
             .zip(split_rects())
@@ -5249,11 +5305,12 @@ fn send_panes() {
             .collect();
         // A page alone, where the card lays it out.
         if let Some(tab) = focused.filter(|_| tabs.is_empty())
-            && let Some(rect) = place_rect(tab)
+            && card_rect().is_some()
         {
+            let bar = shown_toolbar_height();
             panes.push(json!({
                 "tab": tab, "split": null,
-                "x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height,
+                "x": 0, "y": bar, "width": card.width, "height": card.height - bar,
                 "bar": 0, "url": "", "back": false, "forward": false, "loading": false,
                 "focused": true, "color": null, "developer": false, "toolbar": false,
                 "alone": true, "square": square_card(), "cardX": card.x, "cardY": card.y,
@@ -5261,15 +5318,10 @@ fn send_panes() {
         }
         // The empty page standing where a dragged tab would open, known by its tab, -1, which
         // the interface draws.
-        let slot = win().drop_slot.borrow().clone();
-        let split_view = win().split_view.with_borrow(Clone::clone);
-        if let (Some(_), Some(slot), Some(split_view)) =
-            (win().pane_preview.get(), slot, split_view)
-        {
-            let (frame, origin) = (slot.bounds(), split_view.bounds());
+        if let Some((_, frame)) = split_slots().into_iter().find(|(index, _)| index.is_none()) {
             panes.push(json!({
                 "tab": -1, "split": null,
-                "x": origin.x + frame.x, "y": origin.y + frame.y,
+                "x": frame.x - card.x, "y": frame.y - card.y,
                 "width": frame.width, "height": frame.height,
                 "bar": 0, "url": "", "back": false, "forward": false, "loading": false,
                 "focused": false, "color": null, "developer": false, "toolbar": false,
@@ -5290,10 +5342,8 @@ fn send_panes() {
                 "cardX": card.x, "cardY": card.y,
             }));
         }
-        let shows = win()
-            .card
-            .with_borrow(|card| card.as_ref().is_some_and(|card| card.is_visible() == 1))
-            && !fills_window();
+        // Once the sidebar sent the window's colors, which first show it.
+        let shows = win().colored.get() && card_rect().is_some();
         let frame = shows.then_some([card.x, card.y, card.width, card.height]);
         // Only once they change: placing the bars again would end a click on them.
         let sent = json!({ "card": frame, "panes": panes }).to_string();
@@ -5888,12 +5938,9 @@ fn send_empty_card() {
     #[cfg(target_os = "macos")]
     {
         let alone = !fills_window() && split_shown().is_none();
-        let card = win()
-            .card
-            .with_borrow(|card| card.as_ref().map(OverlayController::bounds));
         crate::native::card(
             win().id,
-            card.filter(|_| alone),
+            card_rect().filter(|_| alone),
             win().shown.get().is_none(),
         );
     }
@@ -7354,17 +7401,15 @@ pub fn menu_at(x: f64, y: f64) -> bool {
         }
     }
     // The bar above the page, in toolbar mode, shows its pinned extensions' menus.
-    if let Some(toolbar) = win()
-        .toolbar_view
-        .with_borrow(Clone::clone)
-        .filter(|_| page_toolbar())
-    {
-        // It lies in the card, an overlay of its own: its bounds are the card's.
-        let card = win()
-            .card
-            .with_borrow(|card| card.as_ref().map(OverlayController::bounds));
-        let card = card.unwrap_or_default();
-        let bounds = toolbar.bounds();
+    if shown_toolbar_height() > 0 {
+        // At the card's top.
+        let card = card_rect().unwrap_or_default();
+        let bounds = Rect {
+            x: 0,
+            y: 0,
+            width: card.width,
+            height: shown_toolbar_height(),
+        };
         let point = Point {
             x: x as i32 - card.x - bounds.x,
             y: y as i32 - card.y - bounds.y,
