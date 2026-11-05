@@ -29,7 +29,9 @@ unsafe extern "C" {
         sizes: *const usize,
         count: usize,
     );
-    fn arbalete_ui_little(id: u32, handle: *mut c_void);
+    fn arbalete_ui_open_little(id: u32) -> *mut c_void;
+    fn arbalete_ui_little_closed(id: u32);
+    fn arbalete_ui_focused_little() -> i64;
     fn arbalete_ui_settings_focused() -> bool;
     fn arbalete_ui_make_default_browser();
     fn arbalete_ui_split(window: u32, stacked: bool, frames: *const f64, count: usize);
@@ -290,11 +292,31 @@ pub fn surface(window: u32, name: &str, shown: bool, frame: &Rect) {
     }
 }
 
-/// Gives a Little Arbalete window, `id`, its native bar, or forgets it once closed, without a
-/// handle.
-pub fn little(id: u32, handle: Option<*mut c_void>) {
-    // SAFETY: CEF gives a live NSWindow or NSView, which the window keeps alive.
-    unsafe { arbalete_ui_little(id, handle.unwrap_or(std::ptr::null_mut())) };
+/// Opens the Little Arbalete window `id`, with its bar, and returns the view CEF makes its page's
+/// browser in.
+pub fn open_little(id: u32) -> Option<*mut c_void> {
+    // SAFETY: a plain value; the view lives until little_closed.
+    let view = unsafe { arbalete_ui_open_little(id) };
+    (!view.is_null()).then_some(view)
+}
+
+/// Closes the Little Arbalete window `id`, its page closing: the page's view goes with it, which
+/// destroys its browser.
+pub fn little_closed(id: u32) {
+    // SAFETY: a plain value.
+    unsafe { arbalete_ui_little_closed(id) };
+}
+
+/// The Little Arbalete window that has the keyboard, if any.
+pub fn focused_little() -> Option<u32> {
+    // SAFETY: no arguments.
+    u32::try_from(unsafe { arbalete_ui_focused_little() }).ok()
+}
+
+/// Whether the Little Arbalete window `id` may close now: its page closes first, which closes it.
+#[unsafe(no_mangle)]
+pub extern "C" fn arbalete_little_should_close(id: u32) -> bool {
+    crate::shell::little_can_close(id)
 }
 
 /// Opens the settings window, or closes it.

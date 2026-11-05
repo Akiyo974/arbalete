@@ -23,35 +23,10 @@ final class LittleBar: ObservableObject {
     @Published var editing = false
     let id: Int
     let app: AppModel
-    let panel: ChildPanel
-    weak var window: NSWindow?
-    private var watch: NSObjectProtocol?
 
-    init(id: Int, window: NSWindow, app: AppModel) {
+    init(id: Int, app: AppModel) {
         self.id = id
         self.app = app
-        self.window = window
-        panel = ChildPanel(view: NSView())
-        let host = NSHostingView(rootView: LittleBarView(bar: self))
-        host.autoresizingMask = [.width, .height]
-        panel.contentView?.addSubview(host)
-        place()
-        watch = NotificationCenter.default.addObserver(
-            forName: NSWindow.didResizeNotification, object: window, queue: .main
-        ) { [weak self] _ in MainActor.assumeIsolated { self?.place() } }
-    }
-
-    /// Over the window's top, where the app leaves room for the bar.
-    func place() {
-        guard let window, let content = window.contentView else { return }
-        let height = 40.0
-        panel.place(in: window, NSRect(x: 0, y: 0, width: content.frame.width, height: height))
-        panel.contentView?.subviews.forEach { $0.frame = panel.contentView?.bounds ?? .zero }
-    }
-
-    func close() {
-        if let watch { NotificationCenter.default.removeObserver(watch) }
-        if let window { panel.place(in: window, nil) }
     }
 
     func go(_ text: String) {
@@ -59,6 +34,60 @@ final class LittleBar: ObservableObject {
         let url = toURL(text) ?? page.search.url + percentEncoded(text)
         app.run("little/\(id)/navigate/\(percentEncoded(url))")
         editing = false
+    }
+}
+
+/// A Little Arbalete window's size, and its bar's height, which holds the window buttons, like
+/// Little Arc's: a 31-point row with 8 points above and below.
+private let littleSize = NSSize(width: 768, height: 600)
+private let littleBarHeight: CGFloat = 47
+
+/// A Little Arbalete window, the delegate of its NSWindow: its bar on top, then its page, which
+/// CEF draws in `page`. The app closes its page before the window closes.
+@MainActor
+final class LittleWindow: NSObject, NSWindowDelegate {
+    let bar: LittleBar
+    let window: NSWindow
+    let page = PageHost()
+
+    init(id: Int, app: AppModel) {
+        bar = LittleBar(id: id, app: app)
+        window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: littleSize),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered, defer: false)
+        super.init()
+        window.title = "Little Arbalete"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.isReleasedWhenClosed = false
+        window.tabbingMode = .disallowed
+        let content = NSView(frame: NSRect(origin: .zero, size: littleSize))
+        let host = NSHostingView(rootView: LittleBarView(bar: bar))
+        host.frame = NSRect(
+            x: 0, y: littleSize.height - littleBarHeight, width: littleSize.width,
+            height: littleBarHeight)
+        host.autoresizingMask = [.width, .minYMargin]
+        page.frame = NSRect(
+            x: 0, y: 0, width: littleSize.width, height: littleSize.height - littleBarHeight)
+        page.autoresizingMask = [.width, .height]
+        content.addSubview(page)
+        content.addSubview(host)
+        window.contentView = content
+        window.delegate = self
+        window.center()
+        // Centered in its bar, like Little Arc's.
+        centerWindowButtons(window, height: littleBarHeight)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        centerWindowButtons(window, height: littleBarHeight)
+    }
+
+    /// Its page closes first, which closes the window (arbalete_ui_little_closed).
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        arbalete_little_should_close(UInt32(bar.id))
     }
 }
 
@@ -123,19 +152,32 @@ struct LittleBarView: View {
     }
 }
 
-@MainActor var littles: [Int: LittleBar] = [:]
+@MainActor var littles: [Int: LittleWindow] = [:]
 
-@_cdecl("arbalete_ui_little")
-public func little(_ id: UInt32, _ handle: UnsafeMutableRawPointer?) {
+/// Opens the Little Arbalete window `id` and returns the view CEF draws its page in.
+@_cdecl("arbalete_ui_open_little")
+public func openLittle(_ id: UInt32) -> UnsafeMutableRawPointer? {
+    // As an address: a pointer may not leave the main actor's closure.
+    let address: UInt = MainActor.assumeIsolated {
+        // Its commands go through a window of the app's, any.
+        guard let app = nativeWindows.values.first?.model else { return 0 }
+        let little = LittleWindow(id: Int(id), app: app)
+        littles[Int(id)] = little
+        return UInt(bitPattern: Unmanaged.passUnretained(little.page).toOpaque())
+    }
+    return UnsafeMutableRawPointer(bitPattern: address)
+}
+
+/// Closes the Little Arbalete window `id`, its page closing: its view goes with the window.
+@_cdecl("arbalete_ui_little_closed")
+public func littleClosed(_ id: UInt32) {
+    MainActor.assumeIsolated { littles.removeValue(forKey: Int(id))?.window.close() }
+}
+
+/// The Little Arbalete window that has the keyboard, or -1.
+@_cdecl("arbalete_ui_focused_little")
+public func focusedLittle() -> Int64 {
     MainActor.assumeIsolated {
-        let id = Int(id)
-        // Its commands come from a window of the app's, any.
-        guard let handle, let app = nativeWindows.values.first?.model else {
-            littles.removeValue(forKey: id)?.close()
-            return
-        }
-        let object = Unmanaged<AnyObject>.fromOpaque(handle).takeUnretainedValue()
-        guard let window = (object as? NSWindow) ?? (object as? NSView)?.window else { return }
-        littles[id] = LittleBar(id: id, window: window, app: app)
+        littles.first { $0.value.window.isKeyWindow }.map { Int64($0.key) } ?? -1
     }
 }

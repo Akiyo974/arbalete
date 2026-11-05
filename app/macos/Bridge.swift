@@ -502,13 +502,13 @@ let windowLightsSize = NSSize(
     width: windowButtonsCircle + 2 * windowButtonsSpacing, height: windowButtonsCircle)
 
 /// Places the window's buttons like Arc's: centered `windowButtonsCenter` below its top, their
-/// titlebar grown to twice that, the first circle `windowButtonsLeading` from the left edge.
+/// titlebar grown to twice that, or centered in a titlebar `height` tall; the first circle
+/// `windowButtonsLeading` from the left edge.
 @MainActor
-func centerWindowButtons(_ window: NSWindow) {
+func centerWindowButtons(_ window: NSWindow, height: CGFloat = windowButtonsCenter * 2) {
     guard let close = window.standardWindowButton(.closeButton), let bar = close.superview,
         let container = bar.superview
     else { return }
-    let height = windowButtonsCenter * 2
     container.frame = NSRect(
         x: container.frame.minX, y: window.frame.height - height, width: container.frame.width,
         height: height)
@@ -565,7 +565,7 @@ final class NativeWindow {
         ].map {
             NotificationCenter.default.addObserver(forName: $0, object: window, queue: .main) {
                 [weak window] _ in
-                MainActor.assumeIsolated { window.map(centerWindowButtons) }
+                MainActor.assumeIsolated { window.map { centerWindowButtons($0) } }
             }
         }
         // As it starts going into full screen or out of it, the sidebar's toggle moving with it.
@@ -696,7 +696,7 @@ public func event(
         case "settings":
             settingsModel?.handle(name, detail)
         case let surface where surface.hasPrefix("little/"):
-            if let id = Int(surface.dropFirst("little/".count)), let bar = littles[id],
+            if let id = Int(surface.dropFirst("little/".count)), let bar = littles[id]?.bar,
                 name == "arbalete:little"
             {
                 bar.page = try? JSONDecoder().decode(LittleDetail.self, from: detail)

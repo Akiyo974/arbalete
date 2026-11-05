@@ -18,3 +18,7 @@ bool arbalete_window_should_close(unsigned int id);
 
 /// The window `id` closed.
 void arbalete_window_closed(unsigned int id);
+
+/// Whether the Little Arbalete window `id` may close now: the app first closes its page, which
+/// closes the window.
+bool arbalete_little_should_close(unsigned int id);

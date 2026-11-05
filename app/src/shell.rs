@@ -118,11 +118,14 @@ const IMPORT_SIZE: Size = Size {
 };
 
 /// A Little Arbalete window's size, and its bar's height, which holds the window buttons, like
-/// Little Arc's: a 31-point row with 8 points above and below.
+/// Little Arc's: a 31-point row with 8 points above and below. Not on macOS, whose Little Arbalete
+/// windows are native (app/macos/Little.swift).
+#[cfg(not(target_os = "macos"))]
 const LITTLE_SIZE: Size = Size {
     width: 768,
     height: 600,
 };
+#[cfg(not(target_os = "macos"))]
 const LITTLE_BAR_HEIGHT: i32 = 47;
 
 /// The height of the bar above the page, measured on Arc's in toolbar mode. The developer bar
@@ -2754,10 +2757,25 @@ wrap_dev_tools_message_observer! {
 struct Little {
     id: u32,
     profile: ProfileId,
+    /// Its page, in a view of the native window.
+    #[cfg(target_os = "macos")]
+    browser: Browser,
+    #[cfg(not(target_os = "macos"))]
     window: Window,
+    #[cfg(not(target_os = "macos"))]
     page: BrowserView,
     url: String,
     title: String,
+}
+
+impl Little {
+    /// Its page's browser, once made.
+    fn browser(&self) -> Option<Browser> {
+        #[cfg(target_os = "macos")]
+        return Some(self.browser.clone());
+        #[cfg(not(target_os = "macos"))]
+        self.page.browser()
+    }
 }
 
 /// Opens a link another app asked to open where URL Routing sends it, or an empty page from the
@@ -2808,11 +2826,93 @@ fn open_little(url: Option<String>) {
     let id = NEXT_LITTLE.get();
     NEXT_LITTLE.set(id + 1);
     let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
-    window_create_top_level(Some(&mut LittleWindowDelegate::new(
-        id,
-        profile,
-        url.unwrap_or_default(),
-    )));
+    let url = url.unwrap_or_default();
+    #[cfg(target_os = "macos")]
+    {
+        let Some(view) = crate::native::open_little(id) else {
+            return;
+        };
+        let info = WindowInfo {
+            parent_view: view,
+            // Any size: the window gives the page its own.
+            bounds: Rect {
+                x: 0,
+                y: 0,
+                width: 800,
+                height: 600,
+            },
+            runtime_style: RuntimeStyle::ALLOY,
+            ..Default::default()
+        };
+        let start = if url.is_empty() { "about:blank" } else { &url };
+        let Some(browser) = browser_host_create_browser_sync(
+            Some(&info),
+            Some(&mut ContentClient::new(profile, true)),
+            Some(&CefString::from(start)),
+            Some(&BrowserSettings::default()),
+            None,
+            profile_context(profile).as_mut(),
+        ) else {
+            return crate::native::little_closed(id);
+        };
+        if let Some(host) = browser.host() {
+            host.set_focus(1);
+        }
+        LITTLE.with_borrow_mut(|littles| {
+            littles.push(Little {
+                id,
+                profile,
+                browser,
+                url,
+                title: String::new(),
+            })
+        });
+        send_little(id);
+    }
+    #[cfg(not(target_os = "macos"))]
+    window_create_top_level(Some(&mut LittleWindowDelegate::new(id, profile, url)));
+}
+
+/// A Little Arbalete window's page's browser.
+fn little_browser(id: u32) -> Option<Browser> {
+    LITTLE.with_borrow(|littles| littles.iter().find(|l| l.id == id)?.browser())
+}
+
+/// Closes a Little Arbalete window, its page first, which may ask to stay: on macOS, the page
+/// closing closes the window (RemoveLittle).
+fn close_little(id: u32) {
+    #[cfg(target_os = "macos")]
+    if let Some(host) = little_browser(id).and_then(|browser| browser.host()) {
+        host.close_browser(0);
+    }
+    #[cfg(not(target_os = "macos"))]
+    if let Some(window) =
+        LITTLE.with_borrow(|littles| Some(littles.iter().find(|l| l.id == id)?.window.clone()))
+    {
+        window.close();
+    }
+}
+
+/// Whether the Little Arbalete window `id` may close now: not while its page is open, which it
+/// closes first.
+#[cfg(target_os = "macos")]
+pub fn little_can_close(id: u32) -> bool {
+    if LITTLE.with_borrow(|littles| littles.iter().any(|l| l.id == id)) {
+        close_little(id);
+        return false;
+    }
+    true
+}
+
+/// The Little Arbalete window whose page is `browser`, if any.
+#[cfg(target_os = "macos")]
+fn little_of(browser: &Browser) -> Option<u32> {
+    LITTLE.with_borrow(|littles| {
+        littles
+            .iter()
+            .find(|l| browser.is_same(Some(&mut l.browser.clone())) == 1)
+            .map(|l| l.id)
+    })
 }
 
 /// Runs what a Little Arbalete window's bar asks for.
@@ -2820,15 +2920,7 @@ fn little_action(id: u32, action: LittleAction) {
     match action {
         LittleAction::Ready => send_little(id),
         LittleAction::Navigate(url) => {
-            let frame = LITTLE.with_borrow(|littles| {
-                littles
-                    .iter()
-                    .find(|l| l.id == id)?
-                    .page
-                    .browser()?
-                    .main_frame()
-            });
-            if let Some(frame) = frame {
+            if let Some(frame) = little_browser(id).and_then(|browser| browser.main_frame()) {
                 frame.load_url(Some(&CefString::from(url.as_str())));
             }
         }
@@ -2839,9 +2931,7 @@ fn little_action(id: u32, action: LittleAction) {
                 return;
             };
             open_tab(&url);
-            if let Some(window) = little_window(id) {
-                window.close();
-            }
+            close_little(id);
             if let Some(window) = win().window.with_borrow(Clone::clone) {
                 window.activate();
             }
@@ -2854,7 +2944,6 @@ fn little_changed(browser: &mut Browser, change: impl FnOnce(&mut Little)) {
     let id = LITTLE.with_borrow_mut(|littles| {
         let little = littles.iter_mut().find(|little| {
             little
-                .page
                 .browser()
                 .is_some_and(|mut page| browser.is_same(Some(&mut page)) == 1)
         })?;
@@ -2895,12 +2984,11 @@ fn send_little(id: u32) {
     }
 }
 
-fn little_window(id: u32) -> Option<Window> {
-    LITTLE.with_borrow(|littles| Some(littles.iter().find(|l| l.id == id)?.window.clone()))
-}
-
 /// The Little Arbalete window that has the keyboard, if any: ⌘W closes it, ⌘O moves its page.
 fn focused_little() -> Option<u32> {
+    #[cfg(target_os = "macos")]
+    return crate::native::focused_little();
+    #[cfg(not(target_os = "macos"))]
     LITTLE.with_borrow(|littles| {
         littles
             .iter()
@@ -5794,6 +5882,21 @@ wrap_task! {
     }
 }
 
+#[cfg(target_os = "macos")]
+wrap_task! {
+    struct RemoveLittle {
+        id: u32,
+    }
+
+    impl Task {
+        /// Closes a Little Arbalete window, its page closing, which destroys the page's browser.
+        fn execute(&self) {
+            LITTLE.with_borrow_mut(|littles| littles.retain(|little| little.id != self.id));
+            crate::native::little_closed(self.id);
+        }
+    }
+}
+
 wrap_task! {
     struct RemovePeek {
         window: u32,
@@ -6104,8 +6207,8 @@ fn run_command(command: Command) {
         (Command::Close(None), _) if peek_shown() => close_peek(),
         (Command::OpenLittleInSpace, _) if peek_shown() => keep_peek(false),
         (Command::Close(None), _) if focused_little().is_some() => {
-            if let Some(window) = focused_little().and_then(little_window) {
-                window.close();
+            if let Some(id) = focused_little() {
+                close_little(id);
             }
         }
         (Command::Close(tab), _) => close_tab(tab),
@@ -6450,10 +6553,9 @@ pub fn scroll(scroll: crate::swipe::Scroll) {
 /// close button does the same on every OS.
 pub fn close() {
     close_settings();
-    let littles: Vec<_> =
-        LITTLE.with_borrow(|littles| littles.iter().map(|l| l.window.clone()).collect());
-    for window in littles {
-        window.close();
+    let littles: Vec<_> = LITTLE.with_borrow(|littles| littles.iter().map(|l| l.id).collect());
+    for id in littles {
+        close_little(id);
     }
     if !CLOSING.replace(true) {
         QUIT_WINDOWS.set(Some(other_windows()));
@@ -6778,6 +6880,9 @@ wrap_window_delegate! {
         }
     }
 }
+
+// The settings window on Linux and Windows; on macOS, it is native (app/macos/Settings.swift).
+#[cfg(not(target_os = "macos"))]
 wrap_window_delegate! {
     struct SettingsWindowDelegate {}
 
@@ -6889,6 +6994,9 @@ wrap_browser_view_delegate! {
     }
 }
 
+// A Little Arbalete window on Linux and Windows, which CEF makes; on macOS, the native interface
+// does (open_little).
+#[cfg(not(target_os = "macos"))]
 wrap_window_delegate! {
     struct LittleWindowDelegate {
         id: u32,
@@ -6935,17 +7043,9 @@ wrap_window_delegate! {
             }));
             window.center_window(Some(&LITTLE_SIZE));
             window.show();
-            // The native bar, which asks nothing once ready, unlike the web one.
-            #[cfg(target_os = "macos")]
-            {
-                crate::native::little(self.id, Some(window.window_handle()));
-                send_little(self.id);
-            }
         }
 
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
-            #[cfg(target_os = "macos")]
-            crate::native::little(self.id, None);
             LITTLE.with_borrow_mut(|littles| littles.retain(|little| little.id != self.id));
         }
 
@@ -6981,9 +7081,11 @@ wrap_window_delegate! {
     }
 }
 
+/// Not on macOS, whose windows hold pages in native views.
 /// An Alloy browser view, as wide as `width` says when the layout asks, or sized by the layout or
 /// its overlay's bounds for 0 (no_width). Without a request context, it uses the global one,
 /// which only the app's own UI uses.
+#[cfg(not(target_os = "macos"))]
 fn browser_view(
     client: Client,
     url: &str,
@@ -6995,6 +7097,7 @@ fn browser_view(
 }
 
 /// A browser view as `browser_view` makes, `height` tall when a layout stacks it.
+#[cfg(not(target_os = "macos"))]
 fn browser_view_sized(
     mut client: Client,
     url: &str,
@@ -7879,7 +7982,12 @@ wrap_life_span_handler! {
         /// A page closing leaves its container, which CEF would otherwise close the window of.
         fn do_close(&self, browser: Option<&mut Browser>) -> i32 {
             if self.profile.is_none() {
-                // Peek's page leaves its card; a Little Arbalete window's closes it.
+                // A Little Arbalete window's page closes its window; Peek's leaves its card.
+                #[cfg(target_os = "macos")]
+                if let Some(id) = browser.as_deref().and_then(little_of) {
+                    post_task(ThreadId::UI, Some(&mut RemoveLittle::new(id)));
+                    return 1;
+                }
                 let Some((id, window)) = PEEK_CLOSING.get() else { return 0 };
                 if browser.is_none_or(|browser| browser.identifier() != id) {
                     return 0;
