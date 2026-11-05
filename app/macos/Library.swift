@@ -161,8 +161,6 @@ struct LibraryView: View {
             }
             .padding(.trailing, 1)
             VStack(alignment: .leading, spacing: 10) {
-                // Like Arc's, the field 9 points from the window's top.
-                Spacer().frame(height: 9)
                 if !model.section.wide {
                     LibrarySearch(model: model)
                 }
@@ -183,6 +181,8 @@ struct LibraryView: View {
                     .scrollIndicators(.never)
                 }
             }
+            // Every section's top on the page's card's, 10 points from the window's.
+            .padding(.top, 10)
             .padding(.leading, model.section == .spaces ? 0 : 7)
             .padding(.trailing, 8)
         }
