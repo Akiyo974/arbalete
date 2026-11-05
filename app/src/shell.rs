@@ -3531,14 +3531,13 @@ fn hide_find(browser: Option<&Browser>) {
     }
 }
 
-/// An extension's popup, above the page.
+/// An extension's popup, in a window of its own.
 struct ExtensionPopup {
     /// Its extension's id.
     id: String,
-    window: Window,
-    view: BrowserView,
-    /// Where the site controls' button is on the screen, which the window opens under; without
-    /// one, as for an options page, it opens over the main window's middle.
+    browser: Browser,
+    /// Where the site controls' button is in the main window, which the popup opens under;
+    /// without one, as for an options page, it opens over the main window's middle.
     button: Option<Rect>,
 }
 
@@ -3758,30 +3757,55 @@ fn open_extension_popup(id: &str) {
         return;
     }
     let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
-    let (Some(url), Some(main), Some(button)) = (
+    let (Some(url), Some(button)) = (
         extensions::popup_url(profile, id),
-        win()
-            .window
-            .with_borrow(|window| window.as_ref().map(|w| w.bounds())),
         win().site_button.with_borrow(Clone::clone),
     ) else {
         return;
-    };
-    // The main window has no frame: its coordinates are its content's.
-    let button = Rect {
-        x: main.x + button.x,
-        y: main.y + button.y,
-        ..button
     };
     open_extension_window(profile, id.to_string(), url, Some(button));
 }
 
 /// Opens an extension's page in a small window of its own, like its popup's (PopupClient): under
-/// `button`, or without one over the main window's middle.
+/// `button`, or without one over the main window's middle, once its page has a size
+/// (show_extension_popup).
 fn open_extension_window(profile: ProfileId, id: String, url: String, button: Option<Rect>) {
-    window_create_top_level(Some(&mut PopupWindowDelegate::new(
-        profile, id, url, button,
-    )));
+    #[cfg(target_os = "macos")]
+    let info = WindowInfo {
+        parent_view: match crate::native::extension_popup_view(win().id) {
+            Some(view) => view,
+            None => return,
+        },
+        // The page's own size, once it has one.
+        bounds: Rect {
+            x: 0,
+            y: 0,
+            width: 25,
+            height: 25,
+        },
+        runtime_style: RuntimeStyle::ALLOY,
+        ..Default::default()
+    };
+    #[cfg(not(target_os = "macos"))]
+    let info = WindowInfo {
+        runtime_style: RuntimeStyle::ALLOY,
+        ..Default::default()
+    };
+    let Some(browser) = browser_host_create_browser_sync(
+        Some(&info),
+        Some(&mut PopupClient::new(profile, url)),
+        Some(&CefString::from("about:blank")),
+        Some(&BrowserSettings::default()),
+        None,
+        profile_context(profile).as_mut(),
+    ) else {
+        return;
+    };
+    win().extension_popup.set(Some(ExtensionPopup {
+        id,
+        browser,
+        button,
+    }));
 }
 
 /// Opens an extension's options page: in a tab when it asks for one, like Chrome; otherwise, as
@@ -3808,89 +3832,30 @@ fn open_extension_options(id: &str) {
 
 /// Shows the extension popup's window once its page has a size, under the button, with the focus.
 fn show_extension_popup(size: &Size) {
-    win().extension_popup.with_borrow(|popup| {
-        let Some(popup) = popup else { return };
-        // The window's bounds hold its title bar too.
-        let bar = popup.window.bounds().height - popup.view.bounds().height;
-        let (width, height) = (size.width, size.height + bar);
-        let (x, y) = match &popup.button {
-            Some(button) => (
-                button.x + button.width / 2 - width / 2,
-                button.y + button.height + PANEL_GAP,
-            ),
-            None => {
-                let main = win()
-                    .window
-                    .with_borrow(|w| w.as_ref().map(|w| w.bounds()))
-                    .unwrap_or_default();
-                (
-                    main.x + (main.width - width) / 2,
-                    main.y + (main.height - height) / 3,
-                )
-            }
-        };
-        popup.window.set_bounds(Some(&Rect {
-            x,
-            y,
-            width,
-            height,
-        }));
-        popup.window.show();
-        popup.view.request_focus();
-    });
+    let Some((browser, button)) = win().extension_popup.with_borrow(|popup| {
+        let popup = popup.as_ref()?;
+        Some((popup.browser.clone(), popup.button.clone()))
+    }) else {
+        return;
+    };
+    #[cfg(target_os = "macos")]
+    crate::native::extension_popup_show(win().id, button.as_ref(), size);
+    #[cfg(not(target_os = "macos"))]
+    let _ = button;
+    if let Some(host) = browser.host() {
+        host.set_focus(1);
+    }
 }
 
-/// Closes the extension popup's window, if one is open.
+/// Closes the extension popup, if one is open: its window goes as its page closes
+/// (PopupLifeSpan's do_close).
 pub fn close_extension_popup() {
-    if let Some(window) = win()
-        .extension_popup
-        .with_borrow(|popup| Some(popup.as_ref()?.window.clone()))
-    {
-        window.close();
-    }
-}
-
-wrap_window_delegate! {
-    struct PopupWindowDelegate {
-        profile: ProfileId,
-        id: String,
-        url: String,
-        button: Option<Rect>,
-    }
-
-    impl ViewDelegate {
-        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
-            Size { width: 1, height: 1 }
-        }
-    }
-
-    impl PanelDelegate {}
-
-    impl WindowDelegate {
-        fn on_window_created(&self, window: Option<&mut Window>) {
-            let window = window.expect("window").clone();
-            window.set_to_fill_layout();
-            let client = PopupClient::new(self.profile, self.url.clone());
-            let view = browser_view(client, "about:blank", no_width, profile_context(self.profile).as_mut());
-            window.add_child_view(Some(&mut View::from(&view)));
-            win().extension_popup.set(Some(ExtensionPopup { id: self.id.clone(), window, view, button: self.button.clone() }));
-        }
-
-        fn on_window_destroyed(&self, _window: Option<&mut Window>) {
-            win().extension_popup.set(None);
-            extensions::popup_closed();
-        }
-
-        // Its title bar has the window buttons, like Arc's: close, and minimize.
-        fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 { 1 }
-        fn can_close(&self, _window: Option<&mut Window>) -> i32 { 1 }
-        fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 1 }
-        fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 0 }
-        fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 0 }
-
-        fn window_runtime_style(&self) -> RuntimeStyle {
-            RuntimeStyle::ALLOY
-        }
+    let Some(popup) = win().extension_popup.take() else {
+        return;
+    };
+    extensions::popup_closed();
+    if let Some(host) = popup.browser.host() {
+        host.close_browser(1);
     }
 }
 
@@ -7991,8 +7956,43 @@ wrap_life_span_handler! {
             OPEN_BROWSERS.set(OPEN_BROWSERS.get() + 1);
         }
 
+        /// Its window goes with it, which CEF would otherwise close through the window's own
+        /// close button, asking the app to close the popup again.
+        fn do_close(&self, browser: Option<&mut Browser>) -> i32 {
+            let Some(browser) = browser else { return 0 };
+            let view = browser.host().map(|host| host.window_handle() as usize).unwrap_or(0);
+            post_task(
+                ThreadId::UI,
+                Some(&mut RemoveExtensionPopup::new(browser.identifier(), view)),
+            );
+            1
+        }
+
         fn on_before_close(&self, _browser: Option<&mut Browser>) {
             browser_closed();
+        }
+    }
+}
+
+wrap_task! {
+    struct RemoveExtensionPopup {
+        browser: i32,
+        view: usize,
+    }
+
+    impl Task {
+        /// Takes a closing extension popup's window away, which destroys its browser; the app
+        /// forgets it, when the extension closed it itself.
+        fn execute(&self) {
+            let closing = win().extension_popup.with_borrow(|popup| {
+                popup.as_ref().is_some_and(|popup| popup.browser.identifier() == self.browser)
+            });
+            if closing {
+                win().extension_popup.set(None);
+                extensions::popup_closed();
+            }
+            #[cfg(target_os = "macos")]
+            crate::native::extension_popup_closed(self.view as *mut std::ffi::c_void);
         }
     }
 }

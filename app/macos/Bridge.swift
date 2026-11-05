@@ -542,11 +542,14 @@ final class NativeWindow {
     /// The panels above the page, by the name of the web view they stand for, like "overlay".
     var surfaces: [String: Surface] = [:]
     private var observers: [NSObjectProtocol] = []
+    /// The main window it stands for.
+    private(set) weak var window: NSWindow?
     /// Closes the Command Bar on a click out of it (closeCommandBar).
     private var clicks: Any?
 
     init(window: NSWindow, content: NSView, app: AppModel) {
         model = app
+        self.window = window
         window.isOpaque = false
         window.backgroundColor = .clear
         window.titlebarAppearsTransparent = true

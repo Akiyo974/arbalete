@@ -2,7 +2,7 @@
 //! name and JSON detail, and sends the same commands (app/src/command.rs).
 
 use crate::command::Command;
-use cef::Rect;
+use cef::{Rect, Size};
 use std::ffi::{CStr, CString, c_char, c_void};
 
 unsafe extern "C" {
@@ -45,6 +45,19 @@ unsafe extern "C" {
     fn arbalete_ui_peek(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
     fn arbalete_ui_peek_view(window: u32) -> *mut std::ffi::c_void;
     fn arbalete_ui_peek_closed(window: u32);
+    fn arbalete_ui_extension_popup_view(window: u32) -> *mut std::ffi::c_void;
+    #[allow(clippy::too_many_arguments)]
+    fn arbalete_ui_extension_popup_show(
+        window: u32,
+        button: bool,
+        x: f64,
+        y: f64,
+        button_width: f64,
+        button_height: f64,
+        width: f64,
+        height: f64,
+    );
+    fn arbalete_ui_extension_popup_closed(view: *mut std::ffi::c_void);
     fn arbalete_ui_peek_bar(
         window: u32,
         url: *const c_char,
@@ -282,6 +295,40 @@ pub fn peek_bar(window: u32, url: &str, color: &str, back: bool, forward: bool, 
     let color = CString::new(color).unwrap_or_default();
     // SAFETY: plain values and strings that outlive the call.
     unsafe { arbalete_ui_peek_bar(window, url.as_ptr(), color.as_ptr(), back, forward, loading) };
+}
+
+/// A new extension popup's view, a window of its own for the window `window`, hidden until
+/// extension_popup_show: CEF makes the page's browser in it.
+pub fn extension_popup_view(window: u32) -> Option<*mut std::ffi::c_void> {
+    // SAFETY: a plain value; the view lives until extension_popup_closed.
+    let view = unsafe { arbalete_ui_extension_popup_view(window) };
+    (!view.is_null()).then_some(view)
+}
+
+/// Shows the extension popup at its page's `size`: under the site controls' `button`, in the
+/// window `window`'s points from its top left corner, or without one over the window's middle.
+pub fn extension_popup_show(window: u32, button: Option<&Rect>, size: &Size) {
+    let rect = button.cloned().unwrap_or_default();
+    // SAFETY: plain values.
+    unsafe {
+        arbalete_ui_extension_popup_show(
+            window,
+            button.is_some(),
+            rect.x.into(),
+            rect.y.into(),
+            rect.width.into(),
+            rect.height.into(),
+            size.width.into(),
+            size.height.into(),
+        )
+    };
+}
+
+/// Takes away the extension popup whose page's view is `view`, its browser closing, which
+/// destroys it.
+pub fn extension_popup_closed(view: *mut std::ffi::c_void) {
+    // SAFETY: the interface only compares the address.
+    unsafe { arbalete_ui_extension_popup_closed(view) };
 }
 
 /// Takes Peek's page's view out of the window `window`, its browser closing, which destroys it.
