@@ -94,15 +94,14 @@ unsafe extern "C" {
         forward: bool,
         loading: bool,
     );
-    fn arbalete_ui_capture(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
-    fn arbalete_ui_note(window: u32, text: *const c_char, x: f64, y: f64);
-    fn arbalete_ui_copy_png(
+    fn arbalete_ui_captured(
+        window: u32,
         base64: *const c_char,
+        area: bool,
         x: f64,
         y: f64,
         width: f64,
         height: f64,
-        viewport: f64,
     );
     fn arbalete_ui_card(
         window: u32,
@@ -507,45 +506,20 @@ pub fn peek_closed(window: u32) {
     unsafe { arbalete_ui_peek_closed(window) };
 }
 
-/// Shows the veil a drag picks the part of the page to capture on, over the page at `frame`, in
-/// the window's points from its top left corner, or takes it away without a frame.
-pub fn capture(window: u32, frame: Option<Rect>) {
-    let frame = frame.unwrap_or_default();
-    // SAFETY: plain values.
+/// Gives the interface a capture of the page at `frame`, in the window's points from its top left
+/// corner, a PNG picture in base64: to frame on a color, or `area`, to pick a part of.
+pub fn captured(window: u32, base64: &str, area: bool, frame: &Rect) {
+    let base64 = CString::new(base64).unwrap_or_default();
+    // SAFETY: a C string, which the call reads before returning, and plain values.
     unsafe {
-        arbalete_ui_capture(
+        arbalete_ui_captured(
             window,
-            frame.width > 0,
+            base64.as_ptr(),
+            area,
             frame.x.into(),
             frame.y.into(),
             frame.width.into(),
             frame.height.into(),
-        )
-    };
-}
-
-/// Shows a short note, like a capture copied, its top right corner at `x` and `y`, in the
-/// window's points from its top left corner.
-pub fn note(window: u32, text: &str, x: i32, y: i32) {
-    let text = CString::new(text).unwrap_or_default();
-    // SAFETY: a C string, which the call reads before returning.
-    unsafe { arbalete_ui_note(window, text.as_ptr(), x.into(), y.into()) };
-}
-
-/// Puts a PNG picture, in base64, on the clipboard, like a page's capture: only the part `area`
-/// of it if given, in CSS pixels of a page `viewport` wide, which the picture shows the width of.
-pub fn copy_png(base64: &str, area: Option<(i32, i32, i32, i32)>, viewport: f64) {
-    let base64 = CString::new(base64).unwrap_or_default();
-    let (x, y, width, height) = area.unwrap_or_default();
-    // SAFETY: a C string, which the call reads before returning, and plain values.
-    unsafe {
-        arbalete_ui_copy_png(
-            base64.as_ptr(),
-            x.into(),
-            y.into(),
-            width.into(),
-            height.into(),
-            if area.is_some() { viewport } else { 0.0 },
         )
     };
 }

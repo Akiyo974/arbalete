@@ -114,10 +114,10 @@ pub enum Command {
     /// Shows the page's developer tools on a panel, from the developer bar:
     /// `page/devtools/<console, network or elements>`.
     DevToolsPanel(&'static str),
-    /// Copies a picture of the shown page, from the developer bar: `page/capture`; or shows the
-    /// veil a drag picks a part of it on, `page/capture/area`, then copies that part, in the
-    /// page's points: `page/capture/area/<x>/<y>/<width>/<height>`.
-    Capture(Option<(i32, i32, i32, i32)>),
+    /// Captures the shown page, like Arc's: framed on a color, from the developer bar,
+    /// `page/capture`; or to pick a part of, `page/capture/area`, which the interface then copies,
+    /// saves or edits.
+    Capture,
     CaptureArea,
     /// Shows the find bar above the page, from the menu.
     ShowFind,
@@ -584,7 +584,7 @@ impl Command {
             "page/devtools/console" => Some(Self::DevToolsPanel("console")),
             "page/devtools/network" => Some(Self::DevToolsPanel("network")),
             "page/devtools/elements" => Some(Self::DevToolsPanel("elements")),
-            "page/capture" => Some(Self::Capture(None)),
+            "page/capture" => Some(Self::Capture),
             "page/capture/area" => Some(Self::CaptureArea),
             "settings/ready" => Some(Self::SettingsReady),
             "settings/hide" => Some(Self::HideSettings),
@@ -930,14 +930,6 @@ impl Command {
                 }
                 if let Some(id) = path.strip_prefix("separate/") {
                     return serde_json::from_str(id).ok().map(Self::Separate);
-                }
-                if let Some(args) = path.strip_prefix("page/capture/area/") {
-                    let numbers: Vec<i32> =
-                        args.split('/').filter_map(|n| n.parse().ok()).collect();
-                    return match numbers[..] {
-                        [x, y, width, height] => Some(Self::Capture(Some((x, y, width, height)))),
-                        _ => None,
-                    };
                 }
                 if let Some(args) = path.strip_prefix("pane/resize/") {
                     let (index, point) = args.split_once('/')?;
@@ -1861,12 +1853,11 @@ mod tests {
             Command::parse("page/devtools/network"),
             Some(Command::DevToolsPanel("network"))
         );
-        assert_eq!(Command::parse("page/capture"), Some(Command::Capture(None)));
+        assert_eq!(Command::parse("page/capture"), Some(Command::Capture));
         assert_eq!(
-            Command::parse("page/capture/area/1/2/30/40"),
-            Some(Command::Capture(Some((1, 2, 30, 40))))
+            Command::parse("page/capture/area"),
+            Some(Command::CaptureArea)
         );
-        assert_eq!(Command::parse("page/capture/area/1/2"), None);
         assert_eq!(
             Command::parse("settings/ready"),
             Some(Command::SettingsReady)

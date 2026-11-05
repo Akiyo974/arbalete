@@ -318,7 +318,14 @@ struct DeveloperBar: View {
             tool("link", "Copy URL") { model.run("menu/choose/site/any/copy-link") }
             separator
             tool("rectangle.dashed", "Capture Part of the Page") { model.run("page/capture/area") }
-            tool("camera", "Capture the Page") { model.run("page/capture") }
+            // Its panel framing the page shows under it.
+            GeometryReader { geometry in
+                tool("camera", "Capture the Page") {
+                    nativeWindows[model.window]?.capture.button = geometry.frame(in: .global)
+                    model.run("page/capture")
+                }
+            }
+            .frame(width: 28, height: 28)
             separator
             tool("apple.terminal", "Console") { model.run("page/devtools/console") }
             tool("network", "Network") { model.run("page/devtools/network") }
