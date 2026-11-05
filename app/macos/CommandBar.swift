@@ -166,13 +166,27 @@ final class CommandBar: ObservableObject {
     /// The field, to focus it once the bar shows.
     weak var field: NSTextField?
     private let app: AppModel
+    /// The Little Arbalete window it opens what is picked in, while it is a Little Arbalete
+    /// window's, like Little Arc's: a new one, without an id, or that window's page. Without,
+    /// it is its window's, opening a tab.
+    let little: Int??
+    /// Fits a Little Arbalete window's bar to its height; the app fits its window's.
+    var fit: (CGFloat) -> Void = { _ in }
+    /// Takes a Little Arbalete window's bar away.
+    var dismiss: () -> Void = {}
+    /// Whether a Little Arbalete window's bar shows.
+    var littleShown = false
 
     /// Its panel shows above its window's page.
-    var isShown: Bool { nativeWindows[app.window]?.surfaces["overlay"]?.isShown == true }
+    var isShown: Bool {
+        little == nil
+            ? nativeWindows[app.window]?.surfaces["overlay"]?.isShown == true : littleShown
+    }
     private var height: CGFloat = 0
 
-    init(app: AppModel) {
+    init(app: AppModel, little: Int?? = nil) {
         self.app = app
+        self.little = little
     }
 
     func handle(_ name: String, _ detail: Data) {
@@ -249,10 +263,13 @@ final class CommandBar: ObservableObject {
             .filter { $0.lowercased() != typed.lowercased() }
             .prefix(suggestionCount)
             .map { CommandRow.go(url: search.url + percentEncoded($0), title: $0, search: true) }
+        // A Little Arbalete window's opens pages only, like Little Arc's.
+        let actions = little == nil ? matchingActions(typed) : []
+        let tabs = little == nil ? results?.tabs ?? [] : []
         return [go]
-            + matchingActions(typed).map { .action(command: $0.command, title: $0.title) }
+            + actions.map { .action(command: $0.command, title: $0.title) }
             + suggestions
-            + (results?.tabs ?? []).map { .tab($0) }
+            + tabs.map { .tab($0) }
             + (results?.pages ?? []).map(CommandRow.init)
     }
 
@@ -269,7 +286,7 @@ final class CommandBar: ObservableObject {
             }
         if height != self.height {
             self.height = height
-            app.run("overlay/height/\(Int(height))")
+            if little == nil { app.run("overlay/height/\(Int(height))") } else { fit(height) }
         }
     }
 
@@ -277,7 +294,7 @@ final class CommandBar: ObservableObject {
         completing = !deleting && typed.count > text.count
         text = typed
         picked = 0
-        app.run("overlay/search/\(percentEncoded(typed))")
+        app.run("\(little == nil ? "overlay" : "little")/search/\(percentEncoded(typed))")
         showCompletion()
         sendHeight()
     }
@@ -315,7 +332,16 @@ final class CommandBar: ObservableObject {
             app.run("overlay/hide")
             app.run(command)
         case .go(let url, _, _), .page(let url, _, _):
-            app.run("\(editing ? "navigate" : "open")/\(percentEncoded(url))")
+            switch little {
+            case .some(.some(let id)):
+                app.run("little/\(id)/navigate/\(percentEncoded(url))")
+                hide()
+            case .some(.none):
+                app.run("little/new/\(percentEncoded(url))")
+                hide()
+            case .none:
+                app.run("\(editing ? "navigate" : "open")/\(percentEncoded(url))")
+            }
         }
     }
 
@@ -325,7 +351,16 @@ final class CommandBar: ObservableObject {
     }
 
     func hide() {
-        app.run("overlay/hide")
+        if little == nil { app.run("overlay/hide") } else { dismiss() }
+    }
+
+    /// Shows a Little Arbalete window's bar holding `url`, or empty, like the app shows its
+    /// window's: with the sites visited most until something is typed.
+    func showLittle(url: String?, search engine: SearchEngine) {
+        var show: [String: Any] = ["search": ["name": engine.name, "url": engine.url]]
+        if let url { show["url"] = url }
+        handle("arbalete:show", (try? JSONSerialization.data(withJSONObject: show)) ?? Data())
+        app.run("little/search/\(percentEncoded(text))")
     }
 }
 

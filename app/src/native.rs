@@ -32,6 +32,7 @@ unsafe extern "C" {
     fn arbalete_ui_open_little(id: u32) -> *mut c_void;
     fn arbalete_ui_little_closed(id: u32);
     fn arbalete_ui_focused_little() -> i64;
+    fn arbalete_ui_little_bar();
     fn arbalete_ui_settings_focused() -> bool;
     fn arbalete_ui_make_default_browser();
     fn arbalete_ui_split(window: u32, stacked: bool, frames: *const f64, count: usize);
@@ -305,6 +306,12 @@ pub fn open_little(id: u32) -> Option<*mut c_void> {
 pub fn little_closed(id: u32) {
     // SAFETY: a plain value.
     unsafe { arbalete_ui_little_closed(id) };
+}
+
+/// Shows the Command Bar that opens a Little Arbalete window, like Little Arc's.
+pub fn little_bar() {
+    // SAFETY: no arguments.
+    unsafe { arbalete_ui_little_bar() };
 }
 
 /// The Little Arbalete window that has the keyboard, if any.

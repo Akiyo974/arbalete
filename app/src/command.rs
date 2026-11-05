@@ -218,9 +218,12 @@ pub enum Command {
     ToggleSidebar,
     /// Shows the bar above the page, or hides it: `toolbar/toggle`.
     ToggleToolbar,
-    /// Opens a Little Arbalete window, empty, from the menu, or on a link another app asks to
-    /// open: `little/new` or `little/new/<percent-encoded url>`.
+    /// Opens a Little Arbalete window on a link another app asks to open, or the Command Bar
+    /// that opens one, from the menu: `little/new/<percent-encoded url>` or `little/new`.
     NewLittle(Option<String>),
+    /// Asks for the results of the Command Bar opening a Little Arbalete window, for a text:
+    /// `little/search/<percent-encoded text>`.
+    SearchLittle(String),
     /// Opens another window, on the same Space, without a tab: `window/new`.
     NewWindow,
     /// Opens an incognito window, whose browsing leaves nothing behind: `window/incognito`.
@@ -1004,6 +1007,9 @@ impl Command {
                 }
                 if let Some(url) = path.strip_prefix("little/new/") {
                     return percent_decode(url).map(|url| Self::NewLittle(Some(url)));
+                }
+                if let Some(text) = path.strip_prefix("little/search/") {
+                    return percent_decode(text).map(Self::SearchLittle);
                 }
                 if let Some((id, action)) =
                     path.strip_prefix("little/").and_then(|r| r.split_once('/'))
@@ -1792,6 +1798,10 @@ mod tests {
             Some(Command::NewIncognitoWindow)
         );
         assert_eq!(Command::parse("little/new"), Some(Command::NewLittle(None)));
+        assert_eq!(
+            Command::parse("little/search/caf%C3%A9"),
+            Some(Command::SearchLittle("café".into()))
+        );
         assert_eq!(
             Command::parse("little/new/https%3A%2F%2Fexample.com%2F"),
             Some(Command::NewLittle(Some("https://example.com/".into())))

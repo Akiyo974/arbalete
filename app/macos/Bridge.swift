@@ -503,9 +503,12 @@ let windowLightsSize = NSSize(
 
 /// Places the window's buttons like Arc's: centered `windowButtonsCenter` below its top, their
 /// titlebar grown to twice that, or centered in a titlebar `height` tall; the first circle
-/// `windowButtonsLeading` from the left edge.
+/// `windowButtonsLeading` from the left edge, or `leading`.
 @MainActor
-func centerWindowButtons(_ window: NSWindow, height: CGFloat = windowButtonsCenter * 2) {
+func centerWindowButtons(
+    _ window: NSWindow, height: CGFloat = windowButtonsCenter * 2,
+    leading: CGFloat = windowButtonsLeading
+) {
     guard let close = window.standardWindowButton(.closeButton), let bar = close.superview,
         let container = bar.superview
     else { return }
@@ -523,7 +526,7 @@ func centerWindowButtons(_ window: NSWindow, height: CGFloat = windowButtonsCent
             button.setFrameSize(NSSize(width: windowButtonsCircle, height: windowButtonsCircle))
             button.setBoundsSize(natural)
         }
-        let x = windowButtonsLeading + CGFloat(index) * windowButtonsSpacing
+        let x = leading + CGFloat(index) * windowButtonsSpacing
         button.setFrameOrigin(NSPoint(x: x, y: (height - windowButtonsCircle) / 2))
     }
 }
@@ -695,6 +698,8 @@ public func event(
         switch surface {
         case "settings":
             settingsModel?.handle(name, detail)
+        case "little":
+            littleCommandBar?.handle(name, detail)
         case let surface where surface.hasPrefix("little/"):
             if let id = Int(surface.dropFirst("little/".count)), let bar = littles[id]?.bar,
                 name == "arbalete:little"

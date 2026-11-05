@@ -1386,6 +1386,15 @@ fn download_command(action: DownloadAction, id: u32) {
     }
 }
 
+/// Gives one of the native interface's surfaces in the window, by name, like the Command Bar's,
+/// "overlay", an event, given as the JavaScript a web page would dispatch.
+fn send_surface(surface: &str, event: &str) {
+    #[cfg(target_os = "macos")]
+    crate::native::event(win().id, surface, event);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (surface, event);
+}
+
 /// Gives the native interface's surface standing for one of the window's places, like the
 /// sidebar's, an event, given as the JavaScript a web page would dispatch.
 fn dispatch<T>(view: &RefCell<Option<T>>, event: &str) {
@@ -1471,7 +1480,7 @@ fn open_overlay(visible: bool, tab: Option<(String, Option<String>)>) {
         );
         // Like Arc's, an empty bar offers the sites visited most.
         if empty {
-            search_overlay("");
+            search_overlay("", "overlay");
         }
     }
     if !visible {
@@ -1590,7 +1599,7 @@ fn place_overlay(height: i32) {
 
 /// Sends the Command Bar the open tabs, in every Space and the favorites, then the displayed
 /// Space's profile history pages, best first, whose address or title holds `text`.
-fn search_overlay(text: &str) {
+fn search_overlay(text: &str, surface: &'static str) {
     let wanted = text.trim().to_lowercase();
     let (tabs, profile) = STATE.with_borrow(|state| {
         let sidebar = &state.sidebar;
@@ -1656,17 +1665,17 @@ fn search_overlay(text: &str) {
         })
         .collect();
     let detail = json!({ "text": text, "tabs": tabs, "pages": pages });
-    dispatch(
-        &win().overlay_view,
+    send_surface(
+        surface,
         &format!(r#"new CustomEvent("arbalete:results", {{ detail: {detail} }})"#),
     );
-    suggest(profile, text);
+    suggest(profile, text, surface);
 }
 
 /// Asks the displayed Space's profile's search engine for searches completing `text`, unless the
 /// profile asks for none: the Command Bar shows them once they come (SuggestionsClient). An
 /// address typed is not sent, nor any cookie.
-fn suggest(profile: ProfileId, text: &str) {
+fn suggest(profile: ProfileId, text: &str, surface: &'static str) {
     let typed = text.trim();
     let engine = STATE.with_borrow(|state| {
         let profiles = state.sidebar.profiles();
@@ -1685,13 +1694,14 @@ fn suggest(profile: ProfileId, text: &str) {
     let url = format!("{base}{}", arbalete_core::search::encode(typed));
     request.set_url(Some(&CefString::from(url.as_str())));
     request.set_method(Some(&CefString::from("GET")));
-    let mut client = SuggestionsClient::new(text.to_string(), std::rc::Rc::default());
+    let mut client = SuggestionsClient::new(text.to_string(), surface, std::rc::Rc::default());
     let _ = urlrequest_create(Some(&mut request.clone()), Some(&mut client), None);
 }
 
 wrap_urlrequest_client! {
     struct SuggestionsClient {
         text: String,
+        surface: &'static str,
         body: std::rc::Rc<RefCell<Vec<u8>>>,
     }
 
@@ -1707,8 +1717,8 @@ wrap_urlrequest_client! {
         fn on_request_complete(&self, _request: Option<&mut Urlrequest>) {
             let body = String::from_utf8_lossy(&self.body.borrow()).into_owned();
             let detail = json!({ "text": self.text, "suggestions": arbalete_core::search::suggestions(&body) });
-            dispatch(
-                &win().overlay_view,
+            send_surface(
+                self.surface,
                 &format!(r#"new CustomEvent("arbalete:suggestions", {{ detail: {detail} }})"#),
             );
         }
@@ -2955,24 +2965,31 @@ fn little_changed(browser: &mut Browser, change: impl FnOnce(&mut Little)) {
     }
 }
 
-/// Sends a Little Arbalete window's bar its page's address and title, its profile's search
-/// engine, and the Space its page would move into.
+/// Sends a Little Arbalete window's bar its page's address and title, its profile's name and
+/// search engine, and the Space its page would move into.
 fn send_little(id: u32) {
     let found = LITTLE.with_borrow(|littles| {
         let little = littles.iter().find(|l| l.id == id)?;
-        let (space, engine) = STATE.with_borrow(|state| {
+        let (space, engine, name) = STATE.with_borrow(|state| {
             let sidebar = &state.sidebar;
             let space = sidebar.displayed();
             let profile = sidebar.profiles().iter().find(|p| p.id == little.profile);
             let engine = profile.map(|p| p.search_engine).unwrap_or_default();
+            let name = profile.map(|p| p.name.clone()).unwrap_or_default();
             (
                 json!({ "title": space.title, "emoji": space.emoji }),
                 engine,
+                name,
             )
         });
         let search = json!({ "name": engine.name(), "url": engine.url() });
-        let detail =
-            json!({ "url": little.url, "title": little.title, "space": space, "search": search });
+        let detail = json!({
+            "url": little.url,
+            "title": little.title,
+            "profile": name,
+            "space": space,
+            "search": search,
+        });
         Some(detail)
     });
     if let Some(detail) = found {
@@ -6141,7 +6158,8 @@ fn run_command(command: Command) {
         (Command::ShowOverlay, _) => show_overlay(true),
         (Command::HideOverlay, _) => show_overlay(false),
         (Command::EditUrl, _) => edit_url(),
-        (Command::SearchOverlay(text), _) => search_overlay(&text),
+        (Command::SearchOverlay(text), _) => search_overlay(&text, "overlay"),
+        (Command::SearchLittle(text), _) => search_overlay(&text, "little"),
         (Command::OverlayHeight(height), _) => {
             place_overlay(i32::try_from(height).unwrap_or(OVERLAY_ROW));
             round_overlay();
@@ -6329,6 +6347,9 @@ fn run_command(command: Command) {
         }
         (Command::ShowSettings, _) => show_settings(),
         (Command::ToggleToolbar, _) => toggle_toolbar(),
+        // Like Arc's, the menu opens a Command Bar of its own, which opens the window.
+        #[cfg(target_os = "macos")]
+        (Command::NewLittle(None), _) => crate::native::little_bar(),
         (Command::NewLittle(url), _) => open_link(url),
         (Command::NewWindow, _) => new_window(),
         (Command::NewIncognitoWindow, _) => new_incognito_window(),
