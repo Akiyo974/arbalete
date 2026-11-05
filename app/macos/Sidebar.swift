@@ -106,8 +106,9 @@ struct SidebarToolbar: View {
         .frame(height: 40)
         // Past the window's buttons, which take their own clicks.
         .background(WindowDragArea(doubleClicks: true))
-        // Past the window's buttons, the toggle's symbol 5 points into its button.
-        .padding(.leading, windowButtonsEnd - Measure.inset - 5)
+        // Past the window's buttons, the toggle's symbol 5 points into its button; in full
+        // screen, without them, like Arc's, 20 points from the sidebar's edge.
+        .padding(.leading, (model.fullScreen ? 20 : windowButtonsEnd) - Measure.inset - 5)
         // Like Arc's, floating, it shows the window's buttons, which it covers, where they stand.
         .overlay(alignment: .leading) {
             if model.sidebarFloating {

@@ -86,6 +86,8 @@ final class AppModel: ObservableObject {
     let window: UInt32
     /// Whether the sidebar floats above the page, which then shows the window's buttons.
     @Published var sidebarFloating = false
+    /// Whether the window shows in full screen, without its buttons.
+    @Published var fullScreen = false
     /// Whether the sidebar is docked, which keeps its toggle from the bar above the page.
     @Published var sidebarDocked = true
     /// The split's pages shown, from the card's top left corner, each loading above its own.
@@ -563,6 +565,16 @@ final class NativeWindow {
                 [weak window] _ in
                 MainActor.assumeIsolated { window.map(centerWindowButtons) }
             }
+        }
+        // As it starts going into full screen or out of it, the sidebar's toggle moving with it.
+        for (name, full) in [
+            (NSWindow.willEnterFullScreenNotification, true),
+            (NSWindow.willExitFullScreenNotification, false),
+        ] {
+            observers.append(
+                NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) {
+                    _ in MainActor.assumeIsolated { app.fullScreen = full }
+                })
         }
         backdrop = Backdrop(content: content, model: app)
         sidebar = SidebarHost(window: window, model: app)
