@@ -22,9 +22,9 @@ enum LibrarySection: String, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
-        case .media: "photo.on.rectangle"
+        case .media: "photo.on.rectangle.angled"
         case .downloads: "arrow.down.circle"
-        case .spaces: "rectangle.on.rectangle"
+        case .spaces: "rectangle.on.rectangle.angled"
         case .archive: "archivebox"
         }
     }
@@ -34,7 +34,7 @@ enum LibrarySection: String, CaseIterable, Identifiable {
         switch self {
         case .media: "photo.fill.on.rectangle.fill"
         case .downloads: "arrow.down.circle.fill"
-        case .spaces: "rectangle.fill.on.rectangle.fill"
+        case .spaces: "rectangle.fill.on.rectangle.angled.fill"
         case .archive: "archivebox.fill"
         }
     }
@@ -132,7 +132,7 @@ struct LibraryView: View {
                     } label: {
                         VStack(spacing: 9) {
                             Image(systemName: shown ? section.filledSymbol : section.symbol)
-                                .font(.system(size: 22))
+                                .font(.system(size: 22, weight: .medium))
                                 .foregroundStyle(shown ? model.accent : Ink.secondary)
                                 .frame(height: 26)
                             Text(section.label).font(.system(size: 11, weight: .bold))
