@@ -615,6 +615,17 @@ impl Sidebar {
         self.space(space).ok().map(|s| s.profile)
     }
 
+    /// What a window showing `space` with `tab` selected in it shows.
+    pub fn view_on(&self, space: SpaceId, tab: NodeId) -> View {
+        let mut view = self.view_showing(space);
+        for (id, selected) in &mut view.selected {
+            if *id == space {
+                *selected = Some(tab);
+            }
+        }
+        view
+    }
+
     /// What a window showing `space` shows: it, without a selected tab.
     pub fn view_showing(&self, space: SpaceId) -> View {
         let mut view = self.view();

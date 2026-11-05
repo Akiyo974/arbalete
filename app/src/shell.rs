@@ -525,10 +525,21 @@ fn new_window() {
 /// Opens an incognito window, like Arc's: on a Space of its own, in a profile of its own whose
 /// web data stays in memory, on the Command Bar.
 fn new_incognito_window() {
+    open_incognito_window(None);
+}
+
+/// Opens an incognito window as `new_incognito_window` does, on a tab showing `url` if any.
+fn open_incognito_window(url: Option<&str>) {
     let space = update_sidebar(Sidebar::open_incognito);
+    let tab = url
+        .map(|url| update_sidebar(|sidebar| sidebar.open_tab(space, url).expect("the new Space")));
     let (profile, view) = STATE.with_borrow(|state| {
         let profile = state.sidebar.profile_of_space(space).expect("its Space");
-        (profile, state.sidebar.view_showing(space))
+        let view = match tab {
+            Some(tab) => state.sidebar.view_on(space, tab),
+            None => state.sidebar.view_showing(space),
+        };
+        (profile, view)
     });
     let dir = std::env::temp_dir().join(format!(
         "arbalete-incognito-{}-{}",
@@ -536,7 +547,18 @@ fn new_incognito_window() {
         serde_json::to_string(&profile).expect("an id")
     ));
     INCOGNITO.with_borrow_mut(|incognito| incognito.insert(profile, dir));
-    open_window_in(view, true, Some(space));
+    open_window_in(view, tab.is_none(), Some(space));
+}
+
+/// Opens another window on a new tab of the displayed Space showing `url`, like Arc's Open Link
+/// in New Window.
+fn open_link_in_new_window(url: &str) {
+    let view = update_sidebar(|sidebar| {
+        let space = sidebar.displayed().id;
+        let tab = sidebar.open_tab(space, url).expect("the displayed Space");
+        sidebar.view_on(space, tab)
+    });
+    open_window(view, false);
 }
 
 /// Closes an incognito window's pages and forgets its Space, its profile and their web data, as
@@ -7757,6 +7779,9 @@ wrap_download_handler! {
                 callback.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 0);
                 return 1;
             }
+            // Save Link As… and Save Image As… ask where, from the Downloads folder.
+            let url = CefString::from(&item.original_url()).to_string();
+            let ask = SAVE_AS.with_borrow_mut(|urls| urls.remove(&url));
             let dir = crate::user_home().join("Downloads");
             if let Err(error) = std::fs::create_dir_all(&dir) {
                 eprintln!("cannot create the Downloads folder: {error}");
@@ -7767,7 +7792,7 @@ wrap_download_handler! {
                     path.exists() || downloads.iter().any(|download| download.path == path)
                 })
             });
-            callback.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 0);
+            callback.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), ask.into());
             let url = CefString::from(&item.url()).to_string();
             DOWNLOADS.with_borrow_mut(|list| {
                 let id = downloads::next_id(list);
@@ -7825,40 +7850,102 @@ wrap_download_handler! {
     }
 }
 
-/// The items Arbalete adds to a page's menu, numbered from the first id CEF leaves to apps.
+/// The items Arbalete adds to a page's menu, numbered from the first id CEF leaves to apps, like
+/// Arc's: Chromium's on a link, an image or selected text, and Arc's own.
 const OPEN_LINK: i32 = 26500;
-const COPY_LINK: i32 = OPEN_LINK + 1;
-const OPEN_IMAGE: i32 = OPEN_LINK + 2;
-const COPY_IMAGE: i32 = OPEN_LINK + 3;
-const INSPECT: i32 = OPEN_LINK + 4;
+const OPEN_LINK_WINDOW: i32 = OPEN_LINK + 1;
+const OPEN_LINK_SPLIT: i32 = OPEN_LINK + 2;
+const OPEN_LINK_LITTLE: i32 = OPEN_LINK + 3;
+const OPEN_LINK_INCOGNITO: i32 = OPEN_LINK + 4;
+const SAVE_LINK: i32 = OPEN_LINK + 5;
+const COPY_LINK: i32 = OPEN_LINK + 6;
+const OPEN_IMAGE: i32 = OPEN_LINK + 7;
+const SAVE_IMAGE: i32 = OPEN_LINK + 8;
+const COPY_IMAGE: i32 = OPEN_LINK + 9;
+const COPY_IMAGE_ADDRESS: i32 = OPEN_LINK + 10;
+const SEARCH_IMAGE: i32 = OPEN_LINK + 11;
+const SEARCH_SELECTION: i32 = OPEN_LINK + 12;
+const INSPECT: i32 = OPEN_LINK + 13;
 
-// Adds what a browser offers on a link or an image above Chromium's own items, and Inspect
-// Element below them.
+thread_local! {
+    /// The addresses Save Link As… or Save Image As… asked to download, which ask where.
+    static SAVE_AS: RefCell<HashSet<String>> = RefCell::default();
+}
+
+/// The search engine of the displayed Space's profile.
+fn displayed_search_engine() -> SearchEngine {
+    STATE.with_borrow(|state| {
+        let profile = state.sidebar.displayed().profile;
+        state
+            .sidebar
+            .profiles()
+            .iter()
+            .find(|p| p.id == profile)
+            .map(|p| p.search_engine)
+            .unwrap_or_default()
+    })
+}
+
+/// Selected text as a menu shows it: on one line, cut after 32 characters.
+fn quoted_selection(text: &str) -> String {
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    match text.char_indices().nth(32) {
+        Some((at, _)) => format!("{}…", &text[..at]),
+        None => text,
+    }
+}
+
+// Adds what Arc offers on a link, an image or selected text above Chromium's own items, and
+// Inspect below them.
 wrap_context_menu_handler! {
     struct ContentMenuHandler {}
 
     impl ContextMenuHandler {
         fn on_before_context_menu(&self, _browser: Option<&mut Browser>, _frame: Option<&mut Frame>, params: Option<&mut ContextMenuParams>, model: Option<&mut MenuModel>) {
             let (Some(params), Some(model)) = (params, model) else { return };
-            let mut items = Vec::new();
+            // Groups of items, separated.
+            let mut groups: Vec<Vec<(i32, String)>> = Vec::new();
+            let item = |id: i32, label: &str| (id, label.to_string());
             if !CefString::from(&params.link_url()).to_string().is_empty() {
-                items.extend([(OPEN_LINK, "Open Link in New Tab"), (COPY_LINK, "Copy Link Address")]);
+                groups.push(vec![
+                    item(OPEN_LINK, "Open Link in New Tab"),
+                    item(OPEN_LINK_WINDOW, "Open Link in New Window"),
+                    item(OPEN_LINK_SPLIT, "Open Link in Split View"),
+                    item(OPEN_LINK_LITTLE, "Open Link in Little Arbalete"),
+                    item(OPEN_LINK_INCOGNITO, "Open Link in Incognito Window"),
+                ]);
+                groups.push(vec![item(SAVE_LINK, "Save Link As…"), item(COPY_LINK, "Copy Link Address")]);
             }
             if params.media_type() == ContextMenuMediaType::IMAGE {
-                items.extend([(OPEN_IMAGE, "Open Image in New Tab"), (COPY_IMAGE, "Copy Image Address")]);
+                groups.push(vec![
+                    item(OPEN_IMAGE, "Open Image in New Tab"),
+                    item(SAVE_IMAGE, "Save Image As…"),
+                    item(COPY_IMAGE, "Copy Image"),
+                    item(COPY_IMAGE_ADDRESS, "Copy Image Address"),
+                    item(SEARCH_IMAGE, "Search Image with Google"),
+                ]);
             }
-            if !items.is_empty() {
+            let selection = CefString::from(&params.selection_text()).to_string();
+            if !selection.trim().is_empty() {
+                let label = format!(
+                    "Search {} for “{}”",
+                    displayed_search_engine().name(),
+                    quoted_selection(&selection)
+                );
+                groups.push(vec![(SEARCH_SELECTION, label)]);
+            }
+            for group in groups.into_iter().rev() {
                 if model.count() > 0 {
                     model.insert_separator_at(0);
                 }
-                for (id, label) in items.into_iter().rev() {
-                    model.insert_item_at(0, id, Some(&CefString::from(label)));
+                for (id, label) in group.into_iter().rev() {
+                    model.insert_item_at(0, id, Some(&CefString::from(label.as_str())));
                 }
             }
             if model.count() > 0 {
                 model.add_separator();
             }
-            model.add_item(INSPECT, Some(&CefString::from("Inspect Element")));
+            model.add_item(INSPECT, Some(&CefString::from("Inspect")));
         }
 
         fn on_context_menu_command(&self, browser: Option<&mut Browser>, _frame: Option<&mut Frame>, params: Option<&mut ContextMenuParams>, command_id: i32, _event_flags: EventFlags) -> i32 {
@@ -7873,14 +7960,36 @@ wrap_context_menu_handler! {
             }
             let link = CefString::from(&params.link_url()).to_string();
             let image = CefString::from(&params.source_url()).to_string();
-            let action = match command_id {
-                OPEN_LINK => Action::Run(Command::Open(link)),
-                COPY_LINK => Action::CopyLink(link),
-                OPEN_IMAGE => Action::Run(Command::Open(image)),
-                COPY_IMAGE => Action::CopyLink(image),
-                _ => return 0,
+            let download = |url: String| {
+                SAVE_AS.with_borrow_mut(|urls| urls.insert(url.clone()));
+                if let Some(host) = browser.and_then(|browser| browser.host()) {
+                    host.start_download(Some(&CefString::from(url.as_str())));
+                }
             };
-            perform(action);
+            match command_id {
+                OPEN_LINK => perform(Action::Run(Command::Open(link))),
+                OPEN_LINK_WINDOW => open_link_in_new_window(&link),
+                OPEN_LINK_SPLIT => open_in_pane(&link),
+                OPEN_LINK_LITTLE => open_little(Some(link)),
+                OPEN_LINK_INCOGNITO => open_incognito_window(Some(&link)),
+                SAVE_LINK => download(link),
+                COPY_LINK => perform(Action::CopyLink(link)),
+                OPEN_IMAGE => perform(Action::Run(Command::Open(image))),
+                SAVE_IMAGE => download(image),
+                #[cfg(target_os = "macos")]
+                COPY_IMAGE => crate::mac::copy_image(&image),
+                COPY_IMAGE_ADDRESS => perform(Action::CopyLink(image)),
+                SEARCH_IMAGE => {
+                    let url = format!("https://lens.google.com/uploadbyurl?url={}", arbalete_core::search::encode(&image));
+                    perform(Action::Run(Command::Open(url)));
+                }
+                SEARCH_SELECTION => {
+                    let selection = CefString::from(&params.selection_text()).to_string();
+                    let query = arbalete_core::search::encode(selection.trim());
+                    perform(Action::Run(Command::Open(format!("{}{query}", displayed_search_engine().url()))));
+                }
+                _ => return 0,
+            }
             1
         }
     }
