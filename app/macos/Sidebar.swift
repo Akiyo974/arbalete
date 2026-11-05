@@ -338,6 +338,10 @@ struct AddressRow: View {
             .buttonStyle(.plain)
             .help(tab?.url ?? "")
             if tab != nil {
+                // Like Arc's, the pinned extensions first, always there.
+                ForEach(model.state?.extensions ?? []) { ext in
+                    PinnedExtension(model: model, extension: ext)
+                }
                 // Like Arc's, the address's buttons show while the pointer is over it, and while
                 // the site controls show.
                 let shown = hovered || model.siteControlsShown
@@ -352,9 +356,6 @@ struct AddressRow: View {
                 }
                 if shown {
                     SiteControlsButton(model: model)
-                }
-                ForEach(model.state?.extensions ?? []) { ext in
-                    PinnedExtension(model: model, extension: ext)
                 }
             }
         }
@@ -423,6 +424,8 @@ struct PinnedExtension: View {
             }
             .buttonStyle(.plain)
             .help(`extension`.name)
+            // Like Arc's, its menu (extension_menu in app/src/menu.rs).
+            .rightClick { model.run("extension/context/\(`extension`.id)") }
         }
         .frame(width: 26, height: 26)
     }

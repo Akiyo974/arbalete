@@ -173,8 +173,7 @@ struct PageToolbar: View {
     }
 
     /// Like Arc's, measured: buttons 37 points apart from each end, the sidebar's toggle first
-    /// while it is not docked, the site controls and Split View last. Like Arc's, no extension's
-    /// button: the site controls show them.
+    /// while it is not docked, the pinned extensions, the site controls and Split View last.
     private var plain: some View {
         let tab = model.activeTab
         return ZStack {
@@ -182,6 +181,9 @@ struct PageToolbar: View {
                 BarStart(model: model)
                 Spacer()
                 if tab != nil {
+                    ForEach(model.state?.extensions ?? []) { ext in
+                        PinnedExtension(model: model, extension: ext, view: "toolbar")
+                    }
                     BarEnd(model: model)
                 }
             }
@@ -446,18 +448,7 @@ struct SiteView: View {
                         alignment: .leading, spacing: 8
                     ) {
                         ForEach(site.extensions) { ext in
-                            SiteTile(label: ext.enabled ? ext.name : "\(ext.name) (off)") {
-                                app.run("site/extension/\(ext.id)")
-                            } content: {
-                                Favicon(url: ext.icon, size: 16)
-                                    .opacity(ext.enabled ? 1 : 0.4)
-                            }
-                            .disabled(!ext.popup || !ext.enabled)
-                            .contextMenu {
-                                Button(ext.pinned ? "Unpin" : "Pin") {
-                                    app.run("extension/\(ext.pinned ? "unpin" : "pin")/\(ext.id)")
-                                }
-                            }
+                            SiteExtensionTile(app: app, extension: ext)
                         }
                         SiteTile(label: "Add Extensions") {
                             app.run("site/store")
@@ -598,6 +589,61 @@ struct SiteSection<Content: View>: View {
         .contentShape(Rectangle())
         .onHover { over in
             withAnimation(.easeOut(duration: 0.1)) { hovered.wrappedValue = over }
+        }
+    }
+}
+
+/// An extension's tile in the site controls, like Arc's, measured from a recording: a click
+/// opens its popup, a right click its menu, and a 14-point badge 4 points inside its bottom right
+/// corner pins it by the address or unpins it. The badge shows while it is pinned, light; and
+/// otherwise, grey, once the pointer has stayed over the tile 0.35 s, fading in over 0.1 s.
+struct SiteExtensionTile: View {
+    let app: AppModel
+    let `extension`: SiteControls.Site.SiteExtension
+    private let hovered = State(initialValue: false)
+    private let waiting = State<DispatchWorkItem?>(initialValue: nil)
+
+    var body: some View {
+        let ext = `extension`
+        SiteTile(label: ext.enabled ? ext.name : "\(ext.name) (off)") {
+            app.run("site/extension/\(ext.id)")
+        } content: {
+            Favicon(url: ext.icon, size: 16)
+                .opacity(ext.enabled ? 1 : 0.4)
+        }
+        .disabled(!ext.popup || !ext.enabled)
+        .overlay(alignment: .bottomTrailing) {
+            if ext.pinned || hovered.wrappedValue {
+                Button {
+                    app.run("extension/\(ext.pinned ? "unpin" : "pin")/\(ext.id)")
+                } label: {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 7.5, weight: .bold))
+                        .rotationEffect(.degrees(45))
+                        .foregroundStyle(ext.pinned ? Color.black.opacity(0.8) : .black.opacity(0.45))
+                        .frame(width: 14, height: 14)
+                        .background(Circle().fill(ext.pinned ? .white.opacity(0.9) : .white.opacity(0.3)))
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help(ext.pinned ? "Unpin" : "Pin")
+                // Its center 4 points inside the corner.
+                .offset(x: 3, y: 3)
+                .transition(.opacity)
+            }
+        }
+        .rightClick { app.run("extension/context/\(ext.id)") }
+        .onHover { over in
+            waiting.wrappedValue?.cancel()
+            guard over else {
+                withAnimation(.easeOut(duration: 0.1)) { hovered.wrappedValue = false }
+                return
+            }
+            let show = DispatchWorkItem {
+                withAnimation(.easeOut(duration: 0.1)) { hovered.wrappedValue = true }
+            }
+            waiting.wrappedValue = show
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: show)
         }
     }
 }

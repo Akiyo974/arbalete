@@ -170,6 +170,9 @@ pub enum Command {
     /// Opens a pinned extension's popup under its button:
     /// `extension/popup/<id>/<docked, revealed or toolbar>/<x>/<y>/<width>/<height>`.
     OpenPinnedExtension(String, Button),
+    /// Shows an extension's menu at the pointer, from a right click on its button or its tile:
+    /// `extension/context/<id>`.
+    ExtensionMenu(String),
     /// Shows the developer bar's extensions menu, whose popups open under its button:
     /// `extension/menu/<docked, revealed or toolbar>/<x>/<y>/<width>/<height>`.
     ExtensionsMenu(Button),
@@ -605,6 +608,7 @@ impl Command {
                         "pin" => Some(Self::PinExtension(id, true)),
                         "unpin" => Some(Self::PinExtension(id, false)),
                         "options" => Some(Self::ExtensionOptions(id)),
+                        "context" => Some(Self::ExtensionMenu(id)),
                         "remove" => Some(Self::RemoveExtension(id)),
                         _ => None,
                     };
@@ -1121,6 +1125,10 @@ mod tests {
             }))
         );
         assert_eq!(Command::parse("site/show/menu/10/4/28/28"), None);
+        assert_eq!(
+            Command::parse("extension/context/abc"),
+            Some(Command::ExtensionMenu("abc".into()))
+        );
         assert_eq!(
             Command::parse("extension/menu/toolbar/1/2/3/4"),
             Some(Command::ExtensionsMenu(Button {

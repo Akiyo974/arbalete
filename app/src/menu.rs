@@ -95,15 +95,15 @@ fn site_menu(url: &str) -> Vec<Entry> {
     ]
 }
 
-/// An extension's menu, from the site controls' panel: pinning it by the address, its options
-/// page, turning it off or on, and removing it.
-pub fn extension_menu(id: &str, options: bool, enabled: bool, pinned: bool) -> Vec<Entry> {
-    let pin = if pinned { "Unpin" } else { "Pin" };
-    let mut menu = vec![item(
-        "pin",
-        pin,
-        Action::Run(Command::PinExtension(id.to_string(), !pinned)),
-    )];
+/// An extension's menu, from its button or its tile in the site controls, like Arc's: its name,
+/// which opens its Web Store page, its options page, removing it, pinning it by the address or
+/// unpinning it, and the library to manage it.
+pub fn extension_menu(id: &str, name: &str, options: bool, pinned: bool) -> Vec<Entry> {
+    let store = format!("https://chromewebstore.google.com/detail/{id}");
+    let mut menu = vec![
+        item("store", name, Action::Run(Command::Open(store))),
+        Entry::Separator,
+    ];
     if options {
         menu.push(item(
             "options",
@@ -111,18 +111,23 @@ pub fn extension_menu(id: &str, options: bool, enabled: bool, pinned: bool) -> V
             Action::Run(Command::ExtensionOptions(id.to_string())),
         ));
     }
-    let toggle = if enabled { "Turn Off" } else { "Turn On" };
-    menu.push(item(
-        "toggle",
-        toggle,
-        Action::Run(Command::SetExtensionEnabled(id.to_string(), !enabled)),
-    ));
-    menu.push(Entry::Separator);
     // The app or Chromium asks first (Command::RemoveExtension).
     menu.push(item(
         "remove",
         "Remove from Arbalete…",
         Action::Run(Command::RemoveExtension(id.to_string())),
+    ));
+    let pin = if pinned { "Unpin" } else { "Pin" };
+    menu.push(item(
+        "pin",
+        pin,
+        Action::Run(Command::PinExtension(id.to_string(), !pinned)),
+    ));
+    menu.push(Entry::Separator);
+    menu.push(item(
+        "manage",
+        "Manage Extension",
+        Action::Run(Command::ManageExtensions),
     ));
     menu
 }
@@ -562,6 +567,34 @@ fn item(id: &str, title: &str, action: Action) -> Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extension_menu_is_arcs() {
+        let menu = extension_menu("a", "Dark Reader", true, true);
+        assert_eq!(
+            titles(&menu),
+            [
+                "Dark Reader",
+                "-",
+                "Options",
+                "Remove from Arbalete…",
+                "Unpin",
+                "-",
+                "Manage Extension"
+            ]
+        );
+        assert!(matches!(
+            find(menu, "store"),
+            Some(Action::Run(Command::Open(url)))
+                if url == "https://chromewebstore.google.com/detail/a"
+        ));
+        let menu = extension_menu("a", "Dark Reader", false, false);
+        assert!(!titles(&menu).contains(&"Options".to_string()));
+        assert!(matches!(
+            find(menu, "pin"),
+            Some(Action::Run(Command::PinExtension(_, true)))
+        ));
+    }
 
     #[test]
     fn extensions_menu_opens_their_popups_then_adds_and_manages() {

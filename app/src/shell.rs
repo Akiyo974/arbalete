@@ -4359,8 +4359,8 @@ fn show_extension_menu(id: Option<&String>) {
     let pinned = pinned_extensions(profile).contains(&extension.id);
     let entries = menu::extension_menu(
         &extension.id,
+        &extension.name,
         extension.options.is_some(),
-        extension.enabled,
         pinned,
     );
     #[cfg(target_os = "macos")]
@@ -6392,6 +6392,7 @@ fn run_command(command: Command) {
                 open_extension_popup(&id);
             }
         }
+        (Command::ExtensionMenu(id), _) => show_extension_menu(Some(&id)),
         (Command::ExtensionsMenu(button), _) => {
             if let Some(button) = button_in_window(button) {
                 win().site_button.set(Some(button));
