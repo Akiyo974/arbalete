@@ -1,6 +1,5 @@
 // A panel above the page, like the Command Bar, which the app shows, places and hides (Spot and
-// mirror in app/src/shell.rs). One that takes the keyboard is a child window of the main one,
-// whose own keyboard CEF keeps for its views; the others are views of the main window (Overlay).
+// mirror in app/src/shell.rs): a view of the main window (Overlay).
 
 import AppKit
 import SwiftUI
@@ -127,61 +126,113 @@ final class Overlay {
     func close() { view.removeFromSuperview() }
 }
 
-/// A rounded surface with a blur under its content and a shadow.
+/// A rounded surface with a blur under its content and a shadow, a view over the window's card
+/// and sidebar.
 @MainActor
 final class Surface {
-    private let panel: ChildPanel
+    private let overlay: Overlay
+    /// Casts its shadow, which its rounded content would clip.
+    private let holder = NSView()
+    private let host: NSView
     private let parent: NSWindow
+    private let radius: CGFloat
     /// Called once the surface shows, to focus what it holds.
     var shown: () -> Void = {}
     /// Whether it takes the keyboard when it shows.
     var takesKeyboard = false
-    /// Called when it shows and another window takes the keyboard from it.
-    var resigned: () -> Void {
-        get { panel.resigned }
-        set { panel.resigned = newValue }
-    }
+    /// Called when it shows with the keyboard and loses it: to another window, or to a click
+    /// elsewhere in its own.
+    var resigned: () -> Void = {}
+    /// What had the keyboard before it took it, which gets it back as it hides.
+    private weak var before: NSResponder?
+    private var resignedKey: NSObjectProtocol?
+    private var clicks: Any?
 
     init<Content: View>(
         in parent: NSWindow, radius: CGFloat, material: NSVisualEffectView.Material = .popover,
         @ViewBuilder view: () -> Content
     ) {
         self.parent = parent
+        self.radius = radius
         let effect = NSVisualEffectView()
         effect.material = material
-        effect.blendingMode = .behindWindow
+        // Over the page and the sidebar, in the same window: it blurs them.
+        effect.blendingMode = .withinWindow
         effect.state = .active
         effect.wantsLayer = true
         effect.layer?.cornerRadius = radius
         effect.layer?.masksToBounds = true
         effect.layer?.borderWidth = 0.5
         effect.layer?.borderColor = NSColor.separatorColor.cgColor
+        effect.autoresizingMask = [.width, .height]
         let host = NSHostingView(rootView: view())
         host.autoresizingMask = [.width, .height]
+        host.safeAreaRegions = []
+        self.host = host
         effect.addSubview(host)
-        panel = ChildPanel(view: effect)
-        panel.hasShadow = true
+        holder.wantsLayer = true
+        holder.layer?.shadowColor = NSColor.black.cgColor
+        holder.layer?.shadowOpacity = 0.3
+        holder.layer?.shadowRadius = 16
+        holder.layer?.shadowOffset = .zero
+        holder.addSubview(effect)
+        overlay = Overlay(view: holder)
+        resignedKey = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification, object: parent, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.takesKeyboard, self.isShown else { return }
+                self.resigned()
+            }
+        }
+        clicks = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) {
+            [weak self] event in
+            if let self, self.takesKeyboard, self.isShown, !self.contains(event) {
+                DispatchQueue.main.async { self.resigned() }
+            }
+            return event
+        }
     }
 
-    var isShown: Bool { panel.isVisible }
+    var isShown: Bool { overlay.isVisible }
 
-    /// Its window, which clicks in it land in.
-    var window: NSWindow { panel }
+    /// Whether `event` is a click in it.
+    func contains(_ event: NSEvent) -> Bool {
+        isShown && event.window === parent
+            && holder.bounds.contains(holder.convert(event.locationInWindow, from: nil))
+    }
 
-    /// Closes it, its window closing.
-    func close() { panel.close() }
+    /// Takes it away.
+    func close() {
+        resignedKey.map(NotificationCenter.default.removeObserver)
+        if let clicks { NSEvent.removeMonitor(clicks) }
+        overlay.close()
+    }
 
     /// Shows the surface at `frame`, from the window's top left corner, or hides it.
     func place(_ shown: Bool, _ frame: NSRect) {
-        let showing = shown && !panel.isVisible
-        panel.place(in: parent, shown ? frame : nil)
-        // Once its rounded views are drawn, so that the shadow follows their corners.
-        DispatchQueue.main.async { self.panel.invalidateShadow() }
-        if showing {
-            if takesKeyboard { panel.makeKey() }
-            // Once its views are made, which they are on first showing.
-            DispatchQueue.main.async { self.shown() }
+        let showing = shown && !isShown
+        if showing { before = parent.firstResponder }
+        let had = (parent.firstResponder as? NSView)?.isDescendant(of: holder) == true
+        overlay.place(in: parent, shown ? frame : nil)
+        holder.layer?.shadowPath = CGPath(
+            roundedRect: holder.bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        // Hiding, it gives the keyboard back to what had it.
+        if !shown, had {
+            parent.makeFirstResponder((before as? NSView).flatMap { $0.window === parent ? $0 : nil })
         }
+        guard showing else { return }
+        if takesKeyboard { parent.makeKey() }
+        // Once its views are made, which they are on first showing.
+        DispatchQueue.main.async { self.focus() }
+    }
+
+    /// Focuses what it holds, or itself, if it takes the keyboard.
+    private func focus() {
+        shown()
+        guard takesKeyboard, (parent.firstResponder as? NSView)?.isDescendant(of: holder) != true
+        else { return }
+        parent.makeFirstResponder(host)
     }
 }
 

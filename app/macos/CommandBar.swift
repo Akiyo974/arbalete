@@ -451,7 +451,7 @@ struct ResultRow: View {
 @MainActor func closeCommandBar(
     _ bar: CommandBar, _ overlay: Surface, _ window: NSWindow, _ event: NSEvent
 ) {
-    guard overlay.isShown, event.window !== overlay.window, !onEdge(window) else { return }
+    guard overlay.isShown, !overlay.contains(event), !onEdge(window) else { return }
     bar.hide()
 }
 
@@ -494,7 +494,7 @@ struct CommandField: NSViewRepresentable {
         func controlTextDidEndEditing(_ notification: Notification) {
             // Like Arc's, resizing the window keeps the bar, which takes the keyboard back once
             // the resize ends; a click anywhere else closes it.
-            if let field = notification.object as? NSTextField, let main = field.window?.parent,
+            if let field = notification.object as? NSTextField, let main = field.window,
                 onEdge(main)
             {
                 var observer: NSObjectProtocol?
