@@ -1244,11 +1244,16 @@ impl Sidebar {
     /// ⌘9 is in browsers.
     pub fn favorite(&self, space: SpaceId, number: usize) -> Option<NodeId> {
         let favorites = &self.nodes[&self.favorites_of(space)?].children;
-        if number == 9 {
+        let favorite = if number == 9 {
             favorites.last().copied()
         } else {
             favorites.get(number.checked_sub(1)?).copied()
+        }?;
+        // A split favorite shows with its first tab, the others alongside.
+        if self.is_split(favorite) {
+            return self.nodes[&favorite].children.first().copied();
         }
+        Some(favorite)
     }
 
     /// The favorites of the Space's profile, which its Space shows.
@@ -3013,6 +3018,20 @@ mod tests {
         assert_eq!(sidebar.favorite(home.id, 4), None);
         assert_eq!(sidebar.favorite(home.id, 9), Some(tabs[2]));
         assert_eq!(sidebar.favorite(home.id, 0), None);
+    }
+
+    #[test]
+    fn finds_a_split_favorite_by_its_first_tab() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let favorites = sidebar.profiles()[0].favorites;
+        let left = sidebar.open_tab(home.id, "left").unwrap();
+        let right = sidebar.open_tab(home.id, "right").unwrap();
+        let split = sidebar.split(right, left).unwrap();
+        sidebar.move_node(split, favorites, usize::MAX).unwrap();
+        let first = sidebar.nodes[&split].children[0];
+        assert_eq!(sidebar.favorite(home.id, 1), Some(first));
+        assert_eq!(sidebar.favorite(home.id, 9), Some(first));
     }
 
     #[test]
