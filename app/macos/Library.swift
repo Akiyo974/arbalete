@@ -467,7 +467,7 @@ struct ManageSpacesView: View {
                 .help("New Space")
                 .padding(.horizontal, 12)
             }
-            .padding(.horizontal, 22)
+            .padding(.horizontal, 24)
             .padding(.bottom, 16)
         }
         .scrollIndicators(.never)

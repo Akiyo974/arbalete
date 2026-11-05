@@ -728,12 +728,20 @@ fn square_card() -> bool {
     false
 }
 
-/// The docked sidebar's width: wider for the library, the window's for its Spaces.
+/// The width of the page's strip the library's Spaces leave at the window's right, like Arc's.
+const LIBRARY_STRIP: i32 = 46;
+
+/// The docked sidebar's width: wider for the library; for its Spaces, the window's but for a
+/// strip of the page, like Arc's.
 fn docked_width() -> i32 {
     if fills_window() {
         win()
             .window
-            .with_borrow(|window| window.as_ref().map(|window| window.size().width))
+            .with_borrow(|window| {
+                window
+                    .as_ref()
+                    .map(|window| window.size().width - LIBRARY_STRIP - CARD_MARGIN)
+            })
             .unwrap_or_else(library_width)
     } else if win().library.get() {
         library_width()
@@ -812,7 +820,7 @@ fn end_sidebar_resize() {
     }
 }
 
-/// The docked library shows the Spaces, over the whole window: the card is hidden.
+/// The docked library shows the Spaces, over the window but for a strip of the card.
 fn fills_window() -> bool {
     win().library.get()
         && win().wide_library.get()
@@ -1850,7 +1858,7 @@ fn step_slide() {
     let to = win().sidebar_mode.get().layout(&size);
     win()
         .sliding_card
-        .replace(Some(lerp_rect(&from.card, &to.card, eased)));
+        .replace(Some(lerp_rect(&from.card, &resting_card(&size), eased)));
     place_card();
     if docking && let Some(reveal) = win().reveal.with_borrow(Clone::clone) {
         reveal.set_bounds(Some(&lerp_rect(&from.reveal, &to.reveal, eased)));
@@ -1995,16 +2003,27 @@ fn show_library() {
 
 /// Fills the window with the library while it shows the Spaces, or rests it beside the card.
 fn widen_library(wide: bool) {
+    let from = card_rect();
     if win().wide_library.replace(wide) != wide && win().library.get() {
-        relayout_library();
+        relayout_library_sliding(from);
     }
 }
 
 /// Gives the docked sidebar the library's width, or its own, and places the card beside it.
 fn widen_for_library(library: bool) {
+    let from = card_rect();
     if win().library.replace(library) != library {
-        relayout_library();
+        relayout_library_sliding(from);
     }
+}
+
+/// Lays the window out for the library's new width, the card sliding there from `from`.
+fn relayout_library_sliding(from: Option<Rect>) {
+    if win().slide.with_borrow(Option::is_none) {
+        win().sliding_card.replace(from.clone());
+    }
+    relayout_library();
+    slide_card(from);
 }
 
 /// Sizes the docked sidebar and places the card after the library's width changed.
@@ -5429,19 +5448,18 @@ fn show_split(focused: NodeId, tabs: &[NodeId], layout: SplitLayout) {
 }
 
 /// Where the card is in the window: the page's room, or half of it while a tab dragged over a
-/// page alone would take the other half, like Arc's; none while the library fills the window.
+/// page alone would take the other half, like Arc's; a strip of it while the library shows the
+/// Spaces.
 fn card_rect() -> Option<Rect> {
-    if fills_window() {
-        return None;
-    }
     if let Some(sliding) = win().sliding_card.borrow().clone() {
         return Some(sliding);
     }
     let size = win()
         .window
         .with_borrow(|window| window.as_ref().map(|w| w.size()))?;
-    let mut room = win().sidebar_mode.get().layout(&size).card;
-    if split_shown().is_none()
+    let mut room = resting_card(&size);
+    if !fills_window()
+        && split_shown().is_none()
         && let Some((before, stacked)) = win().drop_preview.get()
     {
         if stacked {
@@ -5460,6 +5478,45 @@ fn card_rect() -> Option<Rect> {
     }
     Some(room)
 }
+
+/// Where the card rests in a window of `size`: beside the sidebar; pushed right by the library's
+/// Spaces, like Arc's, its size kept, a strip of it showing.
+fn resting_card(size: &Size) -> Rect {
+    let mut room = win().sidebar_mode.get().layout(size).card;
+    if fills_window() {
+        room.x = size.width - LIBRARY_STRIP - CARD_MARGIN;
+        room.width = size.width - library_width() - CARD_MARGIN;
+    }
+    room
+}
+
+/// Slides the card from `from` to where it rests now, like Arc's library opening, closing, or
+/// showing the Spaces: an ease out in about 0.22 s.
+fn slide_card(from: Option<Rect>) {
+    let (Some(from), Some(reveal)) = (from, win().reveal.with_borrow(Clone::clone)) else {
+        return;
+    };
+    #[cfg(target_os = "macos")]
+    if crate::mac::reduce_motion() {
+        return;
+    }
+    let slide = Slide {
+        from: Layout {
+            card: from,
+            reveal: reveal.bounds(),
+        },
+        start: Instant::now(),
+        duration: Duration::from_millis(LIBRARY_SLIDE),
+        docking: false,
+    };
+    if win().slide.replace(Some(slide)).is_none() {
+        step_slide();
+    }
+}
+
+/// How long the card takes to slide as the library opens, closes or shows the Spaces, in
+/// milliseconds, like Arc's.
+const LIBRARY_SLIDE: u64 = 220;
 
 /// The height of the bar above a page alone, 0 while it hides: over a split, its pages show their
 /// own bars.
