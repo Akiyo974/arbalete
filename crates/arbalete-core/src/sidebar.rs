@@ -1179,6 +1179,18 @@ impl Sidebar {
         parent.filter(|&p| self.is_split(p)).unwrap_or(tab)
     }
 
+    /// The tab of `tab`'s split that `split_beside` puts it back beside, once it has left: the
+    /// tab before it, or the one after it, `true`, when it comes first. None outside a split.
+    pub fn split_neighbor(&self, tab: NodeId) -> Option<(NodeId, bool)> {
+        let split = self.row_of(tab);
+        let tabs = &self.nodes.get(&split).filter(|_| split != tab)?.children;
+        let index = tabs.iter().position(|&id| id == tab)?;
+        match index.checked_sub(1) {
+            Some(before) => Some((tabs[before], false)),
+            None => tabs.get(1).map(|&after| (after, true)),
+        }
+    }
+
     /// The tab to show once `tab` is closed: the tab it was opened from if still open, else the
     /// next tab in its container, else the previous one.
     pub fn next_after_close(&self, tab: NodeId) -> Option<NodeId> {
@@ -3374,6 +3386,35 @@ mod tests {
         sidebar.separate(b).unwrap();
         assert_eq!(children(&sidebar, home.today), [c, a, b]);
         assert_eq!(sidebar.separate(home.today), Err(Error::NotATab));
+    }
+
+    #[test]
+    fn a_tab_removed_from_its_split_goes_back_to_its_place_beside_its_neighbor() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let [a, b, c] = ["a", "b", "c"].map(|url| sidebar.open_tab(home.id, url).unwrap());
+        let split = sidebar.split(b, a).unwrap();
+        sidebar.split(c, b).unwrap();
+        assert_eq!(sidebar.split_neighbor(a), Some((b, true)));
+        assert_eq!(sidebar.split_neighbor(b), Some((a, false)));
+        assert_eq!(sidebar.split_neighbor(split), None);
+        // The middle tab, then the first: the split keeps its order.
+        for tab in [b, a] {
+            let (target, before) = sidebar.split_neighbor(tab).unwrap();
+            sidebar.remove(tab).unwrap();
+            let again = sidebar.open_tab(home.id, "again").unwrap();
+            sidebar.split_beside(again, target, before).unwrap();
+            assert_eq!(sidebar.split_neighbor(again), Some((target, before)));
+        }
+        // A split left with one tab comes back around it.
+        let [x, y] = ["x", "y"].map(|url| sidebar.open_tab(home.id, url).unwrap());
+        sidebar.split(y, x).unwrap();
+        let (target, before) = sidebar.split_neighbor(y).unwrap();
+        sidebar.remove(y).unwrap();
+        assert_eq!(sidebar.split_neighbor(x), None);
+        let again = sidebar.open_tab(home.id, "y").unwrap();
+        let split = sidebar.split_beside(again, target, before).unwrap();
+        assert_eq!(children(&sidebar, split), [x, again]);
     }
 
     #[test]

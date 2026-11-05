@@ -834,9 +834,19 @@ const RECENTLY_CLOSED: usize = 10;
 struct UiState {
     page: Page,
     sidebar: Sidebar,
-    /// Closed tabs, the last one at the end, with their profile and when they closed, until the
-    /// app quits.
-    closed: Vec<(Tab, ProfileId, SystemTime)>,
+    /// Closed tabs, the last one at the end, until the app quits.
+    closed: Vec<Closed>,
+}
+
+/// A closed tab, which may be reopened.
+struct Closed {
+    /// What it was while open, for the tabs closed beside it; unknown for those closed together.
+    id: Option<NodeId>,
+    tab: Tab,
+    profile: ProfileId,
+    at: SystemTime,
+    /// The tab of its split it goes back beside, and whether before it.
+    beside: Option<(NodeId, bool)>,
 }
 
 impl UiState {
@@ -885,11 +895,11 @@ impl UiState {
             "extensions": self.pinned_extensions(),
             // All of them, which the library lists.
             "installed": self.installed_extensions(),
-            "closed": self.closed.iter().rev().take(RECENTLY_CLOSED).map(|(tab, profile, at)| json!({
-                "url": tab.url,
-                "title": tab.label(),
-                "favicon": favicon_url(*profile, tab),
-                "closedAt": at.duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64),
+            "closed": self.closed.iter().rev().take(RECENTLY_CLOSED).map(|closed| json!({
+                "url": closed.tab.url,
+                "title": closed.tab.label(),
+                "favicon": favicon_url(closed.profile, &closed.tab),
+                "closedAt": closed.at.duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64),
             })).collect::<Vec<_>>(),
         })
     }
@@ -4145,10 +4155,16 @@ fn close_keeping(tab: Option<NodeId>, keep_pinned: bool) {
 fn remove_tab(tab: NodeId) -> Option<NodeId> {
     let next = STATE.with_borrow_mut(|state| {
         let profile = state.sidebar.profile_of(tab).expect("an open tab");
-        let closed = state.sidebar.tab_mut(tab).expect("an open tab").clone();
+        let closed = Closed {
+            id: Some(tab),
+            tab: state.sidebar.tab_mut(tab).expect("an open tab").clone(),
+            profile,
+            at: SystemTime::now(),
+            beside: state.sidebar.split_neighbor(tab),
+        };
         // An incognito window's tabs cannot be reopened.
         if !INCOGNITO.with_borrow(|incognito| incognito.contains_key(&profile)) {
-            state.closed.push((closed, profile, SystemTime::now()));
+            state.closed.push(closed);
         }
         state.sidebar.next_after_close(tab)
     });
@@ -4221,9 +4237,13 @@ fn close_rows(remove: impl FnOnce(&mut Sidebar) -> Result<(Vec<Tab>, ProfileId),
     };
     let now = SystemTime::now();
     STATE.with_borrow_mut(|state| {
-        state
-            .closed
-            .extend(removed.into_iter().map(|tab| (tab, profile, now)))
+        state.closed.extend(removed.into_iter().map(|tab| Closed {
+            id: None,
+            tab,
+            profile,
+            at: now,
+            beside: None,
+        }))
     });
     send_state();
     let open = |id: NodeId| STATE.with_borrow_mut(|state| state.sidebar.tab_mut(id).is_some());
@@ -4456,26 +4476,53 @@ fn new_space_profile(space: SpaceId) {
     }
 }
 
-/// Reopens a closed tab in the displayed Space, by its rank from the last closed one.
+/// Reopens a closed tab, by its rank from the last closed one: back in its split, beside the tab
+/// it showed with while that one is open, like Arc's; else in the displayed Space.
 fn reopen_tab(rank: usize) {
     let closed = STATE.with_borrow_mut(|state| {
         let index = state.closed.len().checked_sub(rank + 1)?;
         Some(state.closed.remove(index))
     });
-    let Some((closed, profile, _)) = closed else {
+    let Some(closed) = closed else {
         return;
     };
-    open_tab(&closed.url);
-    update_sidebar(|sidebar| {
+    let tab = update_sidebar(|sidebar| {
+        let shown = sidebar.displayed().id;
+        // An incognito window and the others never show each other's tabs.
+        let beside = closed.beside.and_then(|(target, before)| {
+            let space = sidebar.space_of(target)?;
+            sidebar
+                .reaches(shown, space)
+                .then_some((space, target, before))
+        });
+        let space = beside.map_or(shown, |(space, ..)| space);
+        let tab = sidebar
+            .open_tab(space, &closed.tab.url)
+            .expect("a known Space");
+        if let Some((_, target, before)) = beside {
+            // A split already full takes it as a row of its own.
+            let _ = sidebar.split_beside(tab, target, before);
+        }
         // Another profile has not cached its icon: its page sends it as it loads.
-        let same_profile = sidebar.displayed().profile == profile;
-        if let Some(tab) = active_tab(sidebar) {
-            tab.title = closed.title;
-            if same_profile {
-                tab.favicon = closed.favicon;
+        let same_profile = sidebar.profile_of_space(space) == Some(closed.profile);
+        let reopened = sidebar.tab_mut(tab).expect("just opened");
+        reopened.title = closed.tab.title;
+        if same_profile {
+            reopened.favicon = closed.tab.favicon;
+        }
+        tab
+    });
+    // The tabs closed beside it go back beside it again.
+    STATE.with_borrow_mut(|state| {
+        for other in &mut state.closed {
+            if let Some((target, _)) = &mut other.beside
+                && closed.id == Some(*target)
+            {
+                *target = tab;
             }
         }
     });
+    select_tab(tab);
 }
 
 /// A tab's live page, in its profile's web data.
@@ -8246,7 +8293,13 @@ mod tests {
             last_shown: None,
         };
         let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(60);
-        state.closed.push((tab, profile, at));
+        state.closed.push(super::Closed {
+            id: None,
+            tab,
+            profile,
+            at,
+            beside: None,
+        });
         let closed = &state.to_json()["closed"][0];
         assert_eq!(closed["url"], "https://example.com/");
         assert_eq!(closed["closedAt"], 60_000);
