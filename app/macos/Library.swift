@@ -4,6 +4,7 @@
 
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum LibrarySection: String, CaseIterable, Identifiable {
     // Arc's, in its order: its Easels and Boosts have no counterpart here.
@@ -392,49 +393,112 @@ struct MediaTile: View {
     }
 }
 
-/// Every download, the most recent first.
+/// Every download, the most recent first, under the day it started, like Arc's.
 struct DownloadsList: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
         let found = model.downloads.reversed().filter { matches(model.query, $0.name, $0.url) }
         if found.isEmpty { Empty(text: model.downloads.isEmpty ? "No downloads yet" : "No download matches") }
-        ForEach(found) { download in
+        DayGroups(items: Array(found), time: { $0.startedAt }) { download in
             DownloadRow(model: model, download: download)
         }
     }
 }
 
-/// A finished download opens on a click, and shows in the Finder from its button; the × cancels
-/// one in progress, or takes another off the list.
+/// A download, like Arc's: its picture or its file's icon, its name over what it is and where it
+/// came from, and its menu on hover. A click shows a picture or a video in the media viewer, and
+/// opens another file.
 struct DownloadRow: View {
     @ObservedObject var model: AppModel
     let download: Download
+    private let hovered = State(initialValue: false)
 
     var body: some View {
         let running = download.state == "inProgress"
-        HStack(spacing: 8) {
-            Image(systemName: "doc").frame(width: 16)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(download.name).lineLimit(1)
-                Text(downloadDetail(download)).font(.system(size: 11)).foregroundStyle(.secondary)
+        let there = download.state == "complete" && !download.missing
+        HStack(spacing: 14) {
+            DownloadIcon(download: download, there: there)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(download.name).font(.system(size: 14)).foregroundStyle(Ink.primary).lineLimit(1)
+                Text(there ? downloadKind(download) : downloadDetail(download))
+                    .font(.system(size: 12)).foregroundStyle(Ink.secondary).lineLimit(1)
             }
-            Spacer(minLength: 4)
-            if download.state == "complete" && !download.missing {
-                IconButton(symbol: "magnifyingglass", label: "Show in Finder", size: 22) {
-                    model.run("download/show/\(download.id)")
+            Spacer(minLength: 6)
+            if hovered.wrappedValue || running {
+                Menu {
+                    if there {
+                        Button("Show in Finder") { model.run("download/show/\(download.id)") }
+                    }
+                    if running {
+                        Button("Cancel") { model.run("download/cancel/\(download.id)") }
+                    } else {
+                        Button("Remove from List") { model.run("download/remove/\(download.id)") }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis").font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Ink.secondary)
+                        .frame(width: 26, height: 26)
+                        .contentShape(Rectangle())
                 }
-            }
-            IconButton(symbol: "xmark", label: running ? "Cancel" : "Remove", size: 22) {
-                model.run("download/\(running ? "cancel" : "remove")/\(download.id)")
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .fixedSize()
             }
         }
-        .padding(.horizontal, 8)
-        .frame(height: 40)
+        .padding(.horizontal, 14)
+        .frame(height: 56)
+        .background(
+            RoundedRectangle(cornerRadius: 10).fill(Ink.item.opacity(hovered.wrappedValue ? 1 : 0)))
         .contentShape(Rectangle())
-        .onTapGesture { if download.state == "complete" { model.run("download/open/\(download.id)") } }
+        .onHover { hovered.wrappedValue = $0 }
+        .onTapGesture {
+            guard there else { return }
+            if mediaKind(download) != nil {
+                model.viewing = download.id
+            } else {
+                model.run("download/open/\(download.id)")
+            }
+        }
         .help(download.url)
     }
+}
+
+/// A picture downloaded in small, or its file's icon, as the Finder shows it.
+struct DownloadIcon: View {
+    let download: Download
+    let there: Bool
+
+    var body: some View {
+        Group {
+            if there, mediaKind(download) == .image,
+                let image = uiImage("arbalete://ui/media/\(download.id)")
+            {
+                Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+                    .frame(width: 22, height: 26).clipped()
+            } else {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: download.path)).resizable()
+                    .frame(width: 28, height: 28)
+            }
+        }
+        .frame(width: 28, height: 28)
+    }
+}
+
+/// What a download is and where it came from, like Arc's: "Image from google.com".
+func downloadKind(_ download: Download) -> String {
+    let kind: String
+    switch mediaKind(download) {
+    case .image: kind = "Image"
+    case .video: kind = "Video"
+    case nil:
+        kind = UTType(filenameExtension: (download.name as NSString).pathExtension)?
+            .localizedDescription?.capitalized ?? "File"
+    }
+    guard let host = URL(string: download.url)?.host() else { return kind }
+    let site = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    return "\(kind) from \(site)"
 }
 
 /// The Spaces side by side, like Arc's: a column each, in sidebar order, in its theme's colors,
