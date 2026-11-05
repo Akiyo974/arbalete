@@ -1303,6 +1303,28 @@ pub fn copy(url: &str) {
     pasteboard.setString_forType(&NSString::from_str(url), unsafe { NSPasteboardTypeString });
 }
 
+/// Puts the image at `url` on the pasteboard, fetched away from the main thread.
+pub fn copy_image(url: &str) {
+    let url = url.to_string();
+    std::thread::spawn(move || {
+        let Some(address) = NSURL::URLWithString(&NSString::from_str(&url)) else {
+            return;
+        };
+        let Some(data) = NSData::dataWithContentsOfURL(&address) else {
+            return eprintln!("cannot fetch the image to copy: {url}");
+        };
+        let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) else {
+            return eprintln!("cannot read the image to copy: {url}");
+        };
+        let Some(tiff) = image.TIFFRepresentation() else {
+            return;
+        };
+        let pasteboard = NSPasteboard::generalPasteboard();
+        pasteboard.clearContents();
+        pasteboard.setData_forType(Some(&tiff), unsafe { objc2_app_kit::NSPasteboardTypeTIFF });
+    });
+}
+
 /// Rounds the corners of the card, view `view`, which holds the pages, and outlines it, or
 /// squares them.
 pub fn round_card(view: *mut c_void, rounded: bool) {
@@ -1540,4 +1562,55 @@ pub fn memory_pressure() -> crate::shell::MemoryPressure {
 /// Whether Low Power Mode is on, saving the battery.
 pub fn low_power() -> bool {
     NSProcessInfo::processInfo().isLowPowerModeEnabled()
+}
+
+/// The system's first preferred language as Chromium names its locales: the language alone, like
+/// "fr", but for the regional ones it ships, like "en-GB" or "pt-BR".
+pub fn chromium_locale() -> String {
+    let preferred = objc2_foundation::NSLocale::preferredLanguages();
+    let Some(first) = preferred.firstObject().map(|tag| tag.to_string()) else {
+        return "en-US".to_string();
+    };
+    chromium_locale_of(&first)
+}
+
+/// Chromium's locale for a BCP 47 language tag, like "fr-FR" or "zh-Hans-CN".
+fn chromium_locale_of(tag: &str) -> String {
+    let parts: Vec<&str> = tag.split('-').collect();
+    let language = parts.first().copied().unwrap_or("en");
+    let region = parts
+        .iter()
+        .skip(1)
+        .find(|part| part.len() == 2 || part.len() == 3);
+    match (language, region.copied()) {
+        ("en", Some("GB" | "AU" | "NZ" | "IE" | "IN" | "ZA")) => "en-GB".to_string(),
+        ("en", _) => "en-US".to_string(),
+        ("pt", Some("PT")) => "pt-PT".to_string(),
+        ("pt", _) => "pt-BR".to_string(),
+        ("es", Some("ES") | None) => "es".to_string(),
+        ("es", _) => "es-419".to_string(),
+        ("zh", _)
+            if tag.contains("Hant") || matches!(region.copied(), Some("TW" | "HK" | "MO")) =>
+        {
+            "zh-TW".to_string()
+        }
+        ("zh", _) => "zh-CN".to_string(),
+        (language, _) => language.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod locale_tests {
+    use super::chromium_locale_of;
+
+    #[test]
+    fn names_chromium_locales() {
+        assert_eq!(chromium_locale_of("fr-FR"), "fr");
+        assert_eq!(chromium_locale_of("en-FR"), "en-US");
+        assert_eq!(chromium_locale_of("en-GB"), "en-GB");
+        assert_eq!(chromium_locale_of("pt-PT"), "pt-PT");
+        assert_eq!(chromium_locale_of("es-MX"), "es-419");
+        assert_eq!(chromium_locale_of("zh-Hant-TW"), "zh-TW");
+        assert_eq!(chromium_locale_of("de"), "de");
+    }
 }

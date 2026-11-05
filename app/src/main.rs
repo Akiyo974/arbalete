@@ -40,6 +40,9 @@ fn main() {
         cache_path: CefString::from(root.join("Default").to_str().unwrap()),
         // The extensions' bridge runs in a page without a window (shell::make_bridge).
         windowless_rendering_enabled: 1,
+        // Like Arc's, Chromium's own menus, pages and dialogs speak the system's language.
+        #[cfg(target_os = "macos")]
+        locale: CefString::from(mac::chromium_locale().as_str()),
         ..Default::default()
     };
     let mut app = shell::ArbaleteApp::new(root.clone());
