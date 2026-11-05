@@ -17,6 +17,7 @@ final class CaptureChrome {
         self.parent = parent
         veilPanel = Overlay(view: veil)
         let host = NSHostingView(rootView: NoteView(model: noteModel))
+        host.safeAreaRegions = []
         host.sizingOptions = []
         note = Overlay(view: host)
         veil.picked = { [weak self] rect in

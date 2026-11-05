@@ -43,6 +43,15 @@ private let paneRadius: CGFloat = 6
 
 /// A bar's view: every click in it is taken at once, its window being key or not.
 private final class BarHost: NSHostingView<PaneBar> {
+    required init(rootView: PaneBar) {
+        super.init(rootView: rootView)
+        // Up to the card's top, under the window's title bar: no room kept for it.
+        safeAreaRegions = []
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
@@ -323,6 +332,14 @@ final class PagePlacer {
     private var last: (panes: [Pane], frame: NSRect?)?
     /// Moves the page under the pointer back or forward (init).
     private var mouseButtons: Any?
+
+    /// Fades the card back, like Arc's behind Peek, or brings it forward again.
+    func fade(_ back: Bool) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            card.animator().alphaValue = back ? 0.3 : 1
+        }
+    }
 
     /// The view filling the window over its content view, which holds the card, and the views
     /// placed over it from the window's top left corner, like the sidebar.

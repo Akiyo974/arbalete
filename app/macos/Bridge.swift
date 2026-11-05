@@ -616,6 +616,7 @@ final class NativeWindow {
         pages.didPlace = { [weak handles] in handles?.arrange() }
         pageDrop = PageDrop(in: window, model: app)
         peek = PeekChrome(in: window, model: app)
+        peek.fade = { [weak pages] in pages?.fade($0) }
         capture = CaptureChrome(in: window, model: app)
     }
 

@@ -45,6 +45,14 @@ unsafe extern "C" {
     fn arbalete_ui_peek(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
     fn arbalete_ui_peek_view(window: u32) -> *mut std::ffi::c_void;
     fn arbalete_ui_peek_closed(window: u32);
+    fn arbalete_ui_peek_bar(
+        window: u32,
+        url: *const c_char,
+        color: *const c_char,
+        back: bool,
+        forward: bool,
+        loading: bool,
+    );
     fn arbalete_ui_capture(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
     fn arbalete_ui_note(window: u32, text: *const c_char, x: f64, y: f64);
     fn arbalete_ui_copy_png(
@@ -265,6 +273,15 @@ pub fn peek_view(window: u32) -> Option<*mut std::ffi::c_void> {
     // SAFETY: a plain value; the view lives until peek_closed.
     let view = unsafe { arbalete_ui_peek_view(window) };
     (!view.is_null()).then_some(view)
+}
+
+/// Gives Peek's bar in the window `window` its page's address, the color at its top as #rrggbb
+/// (empty while unknown), and its state.
+pub fn peek_bar(window: u32, url: &str, color: &str, back: bool, forward: bool, loading: bool) {
+    let url = CString::new(url).unwrap_or_default();
+    let color = CString::new(color).unwrap_or_default();
+    // SAFETY: plain values and strings that outlive the call.
+    unsafe { arbalete_ui_peek_bar(window, url.as_ptr(), color.as_ptr(), back, forward, loading) };
 }
 
 /// Takes Peek's page's view out of the window `window`, its browser closing, which destroys it.

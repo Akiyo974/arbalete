@@ -4,8 +4,8 @@
 //! relies on is implemented explicitly.
 
 use crate::command::{
-    Button, ButtonView, Command, DownloadAction, ExtensionTarget, HitTarget, LittleAction, Setting,
-    SiteData, Target, Zoom,
+    Button, ButtonView, Command, DownloadAction, ExtensionTarget, HitTarget, LittleAction,
+    PeekAction, Setting, SiteData, Target, Zoom,
 };
 use crate::downloads::{self, Download};
 use crate::extensions;
@@ -4684,7 +4684,18 @@ pub fn page_top_color(page: i32, color: &str) {
             .iter()
             .find_map(|(tab, live)| (live.browser.identifier() == page).then_some(*tab))
     });
-    let (Some(tab), Some(hex)) = (tab, css_hex(color)) else {
+    let Some(hex) = css_hex(color) else { return };
+    let Some(tab) = tab else {
+        // Peek's page tints its bar.
+        let changed = PEEK.with_borrow_mut(|peek| {
+            let peek = peek
+                .as_mut()
+                .filter(|peek| peek.browser.identifier() == page)?;
+            (peek.color.as_ref() != Some(&hex)).then(|| peek.color = Some(hex))
+        });
+        if changed.is_some() {
+            send_peek();
+        }
         return;
     };
     if TOP_COLORS.with_borrow_mut(|colors| colors.insert(tab, hex.clone())) != Some(hex) {
@@ -5346,14 +5357,17 @@ fn send_panes() {
 /// a tab or a split.
 struct Peek {
     browser: Browser,
+    /// The color at the top of its page, as #rrggbb, which tints its bar, once known.
+    color: Option<String>,
 }
 
-/// Peek's card in a window of `size`, like Arc's: 80% of its width, centered, 12 points from its
-/// top and bottom.
+/// Peek's card in a window of `size`, like Arc's: 80% of the page's card's width, centered on it,
+/// 12 points from the window's top and bottom.
 fn peek_frame(size: &Size) -> Rect {
-    let width = size.width * 4 / 5;
+    let card = win().sidebar_mode.get().layout(size).card;
+    let width = card.width * 4 / 5;
     Rect {
-        x: (size.width - width) / 2,
+        x: card.x + (card.width - width) / 2,
         y: 12,
         width,
         height: size.height - 24,
@@ -5406,7 +5420,60 @@ fn peek(url: &str) {
     if let Some(host) = browser.host() {
         host.set_focus(1);
     }
-    PEEK.set(Some(Peek { browser }));
+    // The extensions learn it, and it tells the color at its top.
+    extensions::page_created(profile, &browser);
+    PEEK.set(Some(Peek {
+        browser,
+        color: None,
+    }));
+    send_peek();
+}
+
+/// Whether `browser` is Peek's page.
+fn is_peek(browser: &Browser) -> bool {
+    PEEK.with_borrow(|peek| {
+        peek.as_ref()
+            .is_some_and(|peek| browser.is_same(Some(&mut peek.browser.clone())) == 1)
+    })
+}
+
+/// Gives Peek's bar its page's address, and whether it can go back or forward and loads.
+fn send_peek() {
+    let Some((browser, color)) = PEEK.with_borrow(|peek| {
+        peek.as_ref()
+            .map(|peek| (peek.browser.clone(), peek.color.clone()))
+    }) else {
+        return;
+    };
+    let url = browser
+        .main_frame()
+        .map(|frame| CefString::from(&frame.url()).to_string())
+        .unwrap_or_default();
+    #[cfg(target_os = "macos")]
+    crate::native::peek_bar(
+        win().id,
+        &url,
+        color.as_deref().unwrap_or_default(),
+        browser.can_go_back() == 1,
+        browser.can_go_forward() == 1,
+        browser.is_loading() == 1,
+    );
+    #[cfg(not(target_os = "macos"))]
+    let _ = (url, color);
+}
+
+/// Does what Peek's bar asks of its page.
+fn peek_page(action: PeekAction) {
+    let Some(browser) = PEEK.with_borrow(|peek| peek.as_ref().map(|peek| peek.browser.clone()))
+    else {
+        return;
+    };
+    match action {
+        PeekAction::Back => browser.go_back(),
+        PeekAction::Forward => browser.go_forward(),
+        PeekAction::Reload => browser.reload(),
+        PeekAction::Stop => browser.stop_load(),
+    }
 }
 
 /// Peek follows the window's size.
@@ -5435,6 +5502,7 @@ fn close_peek() {
     let Some(peek) = PEEK.take() else { return };
     #[cfg(target_os = "macos")]
     crate::native::peek(win().id, None);
+    extensions::page_closed(peek.browser.identifier());
     // Its card's view goes as it closes (BrowserLifeSpan's do_close), which CEF would otherwise
     // close the window of.
     PEEK_CLOSING.set(Some((peek.browser.identifier(), win().id)));
@@ -6102,6 +6170,7 @@ fn run_command(command: Command) {
         (Command::SwitchPane(next), _) => switch_pane(next),
         (Command::Peek(url), _) => peek(&url),
         (Command::ClosePeek, _) => close_peek(),
+        (Command::PeekPage(action), _) => peek_page(action),
         (Command::KeepPeek { split }, _) => keep_peek(split),
         (Command::FlipPanes(split), _) => flip_panes(split),
         (Command::PreviewPane(index), _) => preview_pane(index),
@@ -6120,6 +6189,9 @@ fn run_command(command: Command) {
             Ok((sidebar.remove_split(split)?, profile))
         }),
         (Command::Close(None), _) if settings_focused() => close_settings(),
+        // Like Arc's, ⌘W closes Peek and ⌘O keeps its page in a tab.
+        (Command::Close(None), _) if peek_shown() => close_peek(),
+        (Command::OpenLittleInSpace, _) if peek_shown() => keep_peek(false),
         (Command::Close(None), _) if focused_little().is_some() => {
             if let Some(window) = focused_little().and_then(little_window) {
                 window.close();
@@ -7640,6 +7712,9 @@ wrap_display_handler! {
             }
             let url = url.map(CefString::to_string).unwrap_or_default();
             let Some(browser) = browser else { return };
+            if is_peek(browser) {
+                return send_peek();
+            }
             let Some(tab) = page_tab(browser) else {
                 return little_changed(browser, |little| little.url = url);
             };
@@ -7798,6 +7873,12 @@ wrap_load_handler! {
         }
 
         fn on_loading_state_change(&self, browser: Option<&mut Browser>, is_loading: i32, can_go_back: i32, can_go_forward: i32) {
+            if browser.as_deref().is_some_and(is_peek) {
+                if is_loading == 0 {
+                    ask_top_color(browser.as_deref());
+                }
+                return send_peek();
+            }
             #[cfg(target_os = "macos")]
             cover_revived(browser.as_deref(), is_loading == 1);
             if let Some(tab) = browser.as_deref().and_then(page_tab) {

@@ -25,6 +25,15 @@ pub enum LittleAction {
     OpenInSpace,
 }
 
+/// What Peek's bar asks of its page (Command::PeekPage).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PeekAction {
+    Back,
+    Forward,
+    Reload,
+    Stop,
+}
+
 /// The UI view a button shows in (Command::ShowSiteControls).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ButtonView {
@@ -326,6 +335,9 @@ pub enum Command {
     Peek(String),
     /// Closes Peek: `peek/close`.
     ClosePeek,
+    /// Moves Peek's page back or forward, reloads or stops it, from its bar: `peek/back`,
+    /// `peek/forward`, `peek/reload`, `peek/stop`.
+    PeekPage(PeekAction),
     /// Opens Peek's page in a tab of its own, or beside the selected tab in a split:
     /// `peek/tab`, `peek/split`.
     KeepPeek {
@@ -917,6 +929,10 @@ impl Command {
                     "pane/close" => return Some(Self::ClosePane),
                     "pane/next" => return Some(Self::SwitchPane(true)),
                     "peek/close" => return Some(Self::ClosePeek),
+                    "peek/back" => return Some(Self::PeekPage(PeekAction::Back)),
+                    "peek/forward" => return Some(Self::PeekPage(PeekAction::Forward)),
+                    "peek/reload" => return Some(Self::PeekPage(PeekAction::Reload)),
+                    "peek/stop" => return Some(Self::PeekPage(PeekAction::Stop)),
                     "peek/tab" => return Some(Self::KeepPeek { split: false }),
                     "peek/split" => return Some(Self::KeepPeek { split: true }),
                     "pane/previous" => return Some(Self::SwitchPane(false)),
@@ -1065,7 +1081,9 @@ fn percent_decode(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Button, ButtonView, Command, ExtensionTarget, LittleAction, Setting, Target};
+    use super::{
+        Button, ButtonView, Command, ExtensionTarget, LittleAction, PeekAction, Setting, Target,
+    };
     use arbalete_core::search::SearchEngine;
     use arbalete_core::sidebar::{ArchiveAfter, Color};
 
@@ -1721,6 +1739,18 @@ mod tests {
     fn parses_import_commands() {
         assert_eq!(Command::parse("import/show"), Some(Command::ShowImport));
         assert_eq!(Command::parse("import/ready"), Some(Command::ImportReady));
+    }
+
+    #[test]
+    fn parses_peeks_bar() {
+        assert_eq!(
+            Command::parse("peek/back"),
+            Some(Command::PeekPage(PeekAction::Back))
+        );
+        assert_eq!(
+            Command::parse("peek/stop"),
+            Some(Command::PeekPage(PeekAction::Stop))
+        );
     }
 
     #[test]
