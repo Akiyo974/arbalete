@@ -7838,6 +7838,12 @@ wrap_download_handler! {
                 download.total = item.total_bytes().max(0);
                 download.speed = item.current_speed();
                 download.state = state;
+                // Where the file is saved, which Save As… asks, elsewhere than planned maybe.
+                let path = PathBuf::from(CefString::from(&item.full_path()).to_string());
+                if let Some(name) = path.file_name().map(|name| name.to_string_lossy().into_owned()) {
+                    download.name = name;
+                    download.path = path;
+                }
                 (*download != before, before.state != state)
             });
             // Only the end is saved: progress changes several times a second.
