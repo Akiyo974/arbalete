@@ -1367,6 +1367,11 @@ struct TakesKeyboard: NSViewRepresentable {
     }
 }
 
+/// The room a split tab's title needs to show at all: two or three letters and their ellipsis.
+private let minTitle: CGFloat = 30
+/// The room an ellipsis alone needs, standing for the title.
+private let minEllipsis: CGFloat = 14
+
 /// A split's tabs in one row, in equal parts: a click on one shows the split with that tab
 /// focused, the only one with a background, like Arc's.
 struct SplitRow: View {
@@ -1416,23 +1421,44 @@ struct SplitRow: View {
     /// closes it, or with Option takes it out of the split, like Arc's. The title stays, unseen,
     /// so that nothing moves.
     private func chip(_ tab: Tab) -> some View {
-        // Like Arc's, the title shortens beside the button that shows on hover.
-        HStack(spacing: 6) {
-            Favicon(url: tab.favicon, size: 14)
-            Text(tab.label).lineLimit(1)
-            Spacer(minLength: 0)
-            if hovered {
-                let separate = model.optionHeld
-                ChipButton(
-                    symbol: separate ? "rectangle.lefthalf.inset.filled.arrow.left" : "xmark",
-                    help: separate ? "Separate from Split View" : "Close \(tab.label)"
-                ) {
-                    model.run(separate ? "separate/\(tab.id)" : "close/\(tab.id)")
+        // Like Arc's, as the row narrows, the title shortens, then an ellipsis stands for it, then
+        // it goes, the icon staying where it is; on hover, the button shows
+        // at the right, only where it has room, the title shortening beside it.
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let leading: CGFloat = width >= 8 + 14 + 6 + minTitle + 4 ? 8 : 4
+            let trailing = leading / 2
+            let showsButton = hovered && width >= leading + 14 + 2 + 22 + trailing
+            // What is left of the row for the title, past the icon, the button and the margins.
+            let titleRoom = width - leading - 14 - 6 - trailing - (showsButton ? 2 + 22 : 0)
+            HStack(spacing: 0) {
+                Favicon(url: tab.favicon, size: 14)
+                // Like Arc's, an ellipsis alone stands for the title once its letters no longer
+                // fit.
+                if titleRoom >= minEllipsis {
+                    Text(titleRoom >= minTitle ? tab.label : "…")
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(width: titleRoom, alignment: .leading)
+                        .padding(.leading, 6)
+                }
+                Spacer(minLength: 0)
+                if showsButton {
+                    let separate = model.optionHeld
+                    ChipButton(
+                        symbol: separate ? "rectangle.lefthalf.inset.filled.arrow.left" : "xmark",
+                        help: separate ? "Separate from Split View" : "Close \(tab.label)"
+                    ) {
+                        model.run(separate ? "separate/\(tab.id)" : "close/\(tab.id)")
+                    }
+                    .padding(.leading, 2)
                 }
             }
+            .padding(.leading, leading)
+            .padding(.trailing, trailing)
+            .frame(width: width, height: 28, alignment: .leading)
+            .clipped()
         }
-        .padding(.leading, 8)
-        .padding(.trailing, 4)
         .font(.system(size: 14))
         .frame(height: 28)
         // Like Arc's, each tab of the split shown has its bubble.
