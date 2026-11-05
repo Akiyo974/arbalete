@@ -23,6 +23,8 @@ final class AppModel: ObservableObject {
     /// The Spaces there were when one was asked for, until it shows.
     var awaitingDraft: Set<Int>?
     @Published var downloads: [Download] = []
+    /// The pointer is over the sidebar: like Arc's, the divider offers to clear today's tabs.
+    @Published var sidebarHovered = false
     /// The download the media viewer shows (MediaViewer.swift).
     @Published var viewing: Int? {
         didSet { viewingChanged() }

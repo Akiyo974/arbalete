@@ -72,7 +72,10 @@ struct SidebarView: View {
             .padding(.horizontal, Measure.inset)
             .foregroundStyle(.primary)
             .overlay(alignment: .trailing) { CreateHint(model: model) }
-            .onHover { hovered = $0 }
+            .onHover {
+                hovered = $0
+                model.sidebarHovered = $0
+            }
             // Like Arc's, the sidebar's empty room offers the displayed Space's menu.
             .overlay(RightClick(underOthers: true) {
                 if let page = model.page { model.run("menu/space/\(page.space)") }
@@ -1026,33 +1029,31 @@ struct SpaceField: View {
     }
 }
 
-/// Between the pinned tabs and today's: hovered, it offers to close today's tabs.
+/// Between the pinned tabs and today's: like Arc's, while the pointer is over the sidebar it
+/// offers to close today's tabs, the line shortening for "↓ Clear".
 struct DividerRow: View {
     @ObservedObject var model: AppModel
     let clearable: Bool
     /// The pinned tabs' container, whose drop line shows on the divider while they are empty.
     var root: Int? = nil
-    private let _hovered = State<Bool>(initialValue: false)
-    private var hovered: Bool {
-        get { _hovered.wrappedValue }
-        nonmutating set { _hovered.wrappedValue = newValue }
-    }
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 12) {
             Rectangle().fill(Ink.divider).frame(height: 1)
-            if clearable && hovered {
+            if clearable && model.sidebarHovered {
                 Button("↓ Clear") { model.run("today/clear") }
                     .buttonStyle(.plain)
-                    .font(.system(size: 11))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .help("Close today's tabs")
+                    .transition(.opacity)
             }
         }
         .padding(.horizontal, 10)
         .frame(height: 20)
         .contentShape(Rectangle())
-        .onHover { hovered = $0 }
+        // Measured on Arc's: in and out in a tenth of a second.
+        .animation(.easeInOut(duration: 0.1), value: model.sidebarHovered)
         .overlay(alignment: .top) {
             if let root, model.dropTarget == .into(root) { InsertionLine(tint: model.themeColor) }
         }
@@ -1704,7 +1705,7 @@ struct SpaceIcons: View {
             .animation(.spring(response: spaceSlide, dampingFraction: 1), value: spaces.map(\.id))
             .animation(.spring(response: spaceSlide, dampingFraction: 1), value: model.state?.space)
         }
-        .frame(height: 24)
+        .frame(height: 32)
         .opacity(spaces.count > 1 ? 1 : 0)
     }
 }
@@ -1731,17 +1732,20 @@ struct SpaceIcon: View {
                 if let emoji = space.emoji {
                     SpaceGlyph(icon: emoji, size: 12).opacity(displayed ? 1 : 0.5)
                 } else {
-                    // Measured on Arc's: 8 points with room, 4 without, dimmed while the
-                    // window is inactive.
-                    let size: CGFloat = slot >= 22.5 ? 8 : 4
+                    // Measured on Arc's: 8 points shown, 7 not, 4 without room; brighter
+                    // hovered, dimmed while the window is inactive.
+                    let size: CGFloat = slot < 22.5 ? 4 : displayed ? 8 : 7
+                    let ink: Double = displayed ? 0.5 : hovered ? 0.36 : 0.18
                     Circle()
-                        .fill(.primary.opacity((displayed ? 0.5 : 0.18) * (model.active ? 1 : 0.5)))
+                        .fill(.primary.opacity(ink * (model.active ? 1 : 0.5)))
                         .frame(width: size, height: size)
                 }
             }
-            .frame(width: min(24, slot), height: 24)
+            // Measured on Arc's: a 34 by 32 square under the pointer, fading in and out.
+            .frame(width: min(34, slot), height: 32)
             .background(
-                RoundedRectangle(cornerRadius: 6).fill(.primary.opacity(hovered ? 0.1 : 0)))
+                RoundedRectangle(cornerRadius: 8).fill(.primary.opacity(hovered ? 0.06 : 0)))
+            .animation(.easeInOut(duration: 0.18), value: hovered)
             .frame(width: slot)
             .contentShape(Rectangle())
         }
