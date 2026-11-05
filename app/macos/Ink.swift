@@ -21,10 +21,10 @@ extension Color {
 
 enum Ink {
     /// A row or a pill at rest, like the address's, and a row hovered.
-    static let item = Color.ink((navy, 0.07), (0xFAFBFF, 0.10))
+    static let item = Color.ink((navy, 0.07), (0xFAFBFF, 0.08))
     static let itemHovered = Color.ink((navy, 0.12), (0xFAFBFF, 0.15))
     /// The selected tab's row, and its shadow in light themes.
-    static let selected = Color.ink((0xFFFFFF, 0.85), (0xFAFBFF, 0.20))
+    static let selected = Color.ink((0xFFFFFF, 0.85), (0xFAFBFF, 0.17))
     static let selectedBehind = Color.ink((0xFFFFFF, 0.20), (0xFAFBFF, 0.10))
     /// The sidebar's buttons while another app is in front, under their own 75%.
     static let buttonBehind = Color.ink((navy, 0.37), (0xFFFFFF, 0.32))
@@ -51,11 +51,11 @@ enum Ink {
 /// The sidebar's measures, in points.
 enum Measure {
     /// A row's height, of which its background takes `rowFill`, inset by `inset` at its sides.
-    static let row: CGFloat = 40
+    static let row: CGFloat = 41
     static let rowFill: CGFloat = 36
     static let inset: CGFloat = 8
     /// Rows', tiles' and pills' corners.
-    static let radius: CGFloat = 12
+    static let radius: CGFloat = 10
     /// How far each folder level indents what it holds.
     static let indent: CGFloat = 16
     /// A favorite's tile.

@@ -1700,8 +1700,9 @@ struct SpaceIcons: View {
             .frame(width: room, height: geometry.size.height)
             // Like Arc's, a new Space's icon grows in as the others make room, and they resize
             // as the displayed one changes.
-            .animation(.easeInOut(duration: spaceSlide), value: spaces.map(\.id))
-            .animation(.easeInOut(duration: spaceSlide), value: model.state?.space)
+            // Like Arc's, measured: a quick start settling without overshoot.
+            .animation(.spring(response: spaceSlide, dampingFraction: 1), value: spaces.map(\.id))
+            .animation(.spring(response: spaceSlide, dampingFraction: 1), value: model.state?.space)
         }
         .frame(height: 24)
         .opacity(spaces.count > 1 ? 1 : 0)
