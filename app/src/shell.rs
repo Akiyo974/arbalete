@@ -1746,6 +1746,9 @@ wrap_urlrequest_client! {
 
 /// Loads an address in the selected tab, or in a new one when none is selected.
 fn navigate(url: &str) {
+    if is_chrome_page(url) {
+        return open_chrome_page(url);
+    }
     show_overlay(false);
     let selected = STATE.with_borrow_mut(|state| active_tab(&mut state.sidebar).is_some());
     if content().is_some() {
@@ -2222,27 +2225,47 @@ fn clear_site_data(browser: &Browser, data: SiteData) {
 }
 
 thread_local! {
-    /// The window showing a site's settings, Chromium's page, while it is open.
-    static SITE_SETTINGS_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
+    /// The window showing Chromium's own pages, and its page, while it is open.
+    static CHROME_PAGE: RefCell<Option<(Window, BrowserView)>> = const { RefCell::new(None) };
+}
+
+/// Whether `url` is one of Chromium's own pages, like chrome://extensions, which Alloy pages do
+/// not show.
+fn is_chrome_page(url: &str) -> bool {
+    url.starts_with("chrome://")
+}
+
+/// Shows one of Chromium's own pages, like a site's settings or the extensions, in a Chrome-style
+/// window of its own, in the displayed Space's profile: Alloy pages have none, and macOS has no
+/// Chrome style in a native view. The window open loads it instead.
+fn open_chrome_page(url: &str) {
+    hide_site_controls();
+    show_overlay(false);
+    let open = CHROME_PAGE.with_borrow(Clone::clone);
+    if let Some((window, view)) = open
+        && let Some(frame) = view.browser().and_then(|browser| browser.main_frame())
+    {
+        frame.load_url(Some(&CefString::from(url)));
+        window.activate();
+        return;
+    }
+    window_create_top_level(Some(&mut ChromePageWindowDelegate::new(
+        displayed_profile(),
+        url.to_string(),
+    )));
 }
 
 /// Shows the selected tab's site's settings, like Arc's All Site Settings…: Chromium's own page
-/// for the site, in a Chrome-style window of its own, as Alloy pages have no settings pages; in
-/// place of the one open.
+/// for the site.
 fn show_site_settings() {
     let Some(origin) = selected_url().and_then(|url| origin(&url).map(str::to_string)) else {
         return;
     };
-    if let Some(window) = SITE_SETTINGS_WINDOW.take() {
-        window.close();
-    }
     // The origin as a query's value: its ":" and "/" encoded, like Chrome's own links to it.
     let site = origin.replace(':', "%3A").replace('/', "%2F");
-    let url = format!("chrome://settings/content/siteDetails?site={site}");
-    window_create_top_level(Some(&mut SiteSettingsWindowDelegate::new(
-        displayed_profile(),
-        url,
-    )));
+    open_chrome_page(&format!(
+        "chrome://settings/content/siteDetails?site={site}"
+    ));
 }
 
 /// A web page's origin: its scheme, host and port.
@@ -3503,21 +3526,21 @@ wrap_window_delegate! {
     }
 }
 
-/// The size of the window showing a site's settings.
-const SITE_SETTINGS_SIZE: Size = Size {
+/// The size of the window showing Chromium's own pages.
+const CHROME_PAGE_SIZE: Size = Size {
     width: 820,
     height: 720,
 };
 
 wrap_window_delegate! {
-    struct SiteSettingsWindowDelegate {
+    struct ChromePageWindowDelegate {
         profile: ProfileId,
         url: String,
     }
 
     impl ViewDelegate {
         fn preferred_size(&self, _view: Option<&mut View>) -> Size {
-            SITE_SETTINGS_SIZE
+            CHROME_PAGE_SIZE
         }
     }
 
@@ -3526,25 +3549,25 @@ wrap_window_delegate! {
     impl WindowDelegate {
         fn on_window_created(&self, window: Option<&mut Window>) {
             let window = window.expect("window").clone();
-            window.set_title(Some(&CefString::from("Site Settings")));
+            window.set_title(Some(&CefString::from("Chromium")));
             window.set_to_fill_layout();
             let view = browser_view_create(
-                Some(&mut SiteSettingsClient::new()),
+                Some(&mut ChromePageClient::new()),
                 Some(&CefString::from(self.url.as_str())),
                 Some(&BrowserSettings::default()),
                 None,
                 profile_context(self.profile).as_mut(),
                 Some(&mut ChromeViewDelegate::new()),
             )
-            .expect("site settings view");
+            .expect("Chromium page view");
             window.add_child_view(Some(&mut View::from(&view)));
-            window.center_window(Some(&SITE_SETTINGS_SIZE));
+            window.center_window(Some(&CHROME_PAGE_SIZE));
             window.show();
-            SITE_SETTINGS_WINDOW.set(Some(window));
+            CHROME_PAGE.set(Some((window, view)));
         }
 
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
-            SITE_SETTINGS_WINDOW.set(None);
+            CHROME_PAGE.set(None);
         }
 
         fn can_close(&self, _window: Option<&mut Window>) -> i32 { 1 }
@@ -3559,9 +3582,9 @@ wrap_window_delegate! {
     }
 }
 
-// The site settings window's page.
+// The page of the window showing Chromium's own pages.
 wrap_client! {
-    struct SiteSettingsClient {}
+    struct ChromePageClient {}
 
     impl Client {
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
@@ -4397,6 +4420,9 @@ fn active_tab(sidebar: &mut Sidebar) -> Option<&mut Tab> {
 
 /// Opens a tab in the displayed Space and shows it.
 fn open_tab(url: &str) {
+    if is_chrome_page(url) {
+        return open_chrome_page(url);
+    }
     update_sidebar(|sidebar| {
         let space = sidebar.displayed().id;
         let tab = sidebar.open_tab(space, url).expect("the displayed Space");
@@ -6757,13 +6783,8 @@ fn run_command(command: Command) {
         (Command::ShowCertificate, _) => show_certificate(),
         (Command::ShowExtensionsPage, _) => extensions::load_unpacked(displayed_profile()),
         (Command::UpdateExtensions, _) => extensions::update(displayed_profile()),
-        (Command::ManageExtensions, _) => {
-            hide_site_controls();
-            if win().sidebar_mode.get() == SidebarMode::Hidden {
-                set_sidebar(SidebarMode::Shown);
-            }
-            dispatch(&win().sidebar, r#"new Event("arbalete:show-extensions")"#);
-        }
+        // Like Arc's, Chromium's extensions page.
+        (Command::ManageExtensions, _) => open_chrome_page("chrome://extensions"),
         (Command::ReloadExtensions, _) => {
             extensions::reload(STATE.with_borrow(|state| state.sidebar.displayed().profile));
         }

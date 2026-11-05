@@ -123,11 +123,19 @@ pub fn extension_menu(id: &str, name: &str, options: bool, pinned: bool) -> Vec<
         pin,
         Action::Run(Command::PinExtension(id.to_string(), !pinned)),
     ));
+    // Like Arc's, Chromium's page of the extension: what it may read and change, and its
+    // permissions.
+    let page = format!("chrome://extensions/?id={id}");
     menu.push(Entry::Separator);
     menu.push(item(
         "manage",
         "Manage Extension",
-        Action::Run(Command::ManageExtensions),
+        Action::Run(Command::Open(page.clone())),
+    ));
+    menu.push(item(
+        "permissions",
+        "View Web Permissions",
+        Action::Run(Command::Open(page)),
     ));
     menu
 }
@@ -580,9 +588,14 @@ mod tests {
                 "Remove from Arbalete…",
                 "Unpin",
                 "-",
-                "Manage Extension"
+                "Manage Extension",
+                "View Web Permissions"
             ]
         );
+        assert!(matches!(
+            find(extension_menu("a", "Dark Reader", true, true), "manage"),
+            Some(Action::Run(Command::Open(url))) if url == "chrome://extensions/?id=a"
+        ));
         assert!(matches!(
             find(menu, "store"),
             Some(Action::Run(Command::Open(url)))
