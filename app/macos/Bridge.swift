@@ -612,7 +612,9 @@ final class NativeWindow {
         let site = SiteControls(app: app)
         siteControls = site
         // Arc's, measured from a recording.
-        let siteSurface = Surface(in: window, radius: 18) { SiteView(controls: site) }
+        let siteSurface = Surface(in: window, radius: 20) { SiteView(controls: site) }
+        // Lighter than the other panels, like Arc's.
+        siteSurface.tint = NSColor(white: 1, alpha: 0.1)
         siteSurface.pops = true
         siteSurface.visibility = { shown in
             if app.siteControlsShown != shown { app.siteControlsShown = shown }

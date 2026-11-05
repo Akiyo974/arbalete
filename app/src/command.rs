@@ -119,6 +119,10 @@ pub enum Command {
     /// saves or edits.
     Capture,
     CaptureArea,
+    /// Copies the whole page, from the site controls: `page/capture/full`.
+    CaptureFull,
+    /// Shows the selected tab's site's settings, Chromium's page, like Arc's: `site/settings`.
+    ShowSiteSettings,
     /// Scrolls the page under a capture's veil, by `dx` and `dy` at `x` and `y`, in its points:
     /// `page/capture/scroll/<dx>/<dy>/<x>/<y>`.
     ScrollCapture(f64, f64, f64, f64),
@@ -589,6 +593,7 @@ impl Command {
             "page/devtools/elements" => Some(Self::DevToolsPanel("elements")),
             "page/capture" => Some(Self::Capture),
             "page/capture/area" => Some(Self::CaptureArea),
+            "page/capture/full" => Some(Self::CaptureFull),
             "settings/ready" => Some(Self::SettingsReady),
             "settings/hide" => Some(Self::HideSettings),
             "import/close" => Some(Self::CloseImport),
@@ -596,6 +601,7 @@ impl Command {
             "find/hide" => Some(Self::HideFind),
             "extension/close" => Some(Self::CloseExtensionPopup),
             "site/hide" => Some(Self::HideSiteControls),
+            "site/settings" => Some(Self::ShowSiteSettings),
             "theme/hide" => Some(Self::HideThemePicker),
             "site/store" => Some(Self::ShowStore),
             "site/certificate" => Some(Self::ShowCertificate),
@@ -1870,6 +1876,14 @@ mod tests {
         assert_eq!(
             Command::parse("page/capture/area"),
             Some(Command::CaptureArea)
+        );
+        assert_eq!(
+            Command::parse("page/capture/full"),
+            Some(Command::CaptureFull)
+        );
+        assert_eq!(
+            Command::parse("site/settings"),
+            Some(Command::ShowSiteSettings)
         );
         assert_eq!(
             Command::parse("page/capture/scroll/0/-12.5/300/200"),

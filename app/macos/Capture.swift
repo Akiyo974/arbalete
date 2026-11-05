@@ -49,6 +49,8 @@ final class CaptureChrome {
     private let framing = FramingModel()
     private let framePanel: Surface
     private var editor: CaptureEditor?
+    /// What the note's Save button saves.
+    private var noteImage: CGImage?
     /// The marks the editor drew on the part picked, which it edits again.
     private var marks: [Mark] = []
     /// The page's frame and its picture, while a capture shows.
@@ -74,7 +76,10 @@ final class CaptureChrome {
         framePanel.takesKeyboard = true
         framePanel.resigned = { [weak self] in self?.closeFraming() }
         framing.capture = { [weak self] in self?.copyFramed() }
-        noteModel.save = { [weak self] in self?.saveFramed() }
+        noteModel.save = { [weak self] in
+            guard let self, let image = self.noteImage else { return }
+            saveImage(image, named: self.title, in: self.parent)
+        }
         veil.picked = { [weak self] rect in self?.picked(rect) }
         veil.done = { [weak self] in self?.closeVeil() }
         veil.copy = { [weak self] in self?.copyPart() }
@@ -123,6 +128,16 @@ final class CaptureChrome {
             framePanel.place(
                 true, NSRect(x: x, y: anchor.maxY + 2, width: size.width, height: size.height))
         }
+    }
+
+    /// Copies all of the page, from the site controls, which a note tells, with a button saving
+    /// it.
+    func copyWhole(_ png: Data, frame: NSRect) {
+        guard let image = NSBitmapImageRep(data: png)?.cgImage else { return }
+        self.frame = frame
+        copyImage(image)
+        noteImage = image
+        tell("Full Page Copied to Clipboard", saving: true, at: NSPoint(x: frame.maxX - 6, y: frame.minY + 6))
     }
 
     // MARK: A part of the page
@@ -192,12 +207,8 @@ final class CaptureChrome {
     private func copyFramed() {
         guard let image = framing.framed else { return }
         copyImage(image)
+        noteImage = image
         tell("Screenshot Copied to Clipboard", saving: true, at: NSPoint(x: frame.maxX - 4, y: frame.minY - 33))
-    }
-
-    private func saveFramed() {
-        guard let image = framing.framed else { return }
-        saveImage(image, named: title, in: parent)
     }
 
     private func closeFraming() {
@@ -813,14 +824,18 @@ struct PageBlocks: Decodable {
 
 @_cdecl("arbalete_ui_captured")
 public func captured(
-    _ id: UInt32, _ base64: UnsafePointer<CChar>, _ area: Bool, _ x: Double, _ y: Double,
+    _ id: UInt32, _ base64: UnsafePointer<CChar>, _ mode: UInt32, _ x: Double, _ y: Double,
     _ width: Double, _ height: Double, _ blocks: UnsafePointer<CChar>
 ) {
     guard let png = Data(base64Encoded: String(cString: base64)) else { return }
     let blocks = try? JSONDecoder().decode(PageBlocks.self, from: Data(String(cString: blocks).utf8))
     MainActor.assumeIsolated {
-        nativeWindows[id]?.capture.show(
-            png, area: area, frame: NSRect(x: x, y: y, width: width, height: height),
-            blocks: blocks)
+        let frame = NSRect(x: x, y: y, width: width, height: height)
+        guard let capture = nativeWindows[id]?.capture else { return }
+        if mode == 2 {
+            capture.copyWhole(png, frame: frame)
+        } else {
+            capture.show(png, area: mode == 1, frame: frame, blocks: blocks)
+        }
     }
 }

@@ -2221,6 +2221,30 @@ fn clear_site_data(browser: &Browser, data: SiteData) {
     }
 }
 
+thread_local! {
+    /// The window showing a site's settings, Chromium's page, while it is open.
+    static SITE_SETTINGS_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
+}
+
+/// Shows the selected tab's site's settings, like Arc's All Site Settings…: Chromium's own page
+/// for the site, in a Chrome-style window of its own, as Alloy pages have no settings pages; in
+/// place of the one open.
+fn show_site_settings() {
+    let Some(origin) = selected_url().and_then(|url| origin(&url).map(str::to_string)) else {
+        return;
+    };
+    if let Some(window) = SITE_SETTINGS_WINDOW.take() {
+        window.close();
+    }
+    // The origin as a query's value: its ":" and "/" encoded, like Chrome's own links to it.
+    let site = origin.replace(':', "%3A").replace('/', "%2F");
+    let url = format!("chrome://settings/content/siteDetails?site={site}");
+    window_create_top_level(Some(&mut SiteSettingsWindowDelegate::new(
+        displayed_profile(),
+        url,
+    )));
+}
+
 /// A web page's origin: its scheme, host and port.
 fn origin(url: &str) -> Option<&str> {
     let (scheme, _) = url.split_once("://")?;
@@ -2258,6 +2282,19 @@ const INSPECT_AT_ID: u64 = APP_MESSAGES + 1;
 const BLOCKS_ID: u64 = APP_MESSAGES + 2;
 const CAPTURE_ID: u64 = APP_MESSAGES + 3;
 const SCROLL_ID: u64 = APP_MESSAGES + 4;
+const LAYOUT_ID: u64 = APP_MESSAGES + 5;
+
+/// The tallest picture of a whole page, in its points, which Chromium can draw at once.
+const FULL_PAGE_MAX: f64 = 15_000.0;
+
+/// What a capture is for: the page framed, like Arc's Portrait Mode; a part of it to pick; or all
+/// of it, scrolled down to its end. The interface knows them by these numbers.
+#[derive(Clone, Copy, PartialEq)]
+enum CaptureMode {
+    Portrait = 0,
+    Area = 1,
+    Full = 2,
+}
 
 /// Lists the page's blocks that show, which a capture of a part picks with a click, like Arc's:
 /// the elements laid out as boxes, or pictures and controls, from 12 points across, but the whole
@@ -2688,7 +2725,7 @@ fn page_frame() -> Option<Rect> {
 /// The capture under way: whether its part is to pick, the picture and the page's blocks once
 /// they come, and what brings the page's protocol messages.
 struct Capturing {
-    area: bool,
+    mode: CaptureMode,
     picture: Option<String>,
     blocks: Option<String>,
     _observer: Option<Registration>,
@@ -2701,19 +2738,25 @@ thread_local! {
 
 /// Captures the shown page, like Arc's: the interface frames it on a color, or shows it in a veil
 /// where a drag picks the part to copy, save or edit.
-fn capture(area: bool) {
+fn capture(mode: CaptureMode) {
     let Some(host) = content().and_then(|browser| browser.host()) else {
         return;
     };
     let observer = host.add_dev_tools_message_observer(Some(&mut CaptureObserver::new()));
+    let area = mode == CaptureMode::Area;
     CAPTURING.set(Some(Capturing {
-        area,
+        mode,
         picture: None,
         // Only a part is picked among them.
         blocks: (!area).then(|| "null".to_string()),
         _observer: observer,
     }));
-    let ask = json!({ "id": CAPTURE_ID, "method": "Page.captureScreenshot", "params": { "format": "png" } });
+    // The whole page: how tall it is first.
+    let ask = if mode == CaptureMode::Full {
+        json!({ "id": LAYOUT_ID, "method": "Page.getLayoutMetrics" })
+    } else {
+        json!({ "id": CAPTURE_ID, "method": "Page.captureScreenshot", "params": { "format": "png" } })
+    };
     host.send_dev_tools_message(Some(ask.to_string().as_bytes()));
     if area {
         let params = json!({ "expression": BLOCKS_SCRIPT, "returnByValue": true });
@@ -2744,7 +2787,7 @@ wrap_task! {
     impl Task {
         fn execute(&self) {
             if CAPTURE_SCROLLS.get() == self.scroll && CAPTURING.with_borrow(Option::is_none) {
-                capture(true);
+                capture(CaptureMode::Area);
             }
         }
     }
@@ -2765,6 +2808,19 @@ wrap_task! {
 /// Hands the page's picture to the interface, over the page.
 fn capture_answered(message: &str) {
     let answer: serde_json::Value = serde_json::from_str(message).unwrap_or_default();
+    if answer["id"] == LAYOUT_ID {
+        // All of the page, as tall as Chromium draws at once.
+        let size = &answer["result"]["cssContentSize"];
+        let width = size["width"].as_f64().unwrap_or(0.0);
+        let height = size["height"].as_f64().unwrap_or(0.0).min(FULL_PAGE_MAX);
+        let clip = json!({ "x": 0, "y": 0, "width": width, "height": height, "scale": 1 });
+        let params = json!({ "format": "png", "captureBeyondViewport": true, "clip": clip });
+        let ask = json!({ "id": CAPTURE_ID, "method": "Page.captureScreenshot", "params": params });
+        if let Some(host) = content().and_then(|browser| browser.host()) {
+            host.send_dev_tools_message(Some(ask.to_string().as_bytes()));
+        }
+        return;
+    }
     let ready = CAPTURING.with_borrow_mut(|capturing| {
         let capturing = capturing.as_mut()?;
         if answer["id"] == CAPTURE_ID {
@@ -2778,7 +2834,7 @@ fn capture_answered(message: &str) {
         return;
     }
     let Some(Capturing {
-        area,
+        mode,
         picture: Some(picture),
         blocks: Some(blocks),
         ..
@@ -2788,10 +2844,10 @@ fn capture_answered(message: &str) {
     };
     #[cfg(target_os = "macos")]
     if let Some(frame) = page_frame() {
-        crate::native::captured(win().id, &picture, area, &frame, &blocks);
+        crate::native::captured(win().id, &picture, mode as u32, &frame, &blocks);
     }
     #[cfg(not(target_os = "macos"))]
-    let _ = (picture, area, blocks);
+    let _ = (picture, mode, blocks);
 }
 
 // Brings a page's answers to a capture under way.
@@ -3443,6 +3499,73 @@ wrap_window_delegate! {
 
         fn window_runtime_style(&self) -> RuntimeStyle {
             RuntimeStyle::CHROME
+        }
+    }
+}
+
+/// The size of the window showing a site's settings.
+const SITE_SETTINGS_SIZE: Size = Size {
+    width: 820,
+    height: 720,
+};
+
+wrap_window_delegate! {
+    struct SiteSettingsWindowDelegate {
+        profile: ProfileId,
+        url: String,
+    }
+
+    impl ViewDelegate {
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            SITE_SETTINGS_SIZE
+        }
+    }
+
+    impl PanelDelegate {}
+
+    impl WindowDelegate {
+        fn on_window_created(&self, window: Option<&mut Window>) {
+            let window = window.expect("window").clone();
+            window.set_title(Some(&CefString::from("Site Settings")));
+            window.set_to_fill_layout();
+            let view = browser_view_create(
+                Some(&mut SiteSettingsClient::new()),
+                Some(&CefString::from(self.url.as_str())),
+                Some(&BrowserSettings::default()),
+                None,
+                profile_context(self.profile).as_mut(),
+                Some(&mut ChromeViewDelegate::new()),
+            )
+            .expect("site settings view");
+            window.add_child_view(Some(&mut View::from(&view)));
+            window.center_window(Some(&SITE_SETTINGS_SIZE));
+            window.show();
+            SITE_SETTINGS_WINDOW.set(Some(window));
+        }
+
+        fn on_window_destroyed(&self, _window: Option<&mut Window>) {
+            SITE_SETTINGS_WINDOW.set(None);
+        }
+
+        fn can_close(&self, _window: Option<&mut Window>) -> i32 { 1 }
+        fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 { 1 }
+        fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 1 }
+        fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 1 }
+        fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 1 }
+
+        fn window_runtime_style(&self) -> RuntimeStyle {
+            RuntimeStyle::CHROME
+        }
+    }
+}
+
+// The site settings window's page.
+wrap_client! {
+    struct SiteSettingsClient {}
+
+    impl Client {
+        fn life_span_handler(&self) -> Option<LifeSpanHandler> {
+            Some(BrowserLifeSpan::new(None))
         }
     }
 }
@@ -6594,8 +6717,10 @@ fn run_command(command: Command) {
                 show_inspector(tab, panel, then);
             }
         }
-        (Command::Capture, Some(_)) => capture(false),
-        (Command::CaptureArea, Some(_)) => capture(true),
+        (Command::Capture, Some(_)) => capture(CaptureMode::Portrait),
+        (Command::CaptureArea, Some(_)) => capture(CaptureMode::Area),
+        (Command::CaptureFull, Some(_)) => capture(CaptureMode::Full),
+        (Command::ShowSiteSettings, _) => show_site_settings(),
         (Command::ScrollCapture(dx, dy, x, y), Some(_)) => scroll_capture(dx, dy, x, y),
         (Command::Stop, Some(browser)) => browser.stop_load(),
         (Command::ClearSiteData(data), Some(browser)) => clear_site_data(&browser, data),

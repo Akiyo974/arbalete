@@ -56,6 +56,11 @@ final class Surface {
     /// Its edge, a line just inside its outline.
     private let border = CAShapeLayer()
     private let host: NSView
+    /// A color over its blur, under its content, which lightens it like Arc's site controls.
+    private let tintView = NSView()
+    var tint: NSColor? {
+        didSet { tintView.layer?.backgroundColor = tint?.cgColor }
+    }
     private let parent: NSWindow
     private let radius: CGFloat
     /// Where a beak on its top edge points, from its left edge, like Arc's site controls: its top
@@ -97,6 +102,9 @@ final class Surface {
         host.autoresizingMask = [.width, .height]
         host.safeAreaRegions = []
         self.host = host
+        tintView.wantsLayer = true
+        tintView.autoresizingMask = [.width, .height]
+        effect.addSubview(tintView)
         effect.addSubview(host)
         holder.wantsLayer = true
         holder.layer?.shadowColor = NSColor.black.cgColor
@@ -246,6 +254,10 @@ final class Surface {
         border.path = outline
         (border.mask as? CAShapeLayer)?.path = outline
         holder.layer?.shadowPath = outline
+        tintView.frame = bounds
+        let mask = CAShapeLayer()
+        mask.path = outline
+        tintView.layer?.mask = mask
         var content = bounds
         if beak != nil { content.size.height -= Self.beakHeight }
         host.frame = content

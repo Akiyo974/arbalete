@@ -472,12 +472,13 @@ final class SiteControls: ObservableObject {
     }
 }
 
-/// The site controls' actions, the items of the site menu (site_menu in app/src/menu.rs).
+/// The site controls' actions, like Arc's: share, copy the link (where Arc has its Boosts),
+/// capture a part of the page, and capture all of it; their commands.
 private let siteActions = [
-    ("share", "Share", "square.and.arrow.up"),
-    ("copy-link", "Copy Link", "link"),
-    ("clear-cache", "Clear Cache", "trash"),
-    ("clear-cookies", "Clear Cookies", "circle.dotted"),
+    ("menu/choose/site/any/share", "Share", "square.and.arrow.up"),
+    ("menu/choose/site/any/copy-link", "Copy Link", "link"),
+    ("page/capture/area", "Capture", "camera"),
+    ("page/capture/full", "Capture Full Page", "text.viewfinder"),
 ]
 
 /// The site controls' panel, like Arc's, measured from a recording of it, in points: 236 wide,
@@ -491,12 +492,12 @@ struct SiteView: View {
             let app = controls.app
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 8) {
-                    ForEach(siteActions, id: \.0) { item, label, symbol in
+                    ForEach(siteActions, id: \.0) { command, label, symbol in
                         SiteTile(label: label, sunken: true) {
                             app.run("site/hide")
-                            app.run("menu/choose/site/any/\(item)")
+                            app.run(command)
                         } content: {
-                            Image(systemName: symbol).font(.system(size: 16))
+                            Image(systemName: symbol).font(.system(size: 17))
                         }
                     }
                 }
@@ -587,7 +588,7 @@ struct SiteView: View {
 }
 
 /// The site controls' "…" button, like Arc's: a round button that pulls down what the site keeps,
-/// and the extensions. Arc's Boosts and site settings have no counterpart here yet.
+/// the extensions and the site's settings. Arc's Boosts have no counterpart here.
 struct SiteMore: View {
     let app: AppModel
     private let hovered = State(initialValue: false)
@@ -599,6 +600,8 @@ struct SiteMore: View {
             Divider()
             Button("Manage Extensions…") { run("extension/manage") }
             Button("Add Extension…") { run("site/store") }
+            Divider()
+            Button("All Site Settings…") { run("site/settings") }
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 15, weight: .semibold))
@@ -736,7 +739,16 @@ struct SiteTile<Content: View>: View {
         return Group {
             if sunken {
                 // Darker than the panel, its top edge catching the light.
-                shape.fill(dark ? Color.black.opacity(0.45 - lit) : Color.white.opacity(0.7 + lit))
+                shape.fill(
+                    dark
+                        ? LinearGradient(
+                            colors: [Color(white: 0.13 + lit), Color(white: 0.07 + lit)],
+                            startPoint: .top, endPoint: .bottom)
+                        : LinearGradient(
+                            colors: [.white.opacity(0.85 + lit), .white.opacity(0.7 + lit)],
+                            startPoint: .top, endPoint: .bottom)
+                )
+                .shadow(color: .black.opacity(dark ? 0.35 : 0.1), radius: 1.5, y: 1)
                     .overlay(
                         shape.strokeBorder(
                             LinearGradient(
@@ -744,7 +756,7 @@ struct SiteTile<Content: View>: View {
                                 startPoint: .top, endPoint: .center),
                             lineWidth: 1))
             } else {
-                shape.fill(.primary.opacity(0.05 + lit))
+                shape.fill(.primary.opacity(0.08 + lit))
             }
         }
     }
