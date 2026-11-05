@@ -173,7 +173,8 @@ struct PageToolbar: View {
     }
 
     /// Like Arc's, measured: buttons 37 points apart from each end, the sidebar's toggle first
-    /// while it is not docked, the site controls and Split View last.
+    /// while it is not docked, the site controls and Split View last. Like Arc's, no extension's
+    /// button: the site controls show them.
     private var plain: some View {
         let tab = model.activeTab
         return ZStack {
@@ -181,9 +182,6 @@ struct PageToolbar: View {
                 BarStart(model: model)
                 Spacer()
                 if tab != nil {
-                    ForEach(model.state?.extensions ?? []) { ext in
-                        PinnedExtension(model: model, extension: ext, view: "toolbar")
-                    }
                     BarEnd(model: model)
                 }
             }
