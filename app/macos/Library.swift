@@ -332,26 +332,67 @@ struct MediaGrid: View {
                 && ["png", "jpg", "jpeg", "gif", "webp", "avif", "mp4", "m4v", "webm", "mov"].contains(ext)
                 && matches(model.query, download.name)
         }
-        if media.isEmpty { Empty(text: "No images or videos downloaded") }
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 6)], spacing: 6) {
+        if media.isEmpty {
+            // Like Arc's, a picture's outline over what found nothing, in the middle.
+            VStack(spacing: 18) {
+                Image(systemName: "photo.on.rectangle").font(.system(size: 40))
+                    .foregroundStyle(Ink.secondary.opacity(0.6))
+                Text(
+                    model.query.isEmpty
+                        ? "No images or videos downloaded" : "No results found for “\(model.query)”"
+                )
+                .font(.system(size: 13.5))
+                .foregroundStyle(Ink.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 180)
+        }
+        // Like Arc's, measured: two columns of 132-point tiles, 16 points apart, 8 between rows.
+        LazyVGrid(
+            columns: Array(repeating: GridItem(.fixed(132), spacing: 16), count: 2), spacing: 8
+        ) {
             ForEach(media) { download in
                 Button {
                     model.run("download/open/\(download.id)")
                 } label: {
-                    Group {
-                        if let image = uiImage("arbalete://ui/media/\(download.id)") {
-                            Image(nsImage: image).resizable().scaledToFill()
-                        } else {
-                            Image(systemName: "film").font(.system(size: 24))
-                        }
-                    }
-                    .frame(width: 90, height: 90)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    MediaTile(
+                        image: uiImage("arbalete://ui/media/\(download.id)"),
+                        video: ["mp4", "m4v", "webm", "mov"].contains(
+                            (download.name as NSString).pathExtension.lowercased()))
                 }
                 .buttonStyle(.plain)
                 .help(download.name)
             }
         }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 4)
+    }
+}
+
+/// A picture or a video downloaded, like Arc's: fitted in a tile, edged in white, a video with a
+/// play glyph.
+struct MediaTile: View {
+    let image: NSImage?
+    let video: Bool
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10).fill(Ink.item)
+            if let image {
+                Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
+                    .padding(4)
+                    .background(Color.white)
+                    .frame(maxWidth: 110, maxHeight: 110)
+            } else {
+                Image(systemName: video ? "film" : "photo").font(.system(size: 24))
+                    .foregroundStyle(Ink.secondary)
+            }
+            if video {
+                Image(systemName: "play.fill").font(.system(size: 22)).foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.4), radius: 3)
+            }
+        }
+        .frame(width: 132, height: 132)
     }
 }
 
