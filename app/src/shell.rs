@@ -2255,7 +2255,28 @@ enum InspectorAction {
 /// the page.
 const APP_MESSAGES: u64 = 1_000_000_000;
 const INSPECT_AT_ID: u64 = APP_MESSAGES + 1;
+const BLOCKS_ID: u64 = APP_MESSAGES + 2;
 const CAPTURE_ID: u64 = APP_MESSAGES + 3;
+const SCROLL_ID: u64 = APP_MESSAGES + 4;
+
+/// Lists the page's blocks that show, which a capture of a part picks with a click, like Arc's:
+/// the elements laid out as boxes, or pictures and controls, from 12 points across, but the whole
+/// page.
+const BLOCKS_SCRIPT: &str = r#"(() => {
+  const width = innerWidth, height = innerHeight, rects = [];
+  const replaced = new Set(['IMG', 'SVG', 'svg', 'VIDEO', 'CANVAS', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'PICTURE']);
+  for (const element of document.querySelectorAll('body *')) {
+    const r = element.getBoundingClientRect();
+    if (r.width < 12 || r.height < 12 || r.bottom <= 0 || r.right <= 0 || r.top >= height || r.left >= width) continue;
+    if (r.width >= width * 0.98 && r.height >= height * 0.98) continue;
+    const style = getComputedStyle(element);
+    if (style.visibility === 'hidden' || style.display === 'contents' || style.opacity === '0') continue;
+    if (style.display === 'inline' && !replaced.has(element.tagName)) continue;
+    rects.push([r.left, r.top, r.width, r.height]);
+    if (rects.length >= 4000) break;
+  }
+  return { width, rects };
+})()"#;
 
 /// The front end's page, told it may dock.
 const INSPECTOR_URL: &str = "devtools://devtools/bundled/devtools_app.html?can_dock=true";
@@ -2664,11 +2685,18 @@ fn page_frame() -> Option<Rect> {
     })
 }
 
-/// The capture under way: whether its part is to pick, and what brings the page's protocol
-/// messages, until the picture comes.
+/// The capture under way: whether its part is to pick, the picture and the page's blocks once
+/// they come, and what brings the page's protocol messages.
 struct Capturing {
     area: bool,
+    picture: Option<String>,
+    blocks: Option<String>,
     _observer: Option<Registration>,
+}
+
+thread_local! {
+    /// The scrolls of the page under a capture's veil: the last one takes the picture again.
+    static CAPTURE_SCROLLS: Cell<u32> = const { Cell::new(0) };
 }
 
 /// Captures the shown page, like Arc's: the interface frames it on a color, or shows it in a veil
@@ -2680,10 +2708,46 @@ fn capture(area: bool) {
     let observer = host.add_dev_tools_message_observer(Some(&mut CaptureObserver::new()));
     CAPTURING.set(Some(Capturing {
         area,
+        picture: None,
+        // Only a part is picked among them.
+        blocks: (!area).then(|| "null".to_string()),
         _observer: observer,
     }));
     let ask = json!({ "id": CAPTURE_ID, "method": "Page.captureScreenshot", "params": { "format": "png" } });
     host.send_dev_tools_message(Some(ask.to_string().as_bytes()));
+    if area {
+        let params = json!({ "expression": BLOCKS_SCRIPT, "returnByValue": true });
+        let ask = json!({ "id": BLOCKS_ID, "method": "Runtime.evaluate", "params": params });
+        host.send_dev_tools_message(Some(ask.to_string().as_bytes()));
+    }
+}
+
+/// Scrolls the page under a capture's veil, like Arc's, at `x` and `y` in its points, then takes
+/// its picture again once the scroll stops.
+fn scroll_capture(dx: f64, dy: f64, x: f64, y: f64) {
+    let Some(host) = content().and_then(|browser| browser.host()) else {
+        return;
+    };
+    let params = json!({ "type": "mouseWheel", "x": x, "y": y, "deltaX": dx, "deltaY": dy });
+    let ask = json!({ "id": SCROLL_ID, "method": "Input.dispatchMouseEvent", "params": params });
+    host.send_dev_tools_message(Some(ask.to_string().as_bytes()));
+    let scroll = CAPTURE_SCROLLS.get() + 1;
+    CAPTURE_SCROLLS.set(scroll);
+    post_delayed_task(ThreadId::UI, Some(&mut RetakeCapture::new(scroll)), 180);
+}
+
+wrap_task! {
+    struct RetakeCapture {
+        scroll: u32,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            if CAPTURE_SCROLLS.get() == self.scroll && CAPTURING.with_borrow(Option::is_none) {
+                capture(true);
+            }
+        }
+    }
 }
 
 wrap_task! {
@@ -2701,21 +2765,33 @@ wrap_task! {
 /// Hands the page's picture to the interface, over the page.
 fn capture_answered(message: &str) {
     let answer: serde_json::Value = serde_json::from_str(message).unwrap_or_default();
-    if answer["id"] != CAPTURE_ID {
+    let ready = CAPTURING.with_borrow_mut(|capturing| {
+        let capturing = capturing.as_mut()?;
+        if answer["id"] == CAPTURE_ID {
+            capturing.picture = Some(answer["result"]["data"].as_str()?.to_string());
+        } else if answer["id"] == BLOCKS_ID {
+            capturing.blocks = Some(answer["result"]["result"]["value"].to_string());
+        }
+        Some(capturing.picture.is_some() && capturing.blocks.is_some())
+    });
+    if ready != Some(true) {
         return;
     }
-    let Some(area) = CAPTURING.take().map(|capturing| capturing.area) else {
-        return;
-    };
-    let Some(picture) = answer["result"]["data"].as_str() else {
+    let Some(Capturing {
+        area,
+        picture: Some(picture),
+        blocks: Some(blocks),
+        ..
+    }) = CAPTURING.take()
+    else {
         return;
     };
     #[cfg(target_os = "macos")]
     if let Some(frame) = page_frame() {
-        crate::native::captured(win().id, picture, area, &frame);
+        crate::native::captured(win().id, &picture, area, &frame, &blocks);
     }
     #[cfg(not(target_os = "macos"))]
-    let _ = (picture, area);
+    let _ = (picture, area, blocks);
 }
 
 // Brings a page's answers to a capture under way.
@@ -6520,6 +6596,7 @@ fn run_command(command: Command) {
         }
         (Command::Capture, Some(_)) => capture(false),
         (Command::CaptureArea, Some(_)) => capture(true),
+        (Command::ScrollCapture(dx, dy, x, y), Some(_)) => scroll_capture(dx, dy, x, y),
         (Command::Stop, Some(browser)) => browser.stop_load(),
         (Command::ClearSiteData(data), Some(browser)) => clear_site_data(&browser, data),
         (Command::Zoom(zoom), Some(browser)) => {

@@ -80,6 +80,9 @@ final class CaptureChrome {
         veil.copy = { [weak self] in self?.copyPart() }
         veil.save = { [weak self] in self?.savePart() }
         veil.edit = { [weak self] in self?.edit() }
+        veil.scroll = { dx, dy, point in
+            model.run("page/capture/scroll/\(dx)/\(dy)/\(Int(point.x))/\(Int(point.y))")
+        }
     }
 
     /// The page's title, which a saved capture is named after.
@@ -87,12 +90,24 @@ final class CaptureChrome {
 
     /// Shows the page's picture, `png`, over the page at `frame`: in the veil to pick a part of,
     /// or framed on a color in the panel under the button, like Arc's Portrait Mode.
-    func show(_ png: Data, area: Bool, frame: NSRect) {
+    func show(_ png: Data, area: Bool, frame: NSRect, blocks: PageBlocks?) {
         guard let image = NSBitmapImageRep(data: png)?.cgImage else { return }
         self.frame = frame
         if area {
             closeFraming()
-            veil.show(image)
+            let scale = blocks.map { frame.width / max($0.width, 1) } ?? 1
+            let rects = (blocks?.rects ?? []).compactMap { rect -> NSRect? in
+                guard rect.count == 4 else { return nil }
+                return NSRect(
+                    x: rect[0] * scale, y: rect[1] * scale, width: rect[2] * scale,
+                    height: rect[3] * scale)
+            }
+            // Taken again after a scroll, it shows the page as it is now.
+            if veilOverlay.isVisible, editor == nil {
+                veil.update(image, blocks: rects)
+                return
+            }
+            veil.show(image, blocks: rects)
             veilOverlay.place(in: parent, frame)
             veilOverlay.makeKey()
         } else {
@@ -254,9 +269,16 @@ final class Veil: NSView {
     var copy: () -> Void = {}
     var save: () -> Void = {}
     var edit: () -> Void = {}
+    /// Scrolls the page under it, by a wheel's deltas, at a point of it.
+    var scroll: (CGFloat, CGFloat, NSPoint) -> Void = { _, _, _ in }
     private var shot: CGImage?
     private var grey: CGImage?
     private var start: NSPoint?
+    /// The page's blocks that show, from its top left corner, which a click picks, and the one
+    /// under the pointer, in color, like Arc's.
+    private var blocks: [NSRect] = []
+    private var hovered: NSRect?
+    private var dragged = false
     /// The part picked, from the veil's top left corner.
     private(set) var selection: NSRect?
     /// The part picked once edited, which shows and copies instead.
@@ -268,16 +290,66 @@ final class Veil: NSView {
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    func show(_ image: CGImage) {
+    func show(_ image: CGImage, blocks: [NSRect]) {
+        update(image, blocks: blocks)
+        clear()
+    }
+
+    /// Shows the page as it is now, as it scrolled, with its blocks.
+    func update(_ image: CGImage, blocks: [NSRect]) {
         shot = image
         grey = greyed(image)
-        clear()
+        self.blocks = blocks
+        if let window, selection == nil {
+            hover(convert(window.mouseLocationOutsideOfEventStream, from: nil))
+        }
+        needsDisplay = true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(
+            NSTrackingArea(
+                rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                owner: self))
+    }
+
+    /// The smallest block under `point`, like Arc's, which shows in color.
+    private func hover(_ point: NSPoint) {
+        let block = blocks.filter { $0.contains(point) }
+            .min { $0.width * $0.height < $1.width * $1.height }
+            .map { $0.intersection(bounds) }
+        if block != hovered {
+            hovered = block
+            needsDisplay = true
+        }
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard selection == nil, start == nil else { return }
+        hover(convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovered = nil
+        needsDisplay = true
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard selection == nil else { return }
+        // Points the page scrolls by, the way the content moves.
+        let factor: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 10
+        scroll(
+            -event.scrollingDeltaX * factor, -event.scrollingDeltaY * factor,
+            convert(event.locationInWindow, from: nil))
     }
 
     func clear() {
         start = nil
         selection = nil
         edited = nil
+        hovered = nil
         needsDisplay = true
     }
 
@@ -309,6 +381,7 @@ final class Veil: NSView {
         start = convert(event.locationInWindow, from: nil)
         selection = nil
         edited = nil
+        dragged = false
         picked(nil)
         needsDisplay = true
     }
@@ -316,6 +389,9 @@ final class Veil: NSView {
     override func mouseDragged(with event: NSEvent) {
         guard let start else { return }
         let point = convert(event.locationInWindow, from: nil)
+        guard dragged || hypot(point.x - start.x, point.y - start.y) > 3 else { return }
+        dragged = true
+        hovered = nil
         selection = NSRect(
             x: min(start.x, point.x), y: min(start.y, point.y), width: abs(point.x - start.x),
             height: abs(point.y - start.y)
@@ -325,6 +401,11 @@ final class Veil: NSView {
 
     override func mouseUp(with event: NSEvent) {
         start = nil
+        // A click picks the block under it, like Arc's.
+        if !dragged, let hovered {
+            selection = hovered
+            self.hovered = nil
+        }
         guard let selection, selection.width > 4, selection.height > 4 else {
             self.selection = nil
             needsDisplay = true
@@ -347,6 +428,12 @@ final class Veil: NSView {
         NSColor.black.withAlphaComponent(0.15).setFill()
         bounds.fill()
         guard let selection else {
+            if let hovered {
+                context.saveGState()
+                context.clip(to: hovered)
+                drawImage(shot, in: bounds, context)
+                context.restoreGState()
+            }
             hint()
             return
         }
@@ -376,7 +463,10 @@ final class Veil: NSView {
 
     /// How to capture, in a white pill at the bottom, like Arc's.
     private func hint() {
-        let text = "Drag to capture a portion of this page" as NSString
+        let text =
+            (hovered == nil
+                ? "Drag to capture a portion of this page"
+                : "Click or drag to capture a portion of this page") as NSString
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12, weight: .medium),
             .foregroundColor: NSColor(srgbRed: 0.27, green: 0.29, blue: 0.83, alpha: 1),
@@ -714,14 +804,23 @@ private struct NoteView: View {
     }
 }
 
+/// The page's blocks that show, as the app lists them: the page's width, and their rects in its
+/// points.
+struct PageBlocks: Decodable {
+    var width: Double
+    var rects: [[Double]]
+}
+
 @_cdecl("arbalete_ui_captured")
 public func captured(
     _ id: UInt32, _ base64: UnsafePointer<CChar>, _ area: Bool, _ x: Double, _ y: Double,
-    _ width: Double, _ height: Double
+    _ width: Double, _ height: Double, _ blocks: UnsafePointer<CChar>
 ) {
     guard let png = Data(base64Encoded: String(cString: base64)) else { return }
+    let blocks = try? JSONDecoder().decode(PageBlocks.self, from: Data(String(cString: blocks).utf8))
     MainActor.assumeIsolated {
         nativeWindows[id]?.capture.show(
-            png, area: area, frame: NSRect(x: x, y: y, width: width, height: height))
+            png, area: area, frame: NSRect(x: x, y: y, width: width, height: height),
+            blocks: blocks)
     }
 }

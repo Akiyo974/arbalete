@@ -102,6 +102,7 @@ unsafe extern "C" {
         y: f64,
         width: f64,
         height: f64,
+        blocks: *const c_char,
     );
     fn arbalete_ui_card(
         window: u32,
@@ -507,9 +508,11 @@ pub fn peek_closed(window: u32) {
 }
 
 /// Gives the interface a capture of the page at `frame`, in the window's points from its top left
-/// corner, a PNG picture in base64: to frame on a color, or `area`, to pick a part of.
-pub fn captured(window: u32, base64: &str, area: bool, frame: &Rect) {
+/// corner, a PNG picture in base64: to frame on a color, or `area`, to pick a part of, among its
+/// `blocks` (JSON: the page's width, and the blocks' rects in its points).
+pub fn captured(window: u32, base64: &str, area: bool, frame: &Rect, blocks: &str) {
     let base64 = CString::new(base64).unwrap_or_default();
+    let blocks = CString::new(blocks).unwrap_or_default();
     // SAFETY: a C string, which the call reads before returning, and plain values.
     unsafe {
         arbalete_ui_captured(
@@ -520,6 +523,7 @@ pub fn captured(window: u32, base64: &str, area: bool, frame: &Rect) {
             frame.y.into(),
             frame.width.into(),
             frame.height.into(),
+            blocks.as_ptr(),
         )
     };
 }

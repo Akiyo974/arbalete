@@ -119,6 +119,9 @@ pub enum Command {
     /// saves or edits.
     Capture,
     CaptureArea,
+    /// Scrolls the page under a capture's veil, by `dx` and `dy` at `x` and `y`, in its points:
+    /// `page/capture/scroll/<dx>/<dy>/<x>/<y>`.
+    ScrollCapture(f64, f64, f64, f64),
     /// Shows the find bar above the page, from the menu.
     ShowFind,
     /// Finds text in the page, forward or backward: `find/forward/<percent-encoded text>`,
@@ -930,6 +933,16 @@ impl Command {
                 }
                 if let Some(id) = path.strip_prefix("separate/") {
                     return serde_json::from_str(id).ok().map(Self::Separate);
+                }
+                if let Some(args) = path.strip_prefix("page/capture/scroll/") {
+                    let numbers: Vec<f64> = args
+                        .split('/')
+                        .filter_map(|n| n.parse().ok().filter(|n: &f64| n.is_finite()))
+                        .collect();
+                    return match numbers[..] {
+                        [dx, dy, x, y] => Some(Self::ScrollCapture(dx, dy, x, y)),
+                        _ => None,
+                    };
                 }
                 if let Some(args) = path.strip_prefix("pane/resize/") {
                     let (index, point) = args.split_once('/')?;
@@ -1857,6 +1870,10 @@ mod tests {
         assert_eq!(
             Command::parse("page/capture/area"),
             Some(Command::CaptureArea)
+        );
+        assert_eq!(
+            Command::parse("page/capture/scroll/0/-12.5/300/200"),
+            Some(Command::ScrollCapture(0.0, -12.5, 300.0, 200.0))
         );
         assert_eq!(
             Command::parse("settings/ready"),
