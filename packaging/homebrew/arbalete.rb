@@ -14,15 +14,15 @@ cask "arbalete" do
 
   app "Arbalete.app"
 
+  # Not notarized yet: macOS would block the first launch of what Homebrew downloaded. Installing
+  # from this tap already trusts it, so the app opens at once.
+  postflight_steps do
+    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/Arbalete.app"]
+  end
+
   zap trash: [
     "~/Library/Application Support/Arbalete",
     "~/Library/Caches/Arbalete",
     "~/Library/Preferences/io.github.amenophis.arbalete.plist",
   ]
-
-  caveats <<~EOS
-    Arbalete is not notarized by Apple yet, so macOS blocks its first launch.
-    Open it once from System Settings > Privacy & Security > Open Anyway, or run:
-      xattr -dr com.apple.quarantine /Applications/Arbalete.app
-  EOS
 end
