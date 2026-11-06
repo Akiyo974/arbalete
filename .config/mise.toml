@@ -4,6 +4,9 @@ rust = { version = "1.99.1", components = "rustfmt,clippy" }
 cmake = "4.4.4"
 ninja = "1.13.2"
 cargo-deny = "0.20.2"
+# Lays out the disk image's window (mise run release).
+uv = "0.13.6"
+"pipx:dmgbuild" = "1.6.7"
 
 [env]
 # One exported CEF distribution, shared by every build instead of a download per build.
@@ -72,11 +75,9 @@ description = "Bundle an optimized app, signed with ARBALETE_SIGN_IDENTITY, in a
 env = { CARGO_TARGET_DIR = "target/release-build", CARGO_PROFILE_DEV_OPT_LEVEL = "3", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_DEV_DEBUG_ASSERTIONS = "false", CARGO_PROFILE_DEV_OVERFLOW_CHECKS = "false", CARGO_PROFILE_DEV_INCREMENTAL = "false" }
 run = [
   "mise run app",
-  # The app beside a link to Applications, to drag it onto.
-  "rm -rf target/dmg && mkdir -p target/dmg/root",
-  "ditto target/bundle/Arbalete.app target/dmg/root/Arbalete.app",
-  "ln -s /Applications target/dmg/root/Applications",
-  "version=$(sed -n 's/^version = \"\\(.*\\)\"/\\1/p' app/Cargo.toml) && hdiutil create -quiet -volname Arbalete -srcfolder target/dmg/root -format UDZO \"target/dmg/Arbalete-$version-arm64.dmg\" && cd target/dmg && shasum -a 256 \"Arbalete-$version-arm64.dmg\" | tee \"Arbalete-$version-arm64.dmg.sha256\"",
+  # The app beside a link to Applications, to drag it onto (packaging/dmg).
+  "rm -rf target/dmg && mkdir -p target/dmg",
+  "version=$(sed -n 's/^version = \"\\(.*\\)\"/\\1/p' app/Cargo.toml) && dmgbuild -s packaging/dmg/settings.py -D app=target/bundle/Arbalete.app Arbalete \"target/dmg/Arbalete-$version-arm64.dmg\" && cd target/dmg && shasum -a 256 \"Arbalete-$version-arm64.dmg\" | tee \"Arbalete-$version-arm64.dmg.sha256\"",
 ]
 
 [tasks.run]
