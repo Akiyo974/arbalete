@@ -131,6 +131,9 @@ pub enum Command {
     /// saves or edits.
     Capture,
     CaptureArea,
+    /// Keeps a capture, a picture saved at a temporary path, in the library's Media, like Arc's
+    /// Save to Library: `capture/library/<path>`.
+    SaveCaptureToLibrary(std::path::PathBuf),
     /// Copies the whole page, from the site controls: `page/capture/full`.
     CaptureFull,
     /// Shows the selected tab's site's settings, Chromium's page, like Arc's: `site/settings`.
@@ -595,6 +598,10 @@ impl Command {
             "page/devtools/elements" => Some(Self::DevToolsPanel("elements")),
             "page/capture" => Some(Self::Capture),
             "page/capture/area" => Some(Self::CaptureArea),
+            _ if path.starts_with("capture/library/") => {
+                percent_decode(path.strip_prefix("capture/library/")?)
+                    .map(|file| Self::SaveCaptureToLibrary(file.into()))
+            }
             "page/capture/full" => Some(Self::CaptureFull),
             "settings/ready" => Some(Self::SettingsReady),
             "settings/hide" => Some(Self::HideSettings),
@@ -1265,6 +1272,10 @@ mod tests {
         ));
         assert_eq!(Command::parse("pin"), Some(Command::Pin(None)));
         assert_eq!(Command::parse("link/copy"), Some(Command::CopyLink));
+        assert_eq!(
+            Command::parse("capture/library/%2Ftmp%2Fa.png"),
+            Some(Command::SaveCaptureToLibrary("/tmp/a.png".into()))
+        );
         assert_eq!(
             Command::parse("shortcut/set/togglePin/1179648/k"),
             Some(Command::Shortcut(ShortcutEdit::Set(

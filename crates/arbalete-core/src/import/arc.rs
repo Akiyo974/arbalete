@@ -118,6 +118,7 @@ pub fn add_archive(
             },
             space,
             archived_at: archived_at as u64,
+            manual: false,
         })
     });
     sidebar.add_archived(archived.collect());

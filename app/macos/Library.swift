@@ -60,6 +60,8 @@ struct ArchivedTab: Decodable {
     var favicon: String?
     var space: String?
     var archivedAt: Double
+    /// Closed by the user rather than archived for being left aside.
+    var manual: Bool?
 }
 
 struct Download: Decodable, Identifiable {
@@ -219,6 +221,8 @@ struct LibrarySearch: View {
 enum FilterChip: Hashable {
     case profile(Int)
     case space(String)
+    /// How a tab was archived: closed by the user, or left aside.
+    case closed(manually: Bool)
 }
 
 extension LibrarySection {
@@ -236,7 +240,16 @@ extension AppModel {
         case .archive:
             var names: [String] = []
             for tab in archive { if let space = tab.space, !names.contains(space) { names.append(space) } }
-            return [("Where was the tab?", names.map { (FilterChip.space($0), $0) })]
+            return [
+                (
+                    "How was the tab closed?",
+                    [
+                        (FilterChip.closed(manually: false), "Auto-Closed"),
+                        (FilterChip.closed(manually: true), "Manually Closed"),
+                    ]
+                ),
+                ("Where was the tab?", names.map { (FilterChip.space($0), $0) }),
+            ]
         default:
             return []
         }
@@ -255,9 +268,13 @@ extension AppModel {
         return picked.isEmpty || profile.map(picked.contains) == true
     }
 
+    /// Whether an archived tab passes the filter: each group picked narrows it, any chip of a
+    /// group does.
     func passes(_ tab: ArchivedTab) -> Bool {
-        let picked = filters.compactMap { if case .space(let name) = $0 { name } else { nil } }
-        return picked.isEmpty || tab.space.map(picked.contains) == true
+        let spaces = filters.compactMap { if case .space(let name) = $0 { name } else { nil } }
+        let closed = filters.compactMap { if case .closed(let manually) = $0 { manually } else { nil } }
+        return (spaces.isEmpty || tab.space.map(spaces.contains) == true)
+            && (closed.isEmpty || closed.contains(tab.manual ?? false))
     }
 }
 

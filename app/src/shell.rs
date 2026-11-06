@@ -3238,7 +3238,23 @@ fn profile_context(profile: ProfileId) -> Option<RequestContext> {
         cache_path: CefString::from(dir.to_str().expect("a UTF-8 path")),
         ..Default::default()
     };
-    request_context_create_context(Some(&settings), None)
+    let context = request_context_create_context(Some(&settings), None)?;
+    // Save Link As… and Save Image As… ask where from the Downloads folder, like Arc's, rather
+    // than the home folder.
+    let downloads = crate::user_home().join("Downloads");
+    for name in ["savefile.default_directory", "download.default_directory"] {
+        let Some(mut value) = value_create() else {
+            break;
+        };
+        value.set_string(Some(&CefString::from(downloads.to_string_lossy().as_ref())));
+        let mut error = CefString::default();
+        context.set_preference(
+            Some(&CefString::from(name)),
+            Some(&mut value),
+            Some(&mut error),
+        );
+    }
+    Some(context)
 }
 
 /// Shows the settings in a window of their own, like Arc's, brought to the front when it is
@@ -3371,6 +3387,7 @@ fn send_archive() {
                     "favicon": favicon_url(profile, &archived.tab),
                     "space": space.map(|space| space.title.clone()),
                     "archivedAt": archived.archived_at,
+                    "manual": archived.manual,
                 })
             })
             .collect();
@@ -3740,6 +3757,35 @@ fn send_settings() {
     let detail = json!({ "settings": settings, "littleHotkeyTaken": taken, "shortcutDefaults": defaults, "shortcutPriorities": priorities, "engines": engines, "delays": delays, "profiles": profiles, "spaces": spaces, "urlRouting": routing });
     let event = format!(r#"new CustomEvent("arbalete:settings", {{ detail: {detail} }})"#);
     SETTINGS_VIEW.with(|view| dispatch(view, &event));
+}
+
+/// Keeps a capture in the library's Media, like Arc's Save to Library: moved into the data
+/// directory's Captures folder, named after the page, and listed with the downloads.
+fn save_capture_to_library(file: &Path) {
+    let dir = DATA_DIR.get().expect("set").join("Captures");
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        return eprintln!("cannot create the Captures folder: {error}");
+    }
+    let (title, url) = STATE.with_borrow_mut(|state| {
+        active_tab(&mut state.sidebar)
+            .map(|tab| (tab.label().replace('/', "-"), tab.url.clone()))
+            .unwrap_or_else(|| ("Capture".into(), String::new()))
+    });
+    let path = downloads::unique_path(&dir, &format!("{title}.png"), Path::exists);
+    if std::fs::rename(file, &path).is_err() {
+        if let Err(error) = std::fs::copy(file, &path) {
+            return eprintln!("cannot keep the capture: {error}");
+        }
+        let _ = std::fs::remove_file(file);
+    }
+    DOWNLOADS.with_borrow_mut(|list| {
+        let id = downloads::next_id(list);
+        let mut capture = Download::saved(id, path, url, now());
+        capture.profile = Some(displayed_profile());
+        list.push(capture);
+    });
+    save_downloads();
+    send_downloads();
 }
 
 /// Gives the menu's shortcuts the keys the settings changed.
@@ -4646,13 +4692,20 @@ fn remove_tab(tab: NodeId) -> Option<NodeId> {
             at: SystemTime::now(),
             beside: state.sidebar.split_neighbor(tab),
         };
-        // An incognito window's tabs cannot be reopened.
+        // An incognito window's tabs cannot be reopened, nor are they archived.
         if !INCOGNITO.with_borrow(|incognito| incognito.contains_key(&profile)) {
+            // Like Arc's, a tab closed goes to the archive too.
+            if let Some(space) = state.sidebar.space_of(tab) {
+                state
+                    .sidebar
+                    .archive_closed(closed.tab.clone(), space, now() as u64);
+            }
             state.closed.push(closed);
         }
         state.sidebar.next_after_close(tab)
     });
     update_sidebar(|sidebar| sidebar.remove(tab)).expect("an open tab");
+    send_archive();
     next
 }
 
@@ -4708,6 +4761,7 @@ fn delete_folder(folder: NodeId) {
 /// reopened. When the selected tab was one of them, shows the tab closing it would have shown,
 /// if it is left, or the overlay. Like a selection, an unknown row from a menu is ignored.
 fn close_rows(remove: impl FnOnce(&mut Sidebar) -> Result<(Vec<Tab>, ProfileId), Error>) {
+    let space = STATE.with_borrow(|state| state.sidebar.displayed().id);
     let (selected, next) = STATE.with_borrow(|state| {
         let sidebar = &state.sidebar;
         let selected = sidebar.displayed().selected;
@@ -4720,6 +4774,17 @@ fn close_rows(remove: impl FnOnce(&mut Sidebar) -> Result<(Vec<Tab>, ProfileId),
         return;
     };
     let now = SystemTime::now();
+    // Like Arc's, the tabs closed go to the archive too, but an incognito window's.
+    if !INCOGNITO.with_borrow(|incognito| incognito.contains_key(&profile)) {
+        STATE.with_borrow_mut(|state| {
+            for tab in removed.iter().rev() {
+                state
+                    .sidebar
+                    .archive_closed(tab.clone(), space, self::now() as u64);
+            }
+        });
+        send_archive();
+    }
     STATE.with_borrow_mut(|state| {
         state.closed.extend(removed.into_iter().map(|tab| Closed {
             id: None,
@@ -6658,6 +6723,7 @@ fn run_command(command: Command) {
             }
         }
         (Command::Shortcut(edit), _) => edit_shortcut(edit),
+        (Command::SaveCaptureToLibrary(file), _) => save_capture_to_library(&file),
         (Command::CopyMarkdownLink, _) => {
             let link = STATE.with_borrow_mut(|state| {
                 active_tab(&mut state.sidebar).map(|tab| format!("[{}]({})", tab.label(), tab.url))

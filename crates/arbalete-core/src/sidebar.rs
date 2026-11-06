@@ -287,6 +287,10 @@ pub struct Archived {
     pub space: SpaceId,
     /// When it was archived, in milliseconds since the Unix epoch.
     pub archived_at: u64,
+    /// Closed by the user rather than archived for being left aside, like Arc's "Manually
+    /// Closed"; the tabs archived before it was kept count as left aside.
+    #[serde(default)]
+    pub manual: bool,
 }
 
 /// How many archived tabs are kept: the oldest go first.
@@ -1427,12 +1431,25 @@ impl Sidebar {
                         tab,
                         space,
                         archived_at: now,
+                        manual: false,
                     },
                 );
             }
         }
         self.archive.truncate(ARCHIVE_SIZE);
         due.len()
+    }
+
+    /// Archives a tab the user closed, from `space`, at `now`, like Arc's: it can be restored.
+    pub fn archive_closed(&mut self, tab: Tab, space: SpaceId, now: u64) {
+        let archived = Archived {
+            tab,
+            space,
+            archived_at: now,
+            manual: true,
+        };
+        self.archive.insert(0, archived);
+        self.archive.truncate(ARCHIVE_SIZE);
     }
 
     /// The tabs archived, the most recent first.
@@ -2031,6 +2048,24 @@ mod tests {
     }
 
     #[test]
+    fn archives_a_tab_closed_by_the_user_first() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let tab = sidebar
+            .open_tab(home.id, "https://closed.example/")
+            .unwrap();
+        let closed = sidebar.tab_mut(tab).unwrap().clone();
+        sidebar.remove(tab).unwrap();
+        sidebar.archive_closed(closed, home.id, 7);
+        let archived = &sidebar.archive()[0];
+        assert_eq!(archived.tab.url, "https://closed.example/");
+        assert_eq!(
+            (archived.space, archived.archived_at, archived.manual),
+            (home.id, 7, true)
+        );
+    }
+
+    #[test]
     fn archives_the_today_tabs_left_unshown_too_long() {
         const HOUR: u64 = 60 * 60 * 1000;
         let mut sidebar = Sidebar::default();
@@ -2085,6 +2120,7 @@ mod tests {
             tab,
             space: gone,
             archived_at: 1,
+            manual: false,
         };
         sidebar.add_archived(vec![archived]);
         assert_eq!(sidebar.restore(0, 6).unwrap().0, space);

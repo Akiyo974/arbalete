@@ -49,6 +49,18 @@ pub enum State {
 }
 
 impl Download {
+    /// A file the app saved itself, like a capture kept in the library, complete already.
+    pub fn saved(id: u32, path: PathBuf, url: String, started_at: i64) -> Self {
+        let size = fs::metadata(&path).map_or(0, |meta| meta.len() as i64);
+        Self {
+            cef_id: None,
+            received: size,
+            total: size,
+            state: State::Complete,
+            ..Self::new(id, 0, path, url, started_at)
+        }
+    }
+
     /// A download of this session, `cef_id` for CEF, about to be saved at `path`.
     pub fn new(id: u32, cef_id: u32, path: PathBuf, url: String, started_at: i64) -> Self {
         let name = path

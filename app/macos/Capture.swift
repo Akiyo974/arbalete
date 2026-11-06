@@ -84,6 +84,7 @@ final class CaptureChrome {
         veil.done = { [weak self] in self?.closeVeil() }
         veil.copy = { [weak self] in self?.copyPart() }
         veil.save = { [weak self] in self?.savePart() }
+        veil.library = { [weak self] in self?.keepPart() }
         veil.edit = { [weak self] in self?.edit() }
         veil.scroll = { dx, dy, point in
             model.run("page/capture/scroll/\(dx)/\(dy)/\(Int(point.x))/\(Int(point.y))")
@@ -161,6 +162,17 @@ final class CaptureChrome {
         copyImage(image)
         closeVeil()
         tell("Copied Image", saving: false, at: NSPoint(x: frame.maxX, y: frame.minY + 6))
+    }
+
+    /// Keeps the part picked in the library's Media, like Arc's Save to Library.
+    private func keepPart() {
+        guard let image = veil.part, let png = pngData(image) else { return }
+        closeVeil()
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString + ".png")
+        guard (try? png.write(to: file)) != nil else { return }
+        model.run("capture/library/\(percentEncoded(file.path))")
+        tell("Saved to Library", saving: false, at: NSPoint(x: frame.maxX, y: frame.minY + 6))
     }
 
     private func savePart() {
@@ -279,6 +291,7 @@ final class Veil: NSView {
     var done: () -> Void = {}
     var copy: () -> Void = {}
     var save: () -> Void = {}
+    var library: () -> Void = {}
     var edit: () -> Void = {}
     /// Scrolls the page under it, by a wheel's deltas, at a point of it.
     var scroll: (CGFloat, CGFloat, NSPoint) -> Void = { _, _, _ in }
@@ -503,12 +516,14 @@ final class Veil: NSView {
 /// What a part picked may become, inside it, like Arc's menu, measured: rows 40 points apart,
 /// a 32-point hover inset 10 points.
 private struct CaptureMenu: View {
-    static let size = NSSize(width: 272, height: 2 * 6 + 4 * 40 + 9)
+    static let size = NSSize(width: 272, height: 2 * 6 + 5 * 40 + 9)
     let veil: Veil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             CaptureMenuRow(symbol: "doc.on.doc", title: "Copy", action: veil.copy)
+            CaptureMenuRow(
+                symbol: "photo.on.rectangle.angled", title: "Save to Library", action: veil.library)
             CaptureMenuRow(symbol: "square.and.arrow.down", title: "Save…", action: veil.save)
             Rectangle().fill(Color(red: 0x1F / 255, green: 0x1D / 255, blue: 0x34 / 255))
                 .frame(height: 0.5).padding(.horizontal, 10).padding(.vertical, 4)
