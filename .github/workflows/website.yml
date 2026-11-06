@@ -35,8 +35,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node website/scripts/build.mjs
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: website/dist
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
