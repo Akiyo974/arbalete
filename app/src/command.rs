@@ -171,6 +171,11 @@ pub enum Command {
     AnswerPermission(u64, bool),
     /// The permission prompt takes this height: `permission/height/<height>`.
     PermissionPromptHeight(i32),
+    /// Allows or blocks a permission for the selected tab's site, from its site controls, by the
+    /// content setting that keeps it: `permission/site/<allow or block>/<setting>`.
+    SetSitePermission(u32, bool),
+    /// Forgets what the selected tab's site was allowed or blocked: `permission/site/reset`.
+    ResetSitePermissions,
     /// Opens an extension's popup from the site controls, under their button:
     /// `site/extension/<id>`.
     OpenExtensionPopup(String),
@@ -636,6 +641,7 @@ impl Command {
             "theme/hide" => Some(Self::HideThemePicker),
             "site/store" => Some(Self::ShowStore),
             "site/certificate" => Some(Self::ShowCertificate),
+            "permission/site/reset" => Some(Self::ResetSitePermissions),
             "extension/manage" => Some(Self::ManageExtensions),
             "history/show" => Some(Self::ShowHistory),
             "downloads/show" => Some(Self::ShowDownloads),
@@ -676,6 +682,18 @@ impl Command {
                 }
                 if let Some(height) = path.strip_prefix("permission/height/") {
                     return height.parse().ok().map(Self::PermissionPromptHeight);
+                }
+                if let Some((answer, setting)) = path
+                    .strip_prefix("permission/site/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let allow = match answer {
+                        "allow" => true,
+                        "block" => false,
+                        _ => return None,
+                    };
+                    let setting = setting.parse().ok()?;
+                    return Some(Self::SetSitePermission(setting, allow));
                 }
                 if let Some((answer, id)) = path
                     .strip_prefix("permission/")
@@ -1338,6 +1356,14 @@ mod tests {
             Some(Command::AnswerPermission(7, false))
         );
         assert_eq!(Command::parse("permission/maybe/7"), None);
+        assert_eq!(
+            Command::parse("permission/site/block/9"),
+            Some(Command::SetSitePermission(9, false))
+        );
+        assert_eq!(
+            Command::parse("permission/site/reset"),
+            Some(Command::ResetSitePermissions)
+        );
         assert_eq!(
             Command::parse("permission/height/120"),
             Some(Command::PermissionPromptHeight(120))

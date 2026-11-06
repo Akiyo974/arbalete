@@ -138,11 +138,12 @@ const REQUESTS: &[(Request, &Capability)] = &[
     ),
     (
         Request::PROTECTED_MEDIA_IDENTIFIER,
-        &capability(
-            "Play protected content",
-            "play.rectangle",
-            Setting::PROTECTED_MEDIA_IDENTIFIER,
-        ),
+        // Chromium keeps no such setting on macOS, where it never asks it either.
+        &Capability {
+            asks: "Play protected content",
+            symbol: "play.rectangle",
+            setting: None,
+        },
     ),
     (
         Request::REGISTER_PROTOCOL_HANDLER,
@@ -240,6 +241,15 @@ pub fn media(requested: u32) -> Vec<&'static Capability> {
     .fold(Vec::new(), distinct)
 }
 
+/// What a site may have been allowed or blocked: everything Chromium keeps a decision for, once.
+pub fn remembered() -> Vec<&'static Capability> {
+    REQUESTS
+        .iter()
+        .map(|(_, capability)| *capability)
+        .filter(|capability| capability.setting.is_some())
+        .fold(Vec::new(), distinct)
+}
+
 /// Adds `capability` to `list`, unless already there.
 fn distinct(
     mut list: Vec<&'static Capability>,
@@ -294,5 +304,14 @@ mod tests {
             asks(media(call)),
             ["Use your camera", "Use your microphone"]
         );
+    }
+
+    #[test]
+    fn remembers_each_setting_once() {
+        let settings: Vec<_> = remembered().iter().filter_map(|c| c.setting).collect();
+        let distinct: std::collections::HashSet<_> = settings.iter().collect();
+        assert_eq!(settings.len(), distinct.len());
+        assert!(settings.contains(&Setting::MEDIASTREAM_CAMERA));
+        assert!(!remembered().contains(&&SCREEN));
     }
 }

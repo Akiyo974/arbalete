@@ -452,6 +452,15 @@ final class SiteControls: ObservableObject {
         var developer: Bool
         var suspends: Bool
         var extensions: [SiteExtension]
+        /// What the site was allowed or blocked, by the content setting that keeps it.
+        struct SitePermission: Decodable, Identifiable {
+            var setting: UInt32
+            var text: String
+            var symbol: String
+            var allowed: Bool
+            var id: UInt32 { setting }
+        }
+        var permissions: [SitePermission]
     }
 
     @Published var site: Site?
@@ -540,6 +549,26 @@ struct SiteView: View {
                     }
                 }
                 .padding(.top, 15.5)
+                if !site.permissions.isEmpty {
+                    SiteSection(
+                        title: "Permissions", more: "Reset",
+                        action: { app.run("permission/site/reset") }
+                    ) {
+                        VStack(alignment: .leading, spacing: 11) {
+                            ForEach(site.permissions) { permission in
+                                SiteSetting(
+                                    symbol: permission.symbol, title: permission.text,
+                                    on: permission.allowed,
+                                    help: permission.allowed ? "Block" : "Allow"
+                                ) {
+                                    let turn = permission.allowed ? "block" : "allow"
+                                    app.run("permission/site/\(turn)/\(permission.setting)")
+                                }
+                            }
+                        }
+                    }
+                    .padding(.top, 15.5)
+                }
                 Divider().padding(.top, 15.5)
                 HStack(spacing: 0) {
                     let secure = site.url.hasPrefix("https://")

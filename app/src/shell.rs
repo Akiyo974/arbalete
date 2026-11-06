@@ -4216,11 +4216,60 @@ fn send_site_controls(url: &str) {
         .collect();
     let settings = app_settings();
     let awake = settings.awake_sites.iter().any(|awake| awake == site(url));
-    let detail = json!({ "url": url, "site": site(url), "awake": awake, "developer": developer_mode(url), "suspends": settings.suspend_tabs, "extensions": extensions });
+    let detail = json!({ "url": url, "site": site(url), "awake": awake, "developer": developer_mode(url), "suspends": settings.suspend_tabs, "extensions": extensions, "permissions": site_permissions(url) });
     dispatch(
         &win().site_view,
         &format!(r#"new CustomEvent("arbalete:show", {{ detail: {detail} }})"#),
     );
+}
+
+/// What the shown page's site, at `url`, was allowed or blocked, unlike Chromium's default, for
+/// its site controls.
+fn site_permissions(url: &str) -> Vec<serde_json::Value> {
+    let Some(context) = shown_context() else {
+        return Vec::new();
+    };
+    let url = CefString::from(url);
+    permissions::remembered()
+        .into_iter()
+        .filter_map(|capability| {
+            let setting = capability.setting?;
+            let value = context.content_setting(Some(&url), Some(&url), setting);
+            let decided = [ContentSettingValues::ALLOW, ContentSettingValues::BLOCK];
+            let default = context.content_setting(None, None, setting);
+            (decided.contains(&value) && value != default).then(|| {
+                json!({
+                    "setting": setting.get_raw(),
+                    "text": capability.asks,
+                    "symbol": capability.symbol,
+                    "allowed": value == ContentSettingValues::ALLOW,
+                })
+            })
+        })
+        .collect()
+}
+
+/// The shown page's profile's web data, which keeps its sites' permissions.
+fn shown_context() -> Option<RequestContext> {
+    content()?.host()?.request_context()
+}
+
+/// Allows or blocks a permission, by the content setting that keeps it, for the shown page's
+/// site; without a value, forgets every permission the site was allowed or blocked. Its site
+/// controls show it.
+fn set_site_permissions(setting: Option<u32>, value: ContentSettingValues) {
+    let (Some(context), Some(url)) = (shown_context(), selected_url()) else {
+        return;
+    };
+    let address = CefString::from(url.as_str());
+    let settings = permissions::remembered()
+        .into_iter()
+        .filter_map(|capability| capability.setting)
+        .filter(|kept| setting.is_none_or(|setting| kept.get_raw() == setting));
+    for kept in settings {
+        context.set_content_setting(Some(&address), Some(&address), kept, value);
+    }
+    send_site_controls(&url);
 }
 
 /// The selected tab's address.
@@ -7031,6 +7080,17 @@ fn run_command(command: Command) {
             place_site_controls();
         }
         (Command::AnswerPermission(id, allow), _) => answer_permission(id, allow),
+        (Command::SetSitePermission(setting, allow), _) => set_site_permissions(
+            Some(setting),
+            if allow {
+                ContentSettingValues::ALLOW
+            } else {
+                ContentSettingValues::BLOCK
+            },
+        ),
+        (Command::ResetSitePermissions, _) => {
+            set_site_permissions(None, ContentSettingValues::DEFAULT);
+        }
         (Command::PermissionPromptHeight(height), _) => {
             win().permission_height.set(height);
             surfaces_changed();
