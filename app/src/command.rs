@@ -400,6 +400,9 @@ pub enum Command {
     RenameProfile(ProfileId, String),
     /// Deletes a profile no Space uses, with its web data: `profile/delete/<profile id>`.
     DeleteProfile(ProfileId),
+    /// Shows one of Chromium's own pages in a profile, from the settings, which close:
+    /// `profile/page/<profile id>/<percent-encoded url>`.
+    ProfilePage(ProfileId, String),
     /// Changes how long a profile's "Today" tabs stay unshown before they are archived:
     /// `profile/archive/<profile id>/<delay>`, like `twelve-hours` or `never`.
     SetArchiveAfter(ProfileId, ArchiveAfter),
@@ -829,6 +832,13 @@ impl Command {
                         _ => return None,
                     };
                     return on.parse().ok().map(|on| Self::SetSetting(setting, on));
+                }
+                if let Some((id, url)) = path
+                    .strip_prefix("profile/page/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let id = serde_json::from_str(id).ok()?;
+                    return percent_decode(url).map(|url| Self::ProfilePage(id, url));
                 }
                 if let Some(id) = path.strip_prefix("profile/delete/") {
                     return serde_json::from_str(id).ok().map(Self::DeleteProfile);
@@ -1601,6 +1611,13 @@ mod tests {
         };
         assert_eq!(serde_json::to_string(&id).unwrap(), "3");
         assert_eq!(Command::parse("profile/delete/x"), None);
+        let Some(Command::ProfilePage(id, url)) =
+            Command::parse("profile/page/3/chrome%3A%2F%2Fsettings%2FsearchEngines")
+        else {
+            panic!("not a page")
+        };
+        assert_eq!(serde_json::to_string(&id).unwrap(), "3");
+        assert_eq!(url, "chrome://settings/searchEngines");
         assert_eq!(Command::parse("profile/rename/1"), None);
         assert_eq!(Command::parse("profile/rename/x/a"), None);
     }

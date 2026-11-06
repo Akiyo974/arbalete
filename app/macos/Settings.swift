@@ -806,6 +806,10 @@ private struct ProfileDetail: View {
                     .fixedSize()
                 }
                 SettingsLine()
+                SettingsRow(label: "Manage search", height: 43) {
+                    Button("Search Settings…") { open("chrome://settings/searchEngines") }
+                }
+                SettingsLine()
                 SettingsSwitch(
                     label: "Include search engine suggestions",
                     isOn: Binding(
@@ -838,6 +842,11 @@ private struct ProfileDetail: View {
             .background(RoundedRectangle(cornerRadius: 8).fill(settingsFill))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(settingsEdge))
         }
+    }
+
+    /// Shows one of Chromium's pages in the profile, like Arc's, the settings closing.
+    private func open(_ address: String) {
+        settings.app.run("profile/page/\(profile.id)/\(percentEncoded(address))")
     }
 }
 

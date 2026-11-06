@@ -2234,7 +2234,7 @@ fn clear_site_data(browser: &Browser, data: SiteData) {
 
 thread_local! {
     /// The window showing Chromium's own pages, and its page, while it is open.
-    static CHROME_PAGE: RefCell<Option<(Window, BrowserView)>> = const { RefCell::new(None) };
+    static CHROME_PAGE: RefCell<Option<(Window, BrowserView, ProfileId)>> = const { RefCell::new(None) };
 }
 
 /// Whether `url` is one of Chromium's own pages, like chrome://extensions, which Alloy pages do
@@ -2247,30 +2247,37 @@ fn is_chrome_page(url: &str) -> bool {
 fn chrome_page_focused() -> bool {
     CHROME_PAGE.with_borrow(|page| {
         page.as_ref()
-            .is_some_and(|(window, _)| window.is_active() == 1)
+            .is_some_and(|(window, _, _)| window.is_active() == 1)
     })
 }
 
 /// Shows one of Chromium's own pages, like a site's settings or the extensions, in a Chrome-style
 /// window of its own, in the displayed Space's profile: Alloy pages have none, and macOS has no
-/// Chrome style in a native view. The window open loads it instead.
+/// Chrome style in a native view.
 fn open_chrome_page(url: &str) {
-    hide_site_controls();
-    show_overlay(false);
-    let open = CHROME_PAGE.with_borrow(Clone::clone);
-    if let Some((window, view)) = open
-        && let Some(frame) = view.browser().and_then(|browser| browser.main_frame())
-    {
-        frame.load_url(Some(&CefString::from(url)));
-        window.activate();
-        return;
-    }
     // An incognito window's profile, whose web data stays in memory, has no Chrome-style page:
     // Chromium's own pages show the first profile's, as an incognito window keeps no history.
     let profile = Some(displayed_profile())
         .filter(|profile| INCOGNITO.with_borrow(|incognito| !incognito.contains_key(profile)))
         .or_else(|| STATE.with_borrow(|state| state.sidebar.profiles().first().map(|p| p.id)))
         .unwrap_or_else(displayed_profile);
+    open_profile_page(url, profile);
+}
+
+/// Shows one of Chromium's own pages in `profile`: the window open loads it if it shows that
+/// profile's pages, else it closes for one of that profile.
+fn open_profile_page(url: &str, profile: ProfileId) {
+    hide_site_controls();
+    show_overlay(false);
+    if let Some((window, view, shown)) = CHROME_PAGE.with_borrow(Clone::clone) {
+        if shown != profile {
+            window.close();
+        } else if let Some(frame) = view.browser().and_then(|browser| browser.main_frame()) {
+            frame.load_url(Some(&CefString::from(url)));
+            window.activate();
+            return;
+        }
+    }
     window_create_top_level(Some(&mut ChromePageWindowDelegate::new(
         profile,
         url.to_string(),
@@ -3602,11 +3609,16 @@ wrap_window_delegate! {
             window.add_child_view(Some(&mut View::from(&view)));
             window.center_window(Some(&CHROME_PAGE_SIZE));
             window.show();
-            CHROME_PAGE.set(Some((window, view)));
+            CHROME_PAGE.set(Some((window, view, self.profile)));
         }
 
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
-            CHROME_PAGE.set(None);
+            // Unless one of another profile's took its place already.
+            CHROME_PAGE.with_borrow_mut(|page| {
+                if page.as_ref().is_some_and(|(_, _, profile)| *profile == self.profile) {
+                    *page = None;
+                }
+            });
             // What the extensions page changed shows.
             extensions::reload(self.profile);
         }
@@ -6689,7 +6701,7 @@ fn run_command(command: Command) {
         (Command::Close(None), _) if settings_focused() => close_settings(),
         // ⌘W closes the window of Chromium's own pages when it is in front.
         (Command::Close(None), _) if chrome_page_focused() => {
-            if let Some((window, _)) = CHROME_PAGE.with_borrow(Clone::clone) {
+            if let Some((window, _, _)) = CHROME_PAGE.with_borrow(Clone::clone) {
                 window.close();
             }
         }
@@ -6815,6 +6827,13 @@ fn run_command(command: Command) {
         (Command::NewProfile, _) => ask("arbalete:new-profile", &json!(null)),
         (Command::CreateProfile { name, spaces }, _) => create_profile(&name, &spaces),
         (Command::DeleteProfile(id), _) => delete_profile(id),
+        // Like Arc's, the page shows in front of the browser, the settings closed.
+        (Command::ProfilePage(id, url), _) => {
+            if is_chrome_page(&url) {
+                close_settings();
+                open_profile_page(&url, id);
+            }
+        }
         // Like a folder, an unknown profile or a blank name from the UI is ignored.
         (Command::RenameProfile(id, name), _) => {
             if update_sidebar(|sidebar| sidebar.rename_profile(id, &name)).is_ok() {
@@ -7070,7 +7089,7 @@ pub fn close() {
     for tab in inspectors {
         close_inspector(tab);
     }
-    if let Some((window, _)) = CHROME_PAGE.with_borrow(Clone::clone) {
+    if let Some((window, _, _)) = CHROME_PAGE.with_borrow(Clone::clone) {
         window.close();
     }
     for host in STRAYS
