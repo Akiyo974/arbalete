@@ -793,6 +793,9 @@ struct SpaceColumn: View {
 
     private var colored: Bool { !space.theme.colors.isEmpty }
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 9) }
+    private var profileName: String {
+        model.state?.profiles.first { $0.id == space.profile }?.name ?? "Default"
+    }
 
     var body: some View {
         let page = model.state?.pages.first { $0.space == space.id }
@@ -803,6 +806,7 @@ struct SpaceColumn: View {
                 if let emoji = space.emoji { SpaceGlyph(icon: emoji, size: 16) }
                 Text(space.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                 Spacer()
+                ProfileChip(name: profileName) { model.run("menu/space-profile/\(space.id)") }
                 IconButton(symbol: "paintbrush.pointed.fill", label: "Edit Theme Color", size: 24) {
                     model.run("theme/show/\(space.id)")
                 }
@@ -881,6 +885,28 @@ struct SpaceColumn: View {
             model.run("space/move/\(id)/\(index)")
             return true
         }
+    }
+}
+
+/// A Space's profile in its column's header, like Arc's chip: a face and the profile's name, whose
+/// menu picks another profile or creates one.
+private struct ProfileChip: View {
+    let name: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: "face.smiling.inverse").font(.system(size: 12))
+                Text(name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 22)
+            .background(Capsule().fill(.white.opacity(0.35)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("Edit Space profile")
     }
 }
 
