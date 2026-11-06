@@ -53,11 +53,6 @@ const LIBRARY_WIDTH: i32 = SIDEBAR_WIDTH + 180;
 /// colors the sidebar sends (Command::WindowColors).
 const CARD_MARGIN: i32 = 10;
 
-/// The window's color until the sidebar sends the displayed Space's: the dark one, its most
-/// common appearance (--window-end in ui/src/index.css).
-#[cfg(not(target_os = "macos"))]
-const WINDOW_COLOR: u32 = 0xff1b_0e1f;
-
 /// The strip along the window's left edge that reveals the hidden sidebar when the pointer
 /// reaches it. Views cannot be transparent, so it shows the sidebar's background.
 const EDGE_WIDTH: i32 = 4;
@@ -119,33 +114,10 @@ const IMPORT_SIZE: Size = Size {
     height: 480,
 };
 
-/// A Little Arbalete window's size, and its bar's height, which holds the window buttons, like
-/// Little Arc's: a 31-point row with 8 points above and below. Not on macOS, whose Little Arbalete
-/// windows are native (app/macos/Little.swift).
-#[cfg(not(target_os = "macos"))]
-const LITTLE_SIZE: Size = Size {
-    width: 768,
-    height: 600,
-};
-#[cfg(not(target_os = "macos"))]
-const LITTLE_BAR_HEIGHT: i32 = 47;
-
 /// The height of the bar above the page, measured on Arc's in toolbar mode. The developer bar
 /// takes it too, unlike Arc's, taller: switching between them, nothing moves, and the site
 /// controls stay under their button.
 const PAGE_TOOLBAR_HEIGHT: i32 = 33;
-
-/// The height of the settings window's title row, which holds the window buttons
-/// (ui/src/index.css). Not on macOS, whose settings window is native.
-#[cfg_attr(target_os = "macos", allow(dead_code))]
-const SETTINGS_TITLE_HEIGHT: f32 = 32.0;
-
-/// The settings window's size, like Arc's (ui/src/Settings.tsx).
-#[cfg_attr(target_os = "macos", allow(dead_code))]
-const SETTINGS_SIZE: Size = Size {
-    width: 600,
-    height: 520,
-};
 
 /// The Privacy & Security pane of System Settings that lists the apps with Full Disk Access.
 const FULL_DISK_ACCESS: &str =
@@ -180,7 +152,6 @@ thread_local! {
     static PENDING_LINKS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     /// The settings, in a window of their own while it is open.
     static SETTINGS_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
-    static SETTINGS_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
     /// The window Chromium asks the user in, for an extension's optional permissions or its
     /// removal (extensions::ChromeTask).
     static PERMISSION_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
@@ -323,8 +294,6 @@ wrap_task! {
 /// A main window: the native interface's on macOS, CEF's elsewhere.
 #[cfg(target_os = "macos")]
 type MainWindow = crate::native::Window;
-#[cfg(not(target_os = "macos"))]
-type MainWindow = Window;
 
 struct Win {
     /// What the native interface knows the window by.
@@ -638,8 +607,6 @@ fn open_window_in(view: WindowView, fresh: bool, incognito: Option<SpaceId>) {
     save_session();
     #[cfg(target_os = "macos")]
     open_main_window(id);
-    #[cfg(not(target_os = "macos"))]
-    window_create_top_level(Some(&mut MainWindowDelegate::new(id)));
 }
 
 wrap_task! {
@@ -751,18 +718,6 @@ impl SidebarMode {
         };
         Layout { card, reveal }
     }
-
-    /// Where the margins that move the window start: past the docked sidebar, which has its own
-    /// drag areas, or at the window's edge.
-    // Where the window's margins move it, which the native window does itself on macOS.
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
-    fn margins_start(self) -> i32 {
-        if self == SidebarMode::Shown {
-            docked_width()
-        } else {
-            0
-        }
-    }
 }
 
 /// Whether the card is square, without margins: a page alone in full screen, like Arc's.
@@ -774,8 +729,6 @@ fn square_card() -> bool {
             .window
             .with_borrow(|window| window.as_ref().map(|w| w.window_handle()))
             .is_some_and(crate::mac::full_screen);
-    #[cfg(not(target_os = "macos"))]
-    false
 }
 
 /// The width of the page's strip the library's Spaces leave at the window's right, like Arc's.
@@ -858,8 +811,6 @@ fn resize_sidebar(x: f64) {
             place_native_sidebar();
             place_card();
         }
-        #[cfg(not(target_os = "macos"))]
-        relayout_library();
     });
 }
 
@@ -1467,8 +1418,6 @@ fn download_command(action: DownloadAction, id: u32) {
         DownloadAction::Open => crate::mac::open_file(&path),
         #[cfg(target_os = "macos")]
         DownloadAction::Show => crate::mac::show_file(&path),
-        #[cfg(not(target_os = "macos"))]
-        DownloadAction::Open | DownloadAction::Show => {}
         DownloadAction::Remove => {
             DOWNLOADS.with_borrow_mut(|downloads| downloads.retain(|download| download.id != id));
             save_downloads();
@@ -1482,8 +1431,6 @@ fn download_command(action: DownloadAction, id: u32) {
 fn send_surface(surface: &str, event: &str) {
     #[cfg(target_os = "macos")]
     crate::native::event(win().id, surface, event);
-    #[cfg(not(target_os = "macos"))]
-    let _ = (surface, event);
 }
 
 /// Gives the native interface's surface standing for one of the window's places, like the
@@ -1493,8 +1440,6 @@ fn dispatch<T>(view: &RefCell<Option<T>>, event: &str) {
     if let Some(surface) = native_surface(std::ptr::from_ref(view).cast()) {
         crate::native::event(win().id, surface, event);
     }
-    #[cfg(not(target_os = "macos"))]
-    let _ = (view, event);
 }
 
 /// The native interface's surface that stands for a web view, which gets its events. The
@@ -1603,16 +1548,10 @@ fn open_overlay(visible: bool, tab: Option<(String, Option<String>)>) {
             min_width.unwrap_or(MIN_WINDOW_WIDTH),
             MIN_WINDOW_HEIGHT,
         );
-        #[cfg(not(target_os = "macos"))]
-        window.invalidate_layout();
     }
     overlay.set_visible(visible.into());
     #[cfg(target_os = "macos")]
     round_overlay();
-    #[cfg(not(target_os = "macos"))]
-    if visible && let Some(view) = overlay.contents_view() {
-        view.request_focus();
-    }
 }
 
 /// Shows the Command Bar where the app placed it, again after it changes size: the native one,
@@ -1864,15 +1803,7 @@ fn set_sidebar(mode: SidebarMode) {
     } else {
         slide_duration(before, mode)
     };
-    #[cfg(not(target_os = "macos"))]
-    let duration = 0;
     let docked = mode == SidebarMode::Shown;
-    if docked
-        && !cfg!(target_os = "macos")
-        && let Some(sidebar) = win().sidebar.with_borrow(Clone::clone)
-    {
-        sidebar.set_visible(1);
-    }
     if docked != (before == SidebarMode::Shown) {
         let slide = duration > 0 && matches!(before, SidebarMode::Shown | SidebarMode::Hidden);
         let detail = json!({ "docked": docked, "slide": slide });
@@ -2000,60 +1931,12 @@ fn settle_sidebar() {
     }
     place_card();
     place_reveal();
-    update_drag_regions();
     #[cfg(target_os = "macos")]
     {
         if let Some(window) = win().window.with_borrow(Clone::clone) {
             crate::mac::sidebar_shown(window.window_handle(), docked);
         }
     }
-}
-
-/// The window moves by its margins around the card, and by the sidebar's drag areas while it is
-/// docked. CEF applies the regions in order, a region that is not draggable cutting out of the
-/// ones before: the sidebar's come last, so its controls stay clickable.
-fn update_drag_regions() {
-    // On macOS, the native window's own background moves it.
-    #[cfg(not(target_os = "macos"))]
-    {
-        let Some(window) = win().window.with_borrow(Clone::clone) else {
-            return;
-        };
-        let mode = win().sidebar_mode.get();
-        let size = window.size();
-        let regions = if fills_window() {
-            Vec::new()
-        } else {
-            margin_regions(&size, &mode.layout(&size).card, mode.margins_start())
-        };
-        window.set_draggable_regions(Some(&regions));
-    }
-}
-
-/// The margins around the `card` of a window of `size`, from `start`: the docked sidebar's edge,
-/// or the window's. Beside the docked sidebar, the margin resizes it instead.
-#[cfg_attr(target_os = "macos", allow(dead_code))]
-fn margin_regions(size: &Size, card: &Rect, start: i32) -> Vec<DraggableRegion> {
-    let (width, height) = (size.width, size.height);
-    let (right, bottom) = (card.x + card.width, card.y + card.height);
-    [
-        (start, 0, width - start, card.y),
-        (start, bottom, width - start, height - bottom),
-        (start, 0, if start == 0 { card.x } else { 0 }, height),
-        (right, 0, width - right, height),
-    ]
-    .into_iter()
-    .filter(|&(_, _, width, _)| width > 0)
-    .map(|(x, y, width, height)| DraggableRegion {
-        bounds: Rect {
-            x,
-            y,
-            width,
-            height,
-        },
-        draggable: 1,
-    })
-    .collect()
 }
 
 /// Insets the card from the window's edges, and from the sidebar while it is docked or floating.
@@ -2087,8 +1970,6 @@ fn shift_card(offset: u32) {
     if let Some(view) = card_window() {
         crate::mac::shift(view, f64::from(offset));
     }
-    #[cfg(not(target_os = "macos"))]
-    let _ = offset;
 }
 
 /// Widens the docked sidebar for the library, the card resting beside it.
@@ -2135,12 +2016,7 @@ fn relayout_library() {
     }
     #[cfg(target_os = "macos")]
     place_native_sidebar();
-    #[cfg(not(target_os = "macos"))]
-    if let Some(window) = win().window.with_borrow(Clone::clone) {
-        window.layout();
-    }
     place_card();
-    update_drag_regions();
 }
 
 /// The native card holding the pages, once the card has shown (send_panes).
@@ -2278,11 +2154,6 @@ fn show_import() {
     // At launch too, out of any command.
     #[cfg(target_os = "macos")]
     sync_native_surfaces();
-    // On macOS, the native surface takes the keyboard instead.
-    #[cfg(not(target_os = "macos"))]
-    if let Some(view) = controller.contents_view() {
-        view.request_focus();
-    }
 }
 
 /// Clears what the shown page's site keeps, through Chromium's DevTools protocol, then reloads the
@@ -2990,8 +2861,6 @@ fn capture_answered(message: &str) {
     if let Some(frame) = page_frame() {
         crate::native::captured(win().id, &picture, mode as u32, &frame, &blocks);
     }
-    #[cfg(not(target_os = "macos"))]
-    let _ = (picture, mode, blocks);
 }
 
 // Brings a page's answers to a capture under way.
@@ -3020,10 +2889,6 @@ struct Little {
     /// Its page, in a view of the native window.
     #[cfg(target_os = "macos")]
     browser: Browser,
-    #[cfg(not(target_os = "macos"))]
-    window: Window,
-    #[cfg(not(target_os = "macos"))]
-    page: BrowserView,
     url: String,
     title: String,
 }
@@ -3033,8 +2898,6 @@ impl Little {
     fn browser(&self) -> Option<Browser> {
         #[cfg(target_os = "macos")]
         return Some(self.browser.clone());
-        #[cfg(not(target_os = "macos"))]
-        self.page.browser()
     }
 }
 
@@ -3106,8 +2969,6 @@ fn open_little(url: Option<String>) {
         });
         send_little(id);
     }
-    #[cfg(not(target_os = "macos"))]
-    window_create_top_level(Some(&mut LittleWindowDelegate::new(id, profile, url)));
 }
 
 /// Makes a Little Arbalete window's page, in `profile`, on `url`, in its window's `view`, with
@@ -3154,12 +3015,6 @@ fn close_little(id: u32) {
     #[cfg(target_os = "macos")]
     if let Some(host) = little_browser(id).and_then(|browser| browser.host()) {
         host.close_browser(0);
-    }
-    #[cfg(not(target_os = "macos"))]
-    if let Some(window) =
-        LITTLE.with_borrow(|littles| Some(littles.iter().find(|l| l.id == id)?.window.clone()))
-    {
-        window.close();
     }
 }
 
@@ -3242,8 +3097,6 @@ fn set_little_profile(id: u32, profile: ProfileId) {
         }
         send_little(id);
     }
-    #[cfg(not(target_os = "macos"))]
-    let _ = (id, profile);
 }
 
 /// Changes what a Little Arbalete window's bar shows of its page, if `browser` is one's page.
@@ -3312,8 +3165,6 @@ fn send_little(id: u32) {
         let event = format!(r#"new CustomEvent("arbalete:little", {{ detail: {detail} }})"#);
         #[cfg(target_os = "macos")]
         crate::native::event(win().id, &format!("little/{id}"), &event);
-        #[cfg(not(target_os = "macos"))]
-        let _ = event;
     }
 }
 
@@ -3321,13 +3172,6 @@ fn send_little(id: u32) {
 fn focused_little() -> Option<u32> {
     #[cfg(target_os = "macos")]
     return crate::native::focused_little();
-    #[cfg(not(target_os = "macos"))]
-    LITTLE.with_borrow(|littles| {
-        littles
-            .iter()
-            .find(|l| l.window.is_active() == 1)
-            .map(|l| l.id)
-    })
 }
 
 /// A request context for a profile's web data, sharing its storage with the profile's content
@@ -3364,13 +3208,6 @@ fn show_settings() {
     {
         crate::native::settings(true);
         send_settings();
-    }
-    #[cfg(not(target_os = "macos"))]
-    match SETTINGS_WINDOW.with_borrow(Clone::clone) {
-        Some(window) => window.activate(),
-        None => {
-            window_create_top_level(Some(&mut SettingsWindowDelegate::new()));
-        }
     }
 }
 
@@ -3805,18 +3642,11 @@ wrap_task! {
 fn close_settings() {
     #[cfg(target_os = "macos")]
     crate::native::settings(false);
-    if let Some(window) = SETTINGS_WINDOW.with_borrow(Clone::clone) {
-        window.close();
-    }
 }
 
 /// The settings window has the keyboard: ⌘W closes it rather than a tab.
 fn settings_focused() -> bool {
-    #[cfg(target_os = "macos")]
-    if crate::native::settings_focused() {
-        return true;
-    }
-    SETTINGS_WINDOW.with_borrow(|window| window.as_ref().is_some_and(|w| w.is_active() == 1))
+    crate::native::settings_focused()
 }
 
 /// Sends the settings window the app's settings, the search engines and each profile's.
@@ -3853,8 +3683,6 @@ fn send_settings() {
     let taken = settings.little_hotkey && !LITTLE_HOTKEY.get();
     #[cfg(target_os = "macos")]
     let defaults = crate::mac::default_shortcuts();
-    #[cfg(not(target_os = "macos"))]
-    let defaults = std::collections::BTreeMap::<String, settings::Keys>::new();
     let priorities: std::collections::BTreeMap<_, _> = defaults
         .keys()
         .map(|id| (id.clone(), settings::default_priority(id)))
@@ -4003,11 +3831,6 @@ fn show_find() {
         &win().find_view,
         &format!(r#"new CustomEvent("arbalete:show", {{ detail: {text} }})"#),
     );
-    // On macOS, the native surface takes the keyboard instead.
-    #[cfg(not(target_os = "macos"))]
-    if let Some(view) = controller.contents_view() {
-        view.request_focus();
-    }
 }
 
 /// Makes the find bar's place, once.
@@ -4168,11 +3991,6 @@ fn show_site_controls(button: Button) {
         return;
     };
     controller.set_visible(1);
-    // On macOS, the native surface takes the keyboard instead.
-    #[cfg(not(target_os = "macos"))]
-    if let Some(view) = controller.contents_view() {
-        view.request_focus();
-    }
 }
 
 /// How far the theme picker shows from the Space's column it opened from, like Arc's.
@@ -4204,11 +4022,6 @@ fn show_theme_picker(id: SpaceId, beside: Option<(i32, i32)>) {
     win().theme_beside.set(beside);
     controller.set_visible(1);
     place_theme_picker();
-    // On macOS, the native surface takes the keyboard instead.
-    #[cfg(not(target_os = "macos"))]
-    if let Some(view) = controller.contents_view() {
-        view.request_focus();
-    }
 }
 
 /// Puts the theme picker, if it shows, just right of the sidebar, or like Arc's beside the Space's
@@ -4409,8 +4222,6 @@ fn show_certificate() {
         .collect();
     #[cfg(target_os = "macos")]
     crate::native::certificate(win().id, &chain);
-    #[cfg(not(target_os = "macos"))]
-    let _ = chain;
 }
 
 /// Hides the site controls' panel, if it shows.
@@ -4467,11 +4278,6 @@ fn open_extension_window(profile: ProfileId, id: String, url: String, button: Op
         runtime_style: RuntimeStyle::ALLOY,
         ..Default::default()
     };
-    #[cfg(not(target_os = "macos"))]
-    let info = WindowInfo {
-        runtime_style: RuntimeStyle::ALLOY,
-        ..Default::default()
-    };
     let Some(browser) = browser_host_create_browser_sync(
         Some(&info),
         Some(&mut PopupClient::new(profile, url)),
@@ -4521,8 +4327,6 @@ fn show_extension_popup(size: &Size) {
     };
     #[cfg(target_os = "macos")]
     crate::native::extension_popup_show(win().id, button.as_ref(), size);
-    #[cfg(not(target_os = "macos"))]
-    let _ = button;
     if let Some(host) = browser.host() {
         host.set_focus(1);
     }
@@ -5016,8 +4820,6 @@ fn show_menu(target: Target) {
     };
     #[cfg(target_os = "macos")]
     crate::mac::pop_up(entries);
-    #[cfg(not(target_os = "macos"))]
-    let _ = entries;
 }
 
 /// Shows the developer bar's extensions menu at the pointer, like Arc's: the displayed Space's
@@ -5031,8 +4833,6 @@ fn show_extensions_menu() {
     let entries = menu::extensions_menu(&extensions);
     #[cfg(target_os = "macos")]
     crate::mac::pop_up(entries);
-    #[cfg(not(target_os = "macos"))]
-    let _ = entries;
 }
 
 /// The profile whose extensions act: the Little Arbalete window's in front last, if any, else the
@@ -5063,8 +4863,6 @@ fn show_extension_menu(id: Option<&String>) {
     );
     #[cfg(target_os = "macos")]
     crate::mac::pop_up(entries);
-    #[cfg(not(target_os = "macos"))]
-    let _ = entries;
 }
 
 /// Runs an item of a row's menu, as if it was picked.
@@ -5103,11 +4901,6 @@ pub fn perform(action: Action) {
                 run(command);
             }
         }
-        #[cfg(not(target_os = "macos"))]
-        Action::CopyLink(_)
-        | Action::Share(_)
-        | Action::Confirm { .. }
-        | Action::EditPinnedUrl { .. } => {}
     }
 }
 
@@ -5331,8 +5124,6 @@ fn suspend_delays(pressure: MemoryPressure, low_power: bool) -> (i64, i64) {
 fn current_suspend_delays() -> (i64, i64) {
     #[cfg(target_os = "macos")]
     return suspend_delays(crate::mac::memory_pressure(), crate::mac::low_power());
-    #[cfg(not(target_os = "macos"))]
-    suspend_delays(MemoryPressure::Normal, false)
 }
 
 /// Asks each page hidden long enough, but not frozen yet or due to unload, whether it plays media
@@ -5696,14 +5487,6 @@ fn make_page(
         },
         runtime_style: RuntimeStyle::ALLOY,
         ..Default::default()
-    };
-    #[cfg(not(target_os = "macos"))]
-    let info = {
-        let _ = tab;
-        WindowInfo {
-            runtime_style: RuntimeStyle::ALLOY,
-            ..Default::default()
-        }
     };
     browser_host_create_browser_sync(
         Some(&info),
@@ -6124,11 +5907,6 @@ fn peek(url: &str) {
         runtime_style: RuntimeStyle::ALLOY,
         ..Default::default()
     };
-    #[cfg(not(target_os = "macos"))]
-    let info = WindowInfo {
-        runtime_style: RuntimeStyle::ALLOY,
-        ..Default::default()
-    };
     let profile = displayed_profile();
     let mut context = profile_context(profile);
     let Some(browser) = browser_host_create_browser_sync(
@@ -6182,8 +5960,6 @@ fn send_peek() {
         browser.can_go_forward() == 1,
         browser.is_loading() == 1,
     );
-    #[cfg(not(target_os = "macos"))]
-    let _ = (url, color);
 }
 
 /// Does what Peek's bar asks of its page.
@@ -6212,8 +5988,6 @@ fn place_peek() {
     if peek_shown() {
         crate::native::peek(win().id, Some(frame));
     }
-    #[cfg(not(target_os = "macos"))]
-    let _ = frame;
 }
 
 /// Whether Peek shows a link.
@@ -6397,8 +6171,6 @@ fn take_page(tab: NodeId) {
         {
             crate::mac::cover_page(card, &jpeg, Some(space_tint(shown)));
         }
-        #[cfg(not(target_os = "macos"))]
-        let _ = shown;
     }
 }
 
@@ -6601,8 +6373,6 @@ wrap_task! {
         fn execute(&self) {
             #[cfg(target_os = "macos")]
             crate::native::peek_closed(self.window);
-            #[cfg(not(target_os = "macos"))]
-            let _ = self.window;
         }
     }
 }
@@ -6614,14 +6384,6 @@ fn set_window_colors(card_color: u32, grain: f64, colors: &[u32]) {
     win()
         .window_colors
         .set(Some((card_color, grain, colors.to_vec())));
-    if let Some(window) = win().window.with_borrow(Clone::clone) {
-        // The native interface tints the window itself, over the blurred desktop, which shows
-        // through: transparent, but not 0, which CEF takes for its theme's color.
-        #[cfg(target_os = "macos")]
-        let _ = (window, grain, colors);
-        #[cfg(not(target_os = "macos"))]
-        window.set_background_color(colors[0]);
-    }
     // The card first shows once the window has its colors.
     if !win().colored.replace(true) {
         place_card();
@@ -6947,8 +6709,6 @@ fn run_command(command: Command) {
             let entries = STATE.with_borrow(|state| menu::tabs_menu(&state.sidebar, &ids));
             #[cfg(target_os = "macos")]
             crate::mac::pop_up(entries);
-            #[cfg(not(target_os = "macos"))]
-            let _ = entries;
         }
         (Command::MenuTargets { view, targets }, _) => {
             win()
@@ -7375,8 +7135,6 @@ wrap_browser_process_handler! {
             make_bridge();
             #[cfg(target_os = "macos")]
             open_main_window(0);
-            #[cfg(not(target_os = "macos"))]
-            window_create_top_level(Some(&mut MainWindowDelegate::new(0)));
         }
 
         fn default_client(&self) -> Option<Client> {
@@ -7465,7 +7223,6 @@ pub fn window_resized(id: u32) {
         place_overlay(overlay.bounds().height);
         round_overlay();
     }
-    update_drag_regions();
     send_window_width();
     place_theme_picker();
     place_peek();
@@ -7543,154 +7300,6 @@ pub fn window_closed(id: u32) {
     }
 }
 
-// A main window on Linux and Windows, which CEF makes; on macOS, the native interface does
-// (open_main_window).
-#[cfg(not(target_os = "macos"))]
-wrap_window_delegate! {
-    struct MainWindowDelegate {
-        id: u32,
-    }
-
-    impl ViewDelegate {
-        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
-            Size { width: 1280, height: 820 }
-        }
-
-        /// Like Arc's, as narrow as its card's least width beside the sidebar.
-        fn minimum_size(&self, _view: Option<&mut View>) -> Size {
-            // Like Arc's, no narrower than the Command Bar's room while it shows over the page,
-            // unless the window already was.
-            let width = window_by_id(self.id)
-                .and_then(|win| win.overlay_min_width.get())
-                .unwrap_or(MIN_WINDOW_WIDTH);
-            Size { width, height: MIN_WINDOW_HEIGHT }
-        }
-
-        // CEF gives views its theme's colors again once it changes, as when the window shows.
-        fn on_theme_changed(&self, _view: Option<&mut View>) {
-            focus(self.id);
-            if let Some(colors) = win().window_colors.with_borrow(Clone::clone) {
-                set_window_colors(colors.0, colors.1, &colors.2);
-            }
-        }
-
-        fn on_layout_changed(&self, _view: Option<&mut View>, _new_bounds: Option<&Rect>) {
-            window_resized(self.id);
-        }
-    }
-
-    impl PanelDelegate {}
-
-    impl WindowDelegate {
-        fn on_window_created(&self, window: Option<&mut Window>) {
-            focus(self.id);
-            let window = window.expect("window").clone();
-            window.set_title(Some(&CefString::from("Arbalete")));
-            if let Some(from) = win().cascade.take() {
-                window.set_bounds(Some(&Rect { x: from.x + CASCADE, y: from.y + CASCADE, ..from }));
-            }
-            // The sidebar at the left edge, the rest of the window its own background.
-            window.set_background_color(WINDOW_COLOR);
-            let layout = window
-                .set_to_box_layout(Some(&BoxLayoutSettings {
-                    horizontal: 1,
-                    cross_axis_alignment: AxisAlignment::STRETCH,
-                    ..Default::default()
-                }))
-                .expect("box layout");
-            let sidebar = place_view(docked_width, 1);
-            let mut view = View::from(&sidebar);
-            window.add_child_view(Some(&mut view));
-            layout.set_flex_for_view(Some(&mut view), 0);
-            win().sidebar.set(Some(sidebar));
-            window_ready(window);
-        }
-
-        fn on_window_activation_changed(&self, _window: Option<&mut Window>, active: i32) {
-            window_activated(self.id, active == 1);
-        }
-
-        fn on_window_destroyed(&self, _window: Option<&mut Window>) {
-            window_closed(self.id);
-        }
-
-        fn can_close(&self, _window: Option<&mut Window>) -> i32 {
-            window_can_close(self.id).into()
-        }
-
-        fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 { 1 }
-        fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 1 }
-        fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 1 }
-        fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 1 }
-
-        fn window_runtime_style(&self) -> RuntimeStyle {
-            RuntimeStyle::ALLOY
-        }
-    }
-}
-
-// The settings window on Linux and Windows; on macOS, it is native (app/macos/Settings.swift).
-#[cfg(not(target_os = "macos"))]
-wrap_window_delegate! {
-    struct SettingsWindowDelegate {}
-
-    impl ViewDelegate {
-        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
-            SETTINGS_SIZE
-        }
-    }
-
-    impl PanelDelegate {}
-
-    impl WindowDelegate {
-        fn on_window_created(&self, window: Option<&mut Window>) {
-            let window = window.expect("window").clone();
-            window.set_title(Some(&CefString::from("Settings")));
-            window.set_to_fill_layout();
-            let view = browser_view(UiClient::new(), "about:blank", no_width, None);
-            window.add_child_view(Some(&mut View::from(&view)));
-            SETTINGS_VIEW.set(Some(view));
-            window.center_window(Some(&SETTINGS_SIZE));
-            window.show();
-            SETTINGS_WINDOW.set(Some(window));
-        }
-
-        fn on_window_destroyed(&self, _window: Option<&mut Window>) {
-            SETTINGS_WINDOW.set(None);
-            SETTINGS_VIEW.set(None);
-        }
-
-        /// The window closes once its page can.
-        fn can_close(&self, _window: Option<&mut Window>) -> i32 {
-            let host = SETTINGS_VIEW.with_borrow(|view| view.as_ref()?.browser()?.host());
-            host.map_or(1, |host| host.try_close_browser())
-        }
-
-        // Its page draws the title and the toolbar, like Arc's: only macOS keeps standard window
-        // buttons in a frameless window.
-        fn is_frameless(&self, _window: Option<&mut Window>) -> i32 {
-            cfg!(target_os = "macos").into()
-        }
-
-        // The window buttons are centered vertically in this height, the title's row.
-        fn titlebar_height(&self, _window: Option<&mut Window>, height: Option<&mut f32>) -> i32 {
-            if let Some(height) = height {
-                *height = SETTINGS_TITLE_HEIGHT;
-            }
-            1
-        }
-
-        fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 { 1 }
-        fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 0 }
-        fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 0 }
-        fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 1 }
-
-        fn window_runtime_style(&self) -> RuntimeStyle {
-            RuntimeStyle::ALLOY
-        }
-    }
-}
-
 // The browsers Chromium opens by itself, outside the app's windows: after an install, a full
 // Chromium window to say the extension was added. Extensions would take its tab for the active
 // one: it closes once the extension is installed. Closed sooner, while Chromium
@@ -7742,128 +7351,6 @@ wrap_browser_view_delegate! {
     }
 }
 
-// A Little Arbalete window on Linux and Windows, which CEF makes; on macOS, the native interface
-// does (open_little).
-#[cfg(not(target_os = "macos"))]
-wrap_window_delegate! {
-    struct LittleWindowDelegate {
-        id: u32,
-        profile: ProfileId,
-        url: String,
-    }
-
-    impl ViewDelegate {
-        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
-            LITTLE_SIZE
-        }
-    }
-
-    impl PanelDelegate {}
-
-    impl WindowDelegate {
-        // Its bar on top, holding the window buttons, then its page.
-        fn on_window_created(&self, window: Option<&mut Window>) {
-            let window = window.expect("window").clone();
-            window.set_title(Some(&CefString::from("Little Arbalete")));
-            let layout = window
-                .set_to_box_layout(Some(&BoxLayoutSettings {
-                    horizontal: 0,
-                    cross_axis_alignment: AxisAlignment::STRETCH,
-                    ..Default::default()
-                }))
-                .expect("box layout");
-            // Room for the native bar, at the top.
-            let bar = place_view(|| 1, LITTLE_BAR_HEIGHT);
-            window.add_child_view(Some(&mut View::from(&bar)));
-            let mut context = profile_context(self.profile);
-            let start = if self.url.is_empty() { "about:blank" } else { &self.url };
-            let page = browser_view(ContentClient::new(self.profile, true), start, no_width, context.as_mut());
-            let mut view = View::from(&page);
-            window.add_child_view(Some(&mut view));
-            layout.set_flex_for_view(Some(&mut view), 1);
-            LITTLE.with_borrow_mut(|littles| littles.push(Little {
-                id: self.id,
-                profile: self.profile,
-                window: window.clone(),
-                page,
-                url: self.url.clone(),
-                title: String::new(),
-            }));
-            window.center_window(Some(&LITTLE_SIZE));
-            window.show();
-        }
-
-        fn on_window_destroyed(&self, _window: Option<&mut Window>) {
-            LITTLE.with_borrow_mut(|littles| littles.retain(|little| little.id != self.id));
-        }
-
-        /// The window closes once its page can.
-        fn can_close(&self, _window: Option<&mut Window>) -> i32 {
-            let host = LITTLE.with_borrow(|littles| {
-                littles.iter().find(|l| l.id == self.id)?.page.browser()?.host()
-            });
-            host.map_or(1, |host| host.try_close_browser())
-        }
-
-        // Its bar draws its title, like the main window's sidebar: only macOS keeps standard
-        // window buttons in a frameless window.
-        fn is_frameless(&self, _window: Option<&mut Window>) -> i32 {
-            cfg!(target_os = "macos").into()
-        }
-
-        fn titlebar_height(&self, _window: Option<&mut Window>, height: Option<&mut f32>) -> i32 {
-            if let Some(height) = height {
-                *height = LITTLE_BAR_HEIGHT as f32;
-            }
-            1
-        }
-
-        fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 { 1 }
-        fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 1 }
-        fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 1 }
-        fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 1 }
-
-        fn window_runtime_style(&self) -> RuntimeStyle {
-            RuntimeStyle::ALLOY
-        }
-    }
-}
-
-/// Not on macOS, whose windows hold pages in native views.
-/// An Alloy browser view, as wide as `width` says when the layout asks, or sized by the layout or
-/// its overlay's bounds for 0 (no_width). Without a request context, it uses the global one,
-/// which only the app's own UI uses.
-#[cfg(not(target_os = "macos"))]
-fn browser_view(
-    client: Client,
-    url: &str,
-    width: fn() -> i32,
-    context: Option<&mut RequestContext>,
-) -> BrowserView {
-    // A zero height would make the size "empty" and CEF would ignore it.
-    browser_view_sized(client, url, width, 1, context)
-}
-
-/// A browser view as `browser_view` makes, `height` tall when a layout stacks it.
-#[cfg(not(target_os = "macos"))]
-fn browser_view_sized(
-    mut client: Client,
-    url: &str,
-    width: fn() -> i32,
-    height: i32,
-    context: Option<&mut RequestContext>,
-) -> BrowserView {
-    browser_view_create(
-        Some(&mut client),
-        Some(&CefString::from(url)),
-        Some(&BrowserSettings::default()),
-        None,
-        context,
-        Some(&mut AlloyViewDelegate::new(width, height)),
-    )
-    .expect("browser view")
-}
-
 fn no_width() -> i32 {
     0
 }
@@ -7887,44 +7374,6 @@ wrap_panel_delegate! {
     }
 
     impl PanelDelegate {}
-}
-
-wrap_browser_view_delegate! {
-    struct AlloyViewDelegate {
-        width: fn() -> i32,
-        height: i32,
-    }
-
-    impl ViewDelegate {
-        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
-            Size { width: (self.width)(), height: self.height }
-        }
-    }
-
-    impl BrowserViewDelegate {
-        fn browser_runtime_style(&self) -> RuntimeStyle {
-            RuntimeStyle::ALLOY
-        }
-    }
-}
-
-// Shows the app's own UI.
-wrap_client! {
-    struct UiClient {}
-
-    impl Client {
-        fn request_handler(&self) -> Option<RequestHandler> {
-            Some(UiRequestHandler::new())
-        }
-
-        fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(BrowserLifeSpan::new(None))
-        }
-
-        fn drag_handler(&self) -> Option<DragHandler> {
-            Some(UiDragHandler::new())
-        }
-    }
 }
 
 // The extensions' bridge's page, drawn nowhere.
@@ -8068,24 +7517,6 @@ pub fn menu_at(x: f64, y: f64) -> bool {
         show_menu(target);
     }
     true
-}
-
-// Lets the UI's `-webkit-app-region: drag` areas move the window.
-wrap_drag_handler! {
-    struct UiDragHandler {}
-
-    impl DragHandler {
-        // The settings page fills its own window, which its title and toolbar move.
-        fn on_draggable_regions_changed(&self, browser: Option<&mut Browser>, _frame: Option<&mut Frame>, regions: Option<&[DraggableRegion]>) {
-            let settings = SETTINGS_VIEW.with_borrow(|view| view.as_ref()?.browser());
-            if let (Some(browser), Some(mut settings)) = (browser.as_deref(), settings)
-                && browser.is_same(Some(&mut settings)) == 1
-                && let Some(window) = SETTINGS_WINDOW.with_borrow(Clone::clone)
-            {
-                window.set_draggable_regions(regions);
-            }
-        }
-    }
 }
 
 // Shows a profile's web pages.
@@ -8360,8 +7791,6 @@ wrap_keyboard_handler! {
             }
             #[cfg(target_os = "macos")]
             return crate::mac::take_shortcut(os_event.cast(), shortcut_priority).into();
-            #[cfg(not(target_os = "macos"))]
-            0
         }
     }
 }
@@ -9280,10 +8709,10 @@ fn favicon_file(path: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CARD_MARGIN, DraggableRegion, EDGE_WIDTH, FLOAT_INSET, LIBRARY_WIDTH, MemoryPressure,
-        RECENT_TABS, Rect, SIDEBAR_WIDTH, SidebarMode, Size, UiState, favicon_file, lead_part,
-        lerp_rect, margin_regions, origin, pane_lengths, popup_allowed, remember, site,
-        slide_duration, step, suspend_delays, toggled, ui_path, win,
+        CARD_MARGIN, EDGE_WIDTH, FLOAT_INSET, LIBRARY_WIDTH, MemoryPressure, RECENT_TABS, Rect,
+        SIDEBAR_WIDTH, SidebarMode, Size, UiState, favicon_file, lead_part, lerp_rect, origin,
+        pane_lengths, popup_allowed, remember, site, slide_duration, step, suspend_delays, toggled,
+        ui_path, win,
     };
     use arbalete_core::sidebar::NodeId;
 
@@ -9360,52 +8789,6 @@ mod tests {
         (rect.x, rect.y, rect.width, rect.height)
     }
 
-    fn regions(mode: SidebarMode) -> Vec<(i32, i32, i32, i32)> {
-        let regions = margin_regions(&SIZE, &mode.layout(&SIZE).card, mode.margins_start());
-        assert!(regions.iter().all(|region| region.draggable == 1));
-        bounds(&regions)
-    }
-
-    #[test]
-    fn the_margins_around_the_card_move_the_window_without_the_sidebar() {
-        let m = CARD_MARGIN;
-        let margins = [
-            (0, 0, 1000, m),
-            (0, 600 - m, 1000, m),
-            (0, 0, m, 600),
-            (1000 - m, 0, m, 600),
-        ];
-        assert_eq!(regions(SidebarMode::Hidden), margins);
-        assert_eq!(regions(SidebarMode::Revealed), margins);
-    }
-
-    #[test]
-    fn the_margins_start_past_the_sidebar_and_its_edge_while_it_is_docked() {
-        let (m, s) = (CARD_MARGIN, SIDEBAR_WIDTH);
-        assert_eq!(
-            regions(SidebarMode::Shown),
-            [
-                (s, 0, 1000 - s, m),
-                (s, 600 - m, 1000 - s, m),
-                (1000 - m, 0, m, 600)
-            ]
-        );
-    }
-
-    #[test]
-    fn the_window_moves_from_around_the_floating_sidebar() {
-        let (m, s) = (CARD_MARGIN, SIDEBAR_WIDTH);
-        assert_eq!(
-            regions(SidebarMode::Floating),
-            [
-                (0, 0, 1000, m),
-                (0, 600 - m, 1000, m),
-                (0, 0, s, 600),
-                (1000 - m, 0, m, 600)
-            ]
-        );
-    }
-
     #[test]
     fn the_card_keeps_its_margin_on_all_sides_without_the_sidebar() {
         let m = CARD_MARGIN;
@@ -9424,14 +8807,12 @@ mod tests {
         let m = CARD_MARGIN;
         win().library.set(true);
         let docked = rect(&SidebarMode::Shown.layout(&SIZE).card);
-        let start = SidebarMode::Shown.margins_start();
         let hidden = rect(&SidebarMode::Hidden.layout(&SIZE).card);
         win().library.set(false);
         assert_eq!(
             docked,
             (LIBRARY_WIDTH, m, 1000 - LIBRARY_WIDTH - m, 600 - 2 * m)
         );
-        assert_eq!(start, LIBRARY_WIDTH);
         // Hidden, the sidebar leaves the card its margins whatever it shows.
         assert_eq!(hidden, (m, m, 1000 - 2 * m, 600 - 2 * m));
     }
@@ -9494,16 +8875,6 @@ mod tests {
         width: 1000,
         height: 600,
     };
-
-    fn bounds(regions: &[DraggableRegion]) -> Vec<(i32, i32, i32, i32)> {
-        regions
-            .iter()
-            .map(|region| {
-                let rect = &region.bounds;
-                (rect.x, rect.y, rect.width, rect.height)
-            })
-            .collect()
-    }
 
     #[test]
     fn sends_the_page_and_the_tabs() {

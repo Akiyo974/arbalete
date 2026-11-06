@@ -32,8 +32,6 @@ fn load() -> Option<HashMap<String, String>> {
     let resources = resources_dir()?;
     #[cfg(target_os = "macos")]
     let locale = crate::mac::chromium_locale().replace('-', "_");
-    #[cfg(not(target_os = "macos"))]
-    let locale = "en".to_string();
     let english = read_pack(&resources.join("en.lproj/locale.pak"))?;
     let local = read_pack(&resources.join(format!("{locale}.lproj/locale.pak")))?;
     Some(translations(&english, &local))
