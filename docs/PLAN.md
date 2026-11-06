@@ -573,11 +573,11 @@ requires notarized apps.
    4. updates `Casks/arbalete.rb` in the tap (version and SHA-256) with a token allowed to write to that
       repository only (`TAP_TOKEN`, a fine-grained token stored as a secret).
 4. **The cask**: the DMG's URL on GitHub releases, `depends_on arch: :arm64` and the oldest macOS CEF supports,
-   `zap` for the data folder, caches and preferences, and caveats for the first launch.
-5. **First launch**: macOS blocks an app that is not notarized. The cask's caveats and the README say how to
-   open it once: System Settings › Privacy & Security › Open Anyway, or
-   `xattr -dr com.apple.quarantine /Applications/Arbalete.app`. The cask does not remove the quarantine
-   itself: the user chooses.
+   `zap` for the data folder, caches and preferences.
+5. **First launch**: macOS blocks an app that is not notarized. The cask removes the quarantine after
+   installing (`postflight_steps`): adding our tap already trusts it. A disk image downloaded by hand stays
+   blocked once; the README says how to open it: System Settings › Privacy & Security › Open Anyway, or
+   `xattr -dr com.apple.quarantine /Applications/Arbalete.app`.
 - **Versioning**: SemVer, starting at 0.1.0; a release is a commit bumping `app/Cargo.toml`, then its tag.
 - **The release certificate**: a self-signed code signing certificate, "Arbalete Release", valid for ten years,
   the same for every release. macOS ties the permissions it gave (camera, microphone, folders) to the

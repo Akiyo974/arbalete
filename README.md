@@ -26,10 +26,9 @@ On a Mac with Apple Silicon and macOS 14 or later, with [Homebrew](https://brew.
 brew install --cask amenophis/tap/arbalete
 ```
 
-Or download the disk image from the [releases](https://github.com/amenophis/arbalete/releases).
-
-Arbalete is not notarized by Apple yet, so macOS blocks its first launch. Open it once from System Settings →
-Privacy & Security → Open Anyway, or run:
+Or download the disk image from the [releases](https://github.com/amenophis/arbalete/releases). Arbalete is not
+notarized by Apple yet, so macOS blocks the first launch of a downloaded disk image (Homebrew's cask clears that
+itself). Open it once from System Settings → Privacy & Security → Open Anyway, or run:
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/Arbalete.app
