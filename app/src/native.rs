@@ -39,6 +39,9 @@ unsafe extern "C" {
     fn arbalete_ui_little_page_closed(view: *mut c_void);
     fn arbalete_ui_settings_focused() -> bool;
     fn arbalete_ui_make_default_browser();
+    fn arbalete_ui_start_updates();
+    fn arbalete_ui_check_for_updates();
+    fn arbalete_ui_can_check_for_updates() -> bool;
     fn arbalete_ui_split(window: u32, stacked: bool, frames: *const f64, count: usize);
     fn arbalete_ui_panes(window: u32, panes: *const c_char) -> *mut std::ffi::c_void;
     fn arbalete_ui_page_view(window: u32, tab: i64) -> *mut std::ffi::c_void;
@@ -579,6 +582,24 @@ pub fn make_default_browser() {
 pub fn is_default_browser() -> bool {
     // SAFETY: no arguments.
     unsafe { arbalete_ui_is_default_browser() }
+}
+
+/// Starts the updater, which looks for updates by itself in a release.
+pub fn start_updates() {
+    // SAFETY: no arguments.
+    unsafe { arbalete_ui_start_updates() };
+}
+
+/// Looks for an update now, showing what it finds.
+pub fn check_for_updates() {
+    // SAFETY: no arguments.
+    unsafe { arbalete_ui_check_for_updates() };
+}
+
+/// Whether looking for an update now can start: never in a development build.
+pub fn can_check_for_updates() -> bool {
+    // SAFETY: no arguments.
+    unsafe { arbalete_ui_can_check_for_updates() }
 }
 
 /// The settings window has the keyboard: ⌘W closes it rather than a tab.

@@ -11,6 +11,8 @@ uv = "0.13.6"
 [env]
 # One exported CEF distribution, shared by every build instead of a download per build.
 CEF_PATH = "{{env.HOME}}/cef"
+# Sparkle, the app's updater (app/macos/Updates.swift), in a folder named by its version.
+SPARKLE_PATH = "{{env.HOME}}/sparkle/2.10.1"
 
 [tasks.cef]
 description = "Download CEF to CEF_PATH"
@@ -19,13 +21,29 @@ run = [
   "export-cef-dir --force \"$CEF_PATH\"",
 ]
 
+# Sparkle's release archive, checked against its checksum, once per version.
+[tasks.sparkle]
+description = "Download Sparkle to SPARKLE_PATH"
+run = """
+[ -d "$SPARKLE_PATH/Sparkle.framework" ] && exit 0
+version=$(basename "$SPARKLE_PATH")
+archive=$(mktemp)
+curl -fsSL -o "$archive" "https://github.com/sparkle-project/Sparkle/releases/download/$version/Sparkle-$version.tar.xz"
+echo "1a856d2a9edb8e628de88121d7be04cf0e2167f8641650b78fca00b14244cf27  $archive" | shasum -a 256 -c
+mkdir -p "$SPARKLE_PATH"
+tar -xf "$archive" -C "$SPARKLE_PATH"
+rm "$archive"
+"""
+
 [tasks.setup]
-description = "Download CEF and install the CEF bundling tool"
-depends = ["cef"]
+description = "Download CEF and Sparkle, and install the CEF bundling tool"
+depends = ["cef", "sparkle"]
 run = "cargo install --locked cef --version =156.0.0 --features build-util --bin bundle-cef-app"
 
 [tasks.check]
 description = "Run every check listed in CONTRIBUTING.md"
+# The interface links Sparkle (app/build.rs).
+depends = ["sparkle"]
 run = [
   "cargo fmt --all --check",
   "cargo clippy --workspace --all-targets -- -D warnings",
@@ -35,6 +53,7 @@ run = [
 
 [tasks.app]
 description = "Bundle the app"
+depends = ["sparkle"]
 # A development bundle, "Arbalete Dev", stands apart from an installed Arbalete: its own
 # identifier, so its own preferences, permissions and default browser registration (its data
 # folder too, app/src/main.rs), and its own icon. mise run release names the release's.
@@ -61,6 +80,17 @@ run = [
   "plutil -replace NSLocationWhenInUseUsageDescription -string 'Websites you allow can know your location.' target/bundle/Arbalete.app/Contents/Info.plist",
   # Arbalete's license, and Chromium's and CEF's, which redistributing them requires.
   "cp LICENSE \"$CEF_PATH/CREDITS.html\" target/bundle/Arbalete.app/Contents/Resources/",
+  # The updater (app/macos/Updates.swift), and its license, which redistributing it requires.
+  "ditto \"$SPARKLE_PATH/Sparkle.framework\" target/bundle/Arbalete.app/Contents/Frameworks/Sparkle.framework",
+  "cp \"$SPARKLE_PATH/LICENSE\" target/bundle/Arbalete.app/Contents/Resources/Sparkle-LICENSE",
+  # A release looks for updates in its feed (mise run release), signed with the private half of
+  # packaging/sparkle/public-key. Without a feed, a development build never updates itself.
+  "[ -z \"${ARBALETE_FEED_URL:-}\" ] || grep -Eqx '[A-Za-z0-9+/]{43}=' packaging/sparkle/public-key || { echo 'packaging/sparkle/public-key holds no EdDSA public key: see the README, Releasing.' >&2; exit 1; }",
+  "[ -z \"${ARBALETE_FEED_URL:-}\" ] || plutil -insert SUFeedURL -string \"$ARBALETE_FEED_URL\" target/bundle/Arbalete.app/Contents/Info.plist",
+  "[ -z \"${ARBALETE_FEED_URL:-}\" ] || plutil -insert SUPublicEDKey -string \"$(cat packaging/sparkle/public-key)\" target/bundle/Arbalete.app/Contents/Info.plist",
+  # It looks once a day (Sparkle's default) without asking first; an update's alert offers to
+  # install the next ones by themselves.
+  "plutil -insert SUEnableAutomaticChecks -bool YES target/bundle/Arbalete.app/Contents/Info.plist",
   # The helper extension, loaded in every profile (app/src/extensions.rs).
   "cp -R app/extension target/bundle/Arbalete.app/Contents/Resources/arbalete-helper",
   # A browser opens web links: macOS offers it as the default browser, which other apps' links
@@ -86,7 +116,7 @@ run = [
 description = "Bundle an optimized app, signed with ARBALETE_SIGN_IDENTITY, in a disk image"
 # bundle-cef-app builds the dev profile only: optimized here, in a folder of its own, so that
 # the development build stays as it is.
-env = { ARBALETE_BUNDLE_ID = "io.github.amenophis.arbalete", ARBALETE_BUNDLE_NAME = "Arbalete", ARBALETE_ICON = "app/resources/mac/arbalete.icns", CARGO_TARGET_DIR = "target/release-build", CARGO_PROFILE_DEV_OPT_LEVEL = "3", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_DEV_DEBUG_ASSERTIONS = "false", CARGO_PROFILE_DEV_OVERFLOW_CHECKS = "false", CARGO_PROFILE_DEV_INCREMENTAL = "false" }
+env = { ARBALETE_BUNDLE_ID = "io.github.amenophis.arbalete", ARBALETE_BUNDLE_NAME = "Arbalete", ARBALETE_FEED_URL = "https://arbalete.co/appcast.xml", ARBALETE_ICON = "app/resources/mac/arbalete.icns", CARGO_TARGET_DIR = "target/release-build", CARGO_PROFILE_DEV_OPT_LEVEL = "3", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_DEV_DEBUG_ASSERTIONS = "false", CARGO_PROFILE_DEV_OVERFLOW_CHECKS = "false", CARGO_PROFILE_DEV_INCREMENTAL = "false" }
 run = [
   "mise run app",
   # The app beside a link to Applications, to drag it onto (packaging/dmg).

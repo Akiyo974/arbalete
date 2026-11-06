@@ -20,6 +20,9 @@ fn main() {
     println!("cargo:rerun-if-changed=macos/Bridge.h");
     // A file added or removed changes the folder.
     println!("cargo:rerun-if-changed=macos");
+    // The updater, Sparkle (macos/Updates.swift): mise run sparkle downloads it.
+    println!("cargo:rerun-if-env-changed=SPARKLE_PATH");
+    let sparkle = env::var("SPARKLE_PATH").expect("SPARKLE_PATH, set by mise (.config/mise.toml)");
     let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let library = out.join("libArbaleteUI.a");
     let arch = match env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
@@ -37,6 +40,8 @@ fn main() {
         .args(["-module-name", "ArbaleteUI", "-target"])
         .arg(format!("{arch}-apple-macos14.0"))
         .args(["-import-objc-header", "macos/Bridge.h"])
+        .arg("-F")
+        .arg(&sparkle)
         .arg("-o")
         .arg(&library)
         .args(&sources)
@@ -62,4 +67,9 @@ fn main() {
     println!("cargo:rustc-link-lib=framework=AVKit");
     // The certificate sheet (showCertificate in macos/Panels.swift).
     println!("cargo:rustc-link-lib=framework=SecurityInterface");
+    // Sparkle ships in the bundle's Frameworks. Weak, since the helpers and the tests, which
+    // never update, run without it.
+    println!("cargo:rustc-link-search=framework={sparkle}");
+    println!("cargo:rustc-link-arg=-Wl,-weak_framework,Sparkle");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,@executable_path/../Frameworks");
 }

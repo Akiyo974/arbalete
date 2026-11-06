@@ -95,6 +95,7 @@ define_class!(
         unsafe fn finish_launching(&self) {
             let _: () = msg_send![super(self), finishLaunching];
             watch_links();
+            crate::native::start_updates();
         }
 
         // Chromium must leave the run loop to shut down: quitting closes the window first.
@@ -323,6 +324,11 @@ define_class!(
             crate::native::about();
         }
 
+        #[unsafe(method(arbaleteCheckForUpdates:))]
+        fn check_for_updates(&self, _sender: Option<&AnyObject>) {
+            crate::native::check_for_updates();
+        }
+
         #[unsafe(method(arbaleteSettings:))]
         fn settings(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::ShowSettings);
@@ -344,6 +350,9 @@ define_class!(
             }
             if action == Some(sel!(arbaleteClosePeek:)) {
                 return Bool::new(crate::shell::peek_shown());
+            }
+            if action == Some(sel!(arbaleteCheckForUpdates:)) {
+                return Bool::new(crate::native::can_check_for_updates());
             }
             let panes = [
                 sel!(arbaleteClosePane:),
@@ -612,6 +621,12 @@ pub fn setup_menu() {
                     mtm,
                     ns_string!("About Arbalete"),
                     sel!(arbaleteAbout:),
+                    ns_string!(""),
+                ),
+                item(
+                    mtm,
+                    ns_string!("Check for Updates…"),
+                    sel!(arbaleteCheckForUpdates:),
                     ns_string!(""),
                 ),
                 NSMenuItem::separatorItem(mtm),
