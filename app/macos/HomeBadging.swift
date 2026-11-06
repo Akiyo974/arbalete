@@ -6,6 +6,7 @@
 
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// A recent item: a download, a capture or a file of a folder.
 struct RecentItem: Identifiable, Equatable {
@@ -46,6 +47,8 @@ final class RecentItems: ObservableObject {
     private var seenSince = Date()
     private var timer: Timer?
     private var dismissal: DispatchWorkItem?
+    /// The library's button, which a new download flies to.
+    weak var button: NSView?
 
     /// Gathers the items again, from the downloads and the sources turned on.
     func refresh(downloads: [Download], sources: [String]) {
@@ -79,7 +82,12 @@ final class RecentItems: ObservableObject {
         defer { known = (known ?? []).union(ids) }
         guard let known, let fresh = items.first(where: { !known.contains($0.id) && $0.date > seenSince })
         else { return }
-        show(fresh)
+        // Like Arc's, a new download first flies from the page to the button.
+        if fresh.kind == .download, let button {
+            flyDownload(fresh, to: button) { [weak self] in self?.show(fresh) }
+        } else {
+            show(fresh)
+        }
     }
 
     private func show(_ item: RecentItem) {
@@ -176,6 +184,7 @@ struct LibraryEntry: View {
             }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.65), value: recent.badge)
+        .background(ButtonAnchor(recent: recent))
         .onHover { over in
             hoveredButton.wrappedValue = over
             hover()
@@ -230,6 +239,83 @@ struct LibraryEntry: View {
         closing.wrappedValue = change
         DispatchQueue.main.asyncAfter(deadline: .now() + (over ? 0.12 : 0.08), execute: change)
     }
+}
+
+/// Hands the button's view to the recent items, for downloads to fly to.
+private struct ButtonAnchor: NSViewRepresentable {
+    let recent: RecentItems
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        recent.button = view
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) { recent.button = view }
+}
+
+/// Like Arc's DownloadToLibrary: the download's icon flies from the page's middle to the
+/// library's button, shrinking along a curve, in a clear window over the app's.
+@MainActor
+private func flyDownload(_ item: RecentItem, to button: NSView, done: @escaping () -> Void) {
+    guard let window = button.window else { return done() }
+    let page = (window.parent ?? window).frame
+    let target = window.convertToScreen(button.convert(button.bounds, to: nil))
+    let overlay = NSPanel(
+        contentRect: page.union(target).insetBy(dx: -80, dy: -160), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered,
+        defer: false)
+    overlay.isOpaque = false
+    overlay.backgroundColor = .clear
+    overlay.hasShadow = false
+    overlay.ignoresMouseEvents = true
+    overlay.level = .floating
+    overlay.isReleasedWhenClosed = false
+    let root = NSView()
+    root.wantsLayer = true
+    overlay.contentView = root
+
+    let type = UTType(filenameExtension: (item.title as NSString).pathExtension) ?? .data
+    let icon = CALayer()
+    icon.contents = NSWorkspace.shared.icon(for: type)
+    icon.contentsGravity = .resizeAspect
+    icon.bounds = CGRect(x: 0, y: 0, width: 72, height: 72)
+    icon.shadowOpacity = 0.25
+    icon.shadowRadius = 8
+    icon.shadowOffset = CGSize(width: 0, height: -3)
+    // Where AppKit put the window, which it may move off the menu bar.
+    let area = overlay.frame
+    let local = { (point: CGPoint) in CGPoint(x: point.x - area.minX, y: point.y - area.minY) }
+    let start = local(CGPoint(x: page.midX, y: page.midY))
+    let end = local(CGPoint(x: target.midX, y: target.midY))
+    icon.position = end
+    root.layer?.addSublayer(icon)
+
+    // A curve rising first, then falling onto the button.
+    let path = CGMutablePath()
+    path.move(to: start)
+    path.addQuadCurve(to: end, control: CGPoint(x: (start.x + end.x) / 2, y: max(start.y, end.y) + 120))
+    let move = CAKeyframeAnimation(keyPath: "position")
+    move.path = path
+    let shrink = CABasicAnimation(keyPath: "transform.scale")
+    shrink.fromValue = 1
+    shrink.toValue = 0.3
+    let fade = CAKeyframeAnimation(keyPath: "opacity")
+    fade.values = [0, 1, 1, 0]
+    fade.keyTimes = [0, 0.12, 0.85, 1]
+    let flight = CAAnimationGroup()
+    flight.animations = [move, shrink, fade]
+    flight.duration = 0.65
+    flight.timingFunction = CAMediaTimingFunction(controlPoints: 0.45, 0, 0.6, 1)
+    icon.opacity = 0
+
+    overlay.orderFront(nil)
+    CATransaction.begin()
+    CATransaction.setCompletionBlock {
+        overlay.orderOut(nil)
+        done()
+    }
+    icon.add(flight, forKey: "flight")
+    CATransaction.commit()
 }
 
 extension AnyTransition {
