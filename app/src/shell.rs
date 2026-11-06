@@ -6806,13 +6806,20 @@ fn run_command(command: Command) {
                 show_selected();
             }
         }
-        (Command::NewProfile, _) => new_profile(),
+        (Command::NewProfile, _) => {
+            new_profile();
+            send_settings();
+        }
         // Like a folder, an unknown profile or a blank name from the UI is ignored.
         (Command::RenameProfile(id, name), _) => {
-            let _ = update_sidebar(|sidebar| sidebar.rename_profile(id, &name));
+            if update_sidebar(|sidebar| sidebar.rename_profile(id, &name)).is_ok() {
+                send_settings();
+            }
         }
         (Command::ColorProfile(id, color), _) => {
-            let _ = update_sidebar(|sidebar| sidebar.set_profile_color(id, color));
+            if update_sidebar(|sidebar| sidebar.set_profile_color(id, color)).is_ok() {
+                send_settings();
+            }
         }
         (Command::SetArchiveAfter(id, after), _) => {
             if update_sidebar(|sidebar| sidebar.set_archive_after(id, after)).is_ok() {

@@ -660,7 +660,9 @@ private struct ProfilesSettings: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, 12)
                 HStack(alignment: .top, spacing: 10) {
-                    ProfileList(detail: detail, picked: profile?.id) { picked.wrappedValue = $0 }
+                    ProfileList(
+                        detail: detail, picked: profile?.id, pick: { picked.wrappedValue = $0 },
+                        create: { settings.app.run("profile/new") })
                         .frame(width: 205)
                     if let profile {
                         ProfileDetail(settings: settings, detail: detail, profile: profile)
@@ -671,11 +673,12 @@ private struct ProfilesSettings: View {
     }
 }
 
-/// The profiles, like Arc's list: each with how many Spaces use it.
+/// The profiles, like Arc's list: each with how many Spaces use it, then a button creating one.
 private struct ProfileList: View {
     let detail: SettingsDetail
     let picked: Int?
     let pick: (Int) -> Void
+    let create: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -708,6 +711,16 @@ private struct ProfileList: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 4)
             }
+            Button(action: create) {
+                Label("New Profile", systemImage: "plus").font(.system(size: 13))
+                    .padding(.horizontal, 8)
+                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
             Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity, alignment: .top)
