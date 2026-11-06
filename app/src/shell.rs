@@ -7261,8 +7261,11 @@ wrap_app! {
                     Some(&CefString::from(dir.to_string_lossy().as_ref())),
                 );
             }
-            // Lets the end-to-end check and the benchmark (e2e/devtools.mjs) drive the UI through DevTools.
-            if let Ok(port) = std::env::var("ARBALETE_DEBUG_PORT") {
+            // Opens DevTools to the editor's debug launch (.vscode/launch.json). Development builds
+            // only: the port gives full control of every profile to anything on this machine.
+            if cfg!(debug_assertions)
+                && let Ok(port) = std::env::var("ARBALETE_DEBUG_PORT")
+            {
                 command_line.append_switch_with_value(
                     Some(&CefString::from("remote-debugging-port")),
                     Some(&CefString::from(port.as_str())),
