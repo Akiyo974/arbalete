@@ -1,6 +1,7 @@
 // Injected by Arbalete into every extension's service worker (app/src/extensions.rs). Arbalete's
 // pages sit in no Chromium window, so Chrome's tab and window APIs find none: they answer instead
-// with the profile's active tab, which the app keeps up to date (__arbaleteSync), and creating or
+// with the profile's active tab, which the app keeps up to date (__arbaleteSync), its address,
+// title and icon only for an extension Chrome would show them to, and creating or
 // updating a tab asks Arbalete (__arbalete, a DevTools binding) to do it in its own tabs. Injected
 // into an extension's popup too, with the active tab as it opens (__arbaleteInitial): the popup
 // closes on Escape, or when it closes itself.

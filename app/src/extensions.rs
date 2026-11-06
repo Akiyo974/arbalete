@@ -57,6 +57,8 @@ pub struct Details {
     pub permissions: Vec<String>,
     /// The sites it may read and change, like `<all_urls>`.
     pub sites: Vec<String>,
+    /// Those of its sites its permissions grant, which its content scripts' do not count in.
+    pub hosts: Vec<String>,
     pub homepage: Option<String>,
     pub manifest_version: u64,
     /// Installed from the Chrome Web Store.
@@ -175,10 +177,11 @@ fn manifest_details(manifest: &Value) -> Details {
     };
     let is_site = |entry: &String| entry.contains("://") || entry == "<all_urls>";
     // Manifest V2 lists the sites among its permissions.
-    let (mut sites, permissions): (Vec<_>, Vec<_>) = strings(&manifest["permissions"])
+    let (mut hosts, permissions): (Vec<_>, Vec<_>) = strings(&manifest["permissions"])
         .into_iter()
         .partition(is_site);
-    sites.extend(strings(&manifest["host_permissions"]));
+    hosts.extend(strings(&manifest["host_permissions"]));
+    let mut sites = hosts.clone();
     let scripts = manifest["content_scripts"].as_array().into_iter().flatten();
     sites.extend(scripts.flat_map(|script| strings(&script["matches"])));
     let mut unique = Vec::new();
@@ -190,6 +193,7 @@ fn manifest_details(manifest: &Value) -> Details {
     Details {
         permissions,
         sites: unique,
+        hosts,
         homepage: manifest["homepage_url"].as_str().map(str::to_string),
         manifest_version: manifest["manifest_version"].as_u64().unwrap_or(2),
         ..Details::default()
@@ -300,13 +304,26 @@ impl Bridge {
         Some(*profile)
     }
 
-    /// The state a profile's extensions see: its active tab, with its page's tab id.
-    fn state(&self, profile: ProfileId) -> Value {
+    /// The tab id of a profile's active tab, once the helper has told it.
+    fn active_tab_id(&self, profile: ProfileId) -> Option<i64> {
+        let page = self.tabs.get(&profile)?.page?;
+        self.contents.get(&page)?.tab_id
+    }
+
+    /// The state one of a profile's extensions sees: its active tab, with its page's tab id, and
+    /// its address, title and icon only if the extension may see them (exposes_tab_details). A
+    /// popup the user opened holds `activeTab` for it, as in Chrome.
+    fn state(&self, profile: ProfileId, extension: &str, popup: bool) -> Value {
         let tab = self.tabs.get(&profile);
-        let tab_id = tab
-            .and_then(|tab| self.contents.get(&tab.page?))
-            .and_then(|content| content.tab_id);
-        state_json(tab, tab_id)
+        let details = tab.is_some_and(|tab| {
+            let installed = list(profile).into_iter().find(|e| e.id == extension);
+            installed.is_some_and(|installed| {
+                let details = &installed.details;
+                (popup && details.permissions.iter().any(|p| p == "activeTab"))
+                    || exposes_tab_details(details, &tab.url)
+            })
+        });
+        state_json(tab, self.active_tab_id(profile), details)
     }
 }
 
@@ -557,7 +574,8 @@ pub fn popup_created(profile: ProfileId, browser: &Browser, url: &str) {
     let mut observer = PopupObserver::new(url.to_string());
     let registration = host.add_dev_tools_message_observer(Some(&mut observer));
     POPUP.set(registration);
-    let state = BRIDGE.with_borrow(|bridge| bridge.state(profile));
+    let extension = extension_id(url).unwrap_or_default();
+    let state = BRIDGE.with_borrow(|bridge| bridge.state(profile, extension, true));
     let source = format!("self.__arbaleteInitial = {state};\n{SHIM}");
     // New documents get the binding only while the Runtime domain is enabled, and the scripts
     // added for them only while the Page domain is.
@@ -674,22 +692,22 @@ fn send_in(session: &str, method: &str, params: Value, pending: Option<Pending>)
 }
 
 /// Gives the extensions' workers of a browser context its profile's active tab, once its tab id
-/// is known.
+/// is known, each as its extension may see it.
 fn push_state(context: &str) {
-    let (state, workers) = BRIDGE.with_borrow(|bridge| {
-        let workers: Vec<String> = bridge
+    let states: Vec<(String, Value)> = BRIDGE.with_borrow(|bridge| {
+        let Some(profile) = bridge.profile_of(context) else {
+            return Vec::new();
+        };
+        bridge
             .workers
             .iter()
             .filter(|(_, (worker, _))| worker == context)
-            .map(|(session, _)| session.clone())
-            .collect();
-        let state = bridge
-            .profile_of(context)
-            .map(|profile| bridge.state(profile));
-        (state, workers)
+            .map(|(session, (_, extension))| {
+                (session.clone(), bridge.state(profile, extension, false))
+            })
+            .collect()
     });
-    let Some(state) = state else { return };
-    for session in workers {
+    for (session, state) in states {
         let expression = format!("self.__arbaleteSync?.({state})");
         send_in(
             &session,
@@ -700,28 +718,118 @@ fn push_state(context: &str) {
     }
 }
 
-/// The state the shim answers with: the active tab, if any and its tab id is known.
-fn state_json(tab: Option<&ActiveTab>, tab_id: Option<i64>) -> Value {
+/// The state the shim answers with: the active tab, if any and its tab id is known, with its
+/// address, title and icon only with `details`, as Chrome leaves them out.
+fn state_json(tab: Option<&ActiveTab>, tab_id: Option<i64>, details: bool) -> Value {
     let tabs: Vec<Value> = match (tab, tab_id) {
-        (Some(tab), Some(id)) => vec![json!({
-            "id": id,
-            "index": 0,
-            "windowId": 1,
-            "active": true,
-            "highlighted": true,
-            "pinned": false,
-            "incognito": false,
-            "status": "complete",
-            "url": tab.url,
-            "title": tab.title,
-            "favIconUrl": tab.favicon,
-            "discarded": false,
-            "autoDiscardable": true,
-            "groupId": -1,
-        })],
+        (Some(tab), Some(id)) => {
+            let mut tab_json = json!({
+                "id": id,
+                "index": 0,
+                "windowId": 1,
+                "active": true,
+                "highlighted": true,
+                "pinned": false,
+                "incognito": false,
+                "status": "complete",
+                "url": tab.url,
+                "title": tab.title,
+                "favIconUrl": tab.favicon,
+                "discarded": false,
+                "autoDiscardable": true,
+                "groupId": -1,
+            });
+            if !details && let Some(fields) = tab_json.as_object_mut() {
+                for field in ["url", "title", "favIconUrl"] {
+                    fields.remove(field);
+                }
+            }
+            vec![tab_json]
+        }
         _ => Vec::new(),
     };
     json!({ "tabs": tabs })
+}
+
+/// Whether an extension may see the address, title and icon of a tab at `url`, as in Chrome: it
+/// holds the `tabs` permission, or a host permission matching the address.
+fn exposes_tab_details(details: &Details, url: &str) -> bool {
+    details.permissions.iter().any(|p| p == "tabs")
+        || details.hosts.iter().any(|host| pattern_matches(host, url))
+}
+
+/// Whether a match pattern, like `https://*.example.com/*` or `<all_urls>`, matches `url`: its
+/// scheme (`*` for http and https), its host (`*` for any, `*.` for a domain and its
+/// subdomains), its port if it names one, and its path and query, where `*` matches anything.
+fn pattern_matches(pattern: &str, url: &str) -> bool {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return false;
+    };
+    let scheme = scheme.to_ascii_lowercase();
+    if pattern == "<all_urls>" {
+        return ["http", "https", "ws", "wss", "ftp", "file"].contains(&scheme.as_str());
+    }
+    let Some((pattern_scheme, pattern_rest)) = pattern.split_once("://") else {
+        return false;
+    };
+    let scheme_matches = match pattern_scheme {
+        "*" => scheme == "http" || scheme == "https",
+        _ => pattern_scheme.eq_ignore_ascii_case(&scheme),
+    };
+    // A pattern has a path, at least `/`.
+    let Some(slash) = pattern_rest.find('/') else {
+        return false;
+    };
+    let (pattern_authority, pattern_path) = pattern_rest.split_at(slash);
+    let rest = rest.split('#').next().unwrap_or_default();
+    let (authority, path) = rest.split_at(rest.find(['/', '?']).unwrap_or(rest.len()));
+    let path = if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{path}")
+    };
+    let authority = authority.rsplit('@').next().unwrap_or_default();
+    let (host, port) = host_and_port(authority);
+    let (pattern_host, pattern_port) = host_and_port(pattern_authority);
+    let host = host.to_ascii_lowercase();
+    let pattern_host = pattern_host.to_ascii_lowercase();
+    let host_matches = match pattern_host.strip_prefix("*") {
+        Some("") => true,
+        Some(domain) => domain
+            .strip_prefix('.')
+            .is_some_and(|domain| host == domain || host.ends_with(&format!(".{domain}"))),
+        None => host == pattern_host,
+    };
+    let port_matches = pattern_port.is_none_or(|p| p == "*" || Some(p) == port);
+    scheme_matches && host_matches && port_matches && glob_matches(pattern_path, &path)
+}
+
+/// An authority's host and port, if it names one: `[::1]:8080` has the host `[::1]`.
+fn host_and_port(authority: &str) -> (&str, Option<&str>) {
+    match authority.rsplit_once(':') {
+        Some((host, port)) if !port.contains(']') => (host, Some(port)),
+        _ => (authority, None),
+    }
+}
+
+/// Whether `text` matches `glob`, where `*` matches any run of characters.
+fn glob_matches(glob: &str, text: &str) -> bool {
+    let mut parts = glob.split('*');
+    let first = parts.next().unwrap_or_default();
+    let Some(mut rest) = text.strip_prefix(first) else {
+        return false;
+    };
+    let parts: Vec<_> = parts.collect();
+    let Some((last, middle)) = parts.split_last() else {
+        return rest.is_empty();
+    };
+    for part in middle {
+        let Some(at) = rest.find(part) else {
+            return false;
+        };
+        rest = &rest[at + part.len()..];
+    }
+    rest.ends_with(last)
 }
 
 /// Whether a target is an extension's service worker, and the helper's.
@@ -867,7 +975,7 @@ impl Caller {
     /// The tab id the caller's shim gives the active tab, if it knows one.
     fn active_tab_id(&self) -> Option<i64> {
         let profile = self.profile()?;
-        BRIDGE.with_borrow(|bridge| bridge.state(profile)["tabs"][0]["id"].as_i64())
+        BRIDGE.with_borrow(|bridge| bridge.active_tab_id(profile))
     }
 }
 
@@ -1371,12 +1479,17 @@ mod tests {
             title: "Example".into(),
             favicon: None,
         };
-        assert_eq!(state_json(Some(&tab), None), json!({ "tabs": [] }));
-        assert_eq!(state_json(None, Some(7)), json!({ "tabs": [] }));
-        let state = state_json(Some(&tab), Some(7));
-        let tab = &state["tabs"][0];
+        assert_eq!(state_json(Some(&tab), None, true), json!({ "tabs": [] }));
+        assert_eq!(state_json(None, Some(7), true), json!({ "tabs": [] }));
+        let state = state_json(Some(&tab), Some(7), true);
+        let shown = &state["tabs"][0];
         assert_eq!(
-            (&tab["id"], &tab["url"], &tab["active"], &tab["windowId"]),
+            (
+                &shown["id"],
+                &shown["url"],
+                &shown["active"],
+                &shown["windowId"]
+            ),
             (
                 &json!(7),
                 &json!("https://example.com/"),
@@ -1384,5 +1497,75 @@ mod tests {
                 &json!(1)
             )
         );
+        assert_eq!(shown["title"], "Example");
+        let state = state_json(Some(&tab), Some(7), false);
+        let hidden = state["tabs"][0].as_object().expect("a tab");
+        assert_eq!(hidden["id"], 7);
+        for field in ["url", "title", "favIconUrl"] {
+            assert!(!hidden.contains_key(field), "{field} is left out");
+        }
+    }
+
+    #[test]
+    fn shows_a_tab_only_to_extensions_with_the_tabs_or_a_host_permission() {
+        let details = |manifest: Value| manifest_details(&manifest);
+        let url = "https://mail.example.com/inbox";
+        let storage = details(json!({ "permissions": ["storage"] }));
+        assert!(!exposes_tab_details(&storage, url));
+        let tabs = details(json!({ "permissions": ["storage", "tabs"] }));
+        assert!(exposes_tab_details(&tabs, url));
+        let host = details(json!({ "host_permissions": ["https://*.example.com/*"] }));
+        assert!(exposes_tab_details(&host, url));
+        assert!(!exposes_tab_details(&host, "https://other.test/"));
+        let v2 = details(json!({ "manifest_version": 2, "permissions": ["<all_urls>"] }));
+        assert!(exposes_tab_details(&v2, url));
+        // Content scripts grant no host permission.
+        let scripts = details(json!({ "content_scripts": [{ "matches": ["<all_urls>"] }] }));
+        assert!(!exposes_tab_details(&scripts, url));
+        // `activeTab` alone grants nothing until the user invokes the extension.
+        let active = details(json!({ "permissions": ["activeTab"] }));
+        assert!(!exposes_tab_details(&active, url));
+    }
+
+    #[test]
+    fn matches_urls_with_match_patterns() {
+        let cases = [
+            ("<all_urls>", "https://a.com/", true),
+            ("<all_urls>", "file:///Users/me/a.txt", true),
+            ("<all_urls>", "chrome://settings/", false),
+            ("*://*/*", "http://a.com/a", true),
+            ("*://*/*", "https://a.com/", true),
+            ("*://*/*", "ftp://a.com/", false),
+            ("*://*/*", "about:blank", false),
+            ("https://*.a.com/*", "https://a.com/", true),
+            ("https://*.a.com/*", "https://a.b.a.com/x?y", true),
+            ("https://*.a.com/*", "https://nota.com/", false),
+            ("https://*.a.com/*", "http://a.com/", false),
+            ("https://a.com/*", "https://A.com/a", true),
+            ("https://a.com/*", "https://www.a.com/", false),
+            ("https://a.com/*", "https://a.com.evil.test/", false),
+            ("https://a.com/*", "https://user@a.com:8443/", true),
+            ("https://a.com/docs/*", "https://a.com/docs/a", true),
+            ("https://a.com/docs/*", "https://a.com/blog/a", false),
+            ("https://a.com/*.pdf", "https://a.com/a/b.pdf", true),
+            ("https://a.com/*.pdf", "https://a.com/b.html", false),
+            ("https://a.com/", "https://a.com", true),
+            ("https://a.com/", "https://a.com/a", false),
+            ("https://a.com/*?q=*", "https://a.com/s?q=1", true),
+            ("http://localhost:8080/*", "http://localhost:8080/a", true),
+            ("http://localhost:8080/*", "http://localhost:9090/a", false),
+            ("http://localhost/*", "http://localhost:9090/a", true),
+            ("http://[::1]/*", "http://[::1]:3000/", true),
+            ("file:///*", "file:///tmp/a", true),
+            ("https://a.com", "https://a.com/", false),
+            ("storage", "https://a.com/", false),
+        ];
+        for (pattern, url, expected) in cases {
+            assert_eq!(
+                pattern_matches(pattern, url),
+                expected,
+                "{pattern} on {url}"
+            );
+        }
     }
 }
