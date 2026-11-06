@@ -803,7 +803,7 @@ private struct ProfileDetail: View {
                         ForEach(detail.engines) { Text($0.name).tag($0.id) }
                     }
                     .labelsHidden()
-                    .frame(width: 153)
+                    .fixedSize()
                 }
                 SettingsLine()
                 SettingsSwitch(
@@ -821,7 +821,7 @@ private struct ProfileDetail: View {
                         ForEach(detail.delays) { Text($0.name).tag($0.id) }
                     }
                     .labelsHidden()
-                    .frame(width: 153)
+                    .fixedSize()
                 }
             }
             Text("Your Data and Settings").font(.system(size: 12)).foregroundStyle(.tertiary)
