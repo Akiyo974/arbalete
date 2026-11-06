@@ -1987,8 +1987,57 @@ mod tests {
         sidebar.spaces()[0].clone()
     }
 
+    /// A node's children, checking first the tree the test changed still holds together.
     fn children(sidebar: &Sidebar, id: NodeId) -> Vec<NodeId> {
+        sidebar.check_invariants().unwrap();
         sidebar.node(id).unwrap().children.clone()
+    }
+
+    #[test]
+    fn random_operations_keep_the_tree_whole_through_a_save() {
+        let mut sidebar = Sidebar::default();
+        // A linear congruential generator: the same operations at every run.
+        let mut seed: u64 = 42;
+        let mut next = move |bound: usize| {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 33) as usize % bound.max(1)
+        };
+        for step in 0..2000 {
+            let mut nodes: Vec<_> = sidebar.nodes.keys().copied().collect();
+            nodes.sort_by_key(|id| id.0);
+            let spaces: Vec<_> = sidebar.spaces.iter().map(|s| s.id).collect();
+            let node = nodes[next(nodes.len())];
+            let other = nodes[next(nodes.len())];
+            let space = spaces[next(spaces.len())];
+            let index = next(4);
+            // Refused operations are part of the test: they must leave the tree whole too.
+            let _ = match next(16) {
+                0..=2 => sidebar.open_tab(space, "https://a.test/").map(drop),
+                3 => sidebar.add_tab(node, "https://b.test/", "B").map(drop),
+                4 => sidebar.add_folder(node, "Folder").map(drop),
+                5 => sidebar.move_node(node, other, index),
+                6 => sidebar.split_beside(node, other, index == 0).map(drop),
+                7 => sidebar.separate(node),
+                8 => sidebar.remove(node),
+                9 => sidebar.toggle_pin(space, node),
+                10 => sidebar.move_to_space(node, space),
+                11 => sidebar.duplicate_below(node).map(drop),
+                12 => sidebar.select(space, node),
+                13 => sidebar.close_in_place(space, node).map(drop),
+                14 => sidebar.remove_folder(node).map(drop),
+                15 if index < 2 => sidebar.delete_space(space),
+                _ => sidebar.add_space("Space", home(&sidebar).profile).map(drop),
+            };
+            if let Err(problem) = sidebar.check_invariants() {
+                panic!("step {step}: {problem}");
+            }
+        }
+        let json = serde_json::to_string(&sidebar.saved()).unwrap();
+        let loaded: Sidebar = serde_json::from_str(&json).unwrap();
+        loaded.check_invariants().unwrap();
+        assert_eq!(loaded, sidebar);
     }
 
     #[test]
