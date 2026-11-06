@@ -42,11 +42,11 @@ With [mise](https://mise.jdx.dev/) installed:
 
 ```sh
 mise install     # install the tools
-mise run setup   # download CEF and install bundle-cef-app, the CEF bundling tool
+mise run setup   # download CEF and Sparkle, and install bundle-cef-app, the CEF bundling tool
 mise run run     # bundle the app and run it
 ```
 
-`mise run setup` downloads CEF (about 350 MB) to `~/cef` once; every build uses it through `CEF_PATH`.
+`mise run setup` downloads CEF (about 350 MB) to `~/cef` once, and Sparkle, the updater, to `~/sparkle`; every build uses them through `CEF_PATH` and `SPARKLE_PATH`.
 
 Development builds are "Arbalete Dev": their own bundle identifier (`io.github.amenophis.arbalete.dev`) and data
 folder (`~/Library/Application Support/Arbalete Dev`), so an installed Arbalete keeps its own data, preferences and
@@ -72,8 +72,23 @@ ARBALETE_SIGN_IDENTITY = "Arbalete Dev"
 `target/dmg/Arbalete-<version>-arm64.dmg`. To publish one, bump the version in `app/Cargo.toml` on `main`, then
 push its tag (`v0.1.0`): the [release workflow](.github/workflows/release.yml) builds the disk image signed with the
 release certificate, publishes it on GitHub and updates the cask in
-[amenophis/homebrew-tap](https://github.com/amenophis/homebrew-tap). It needs three secrets: `SIGN_P12` (the
-certificate and its key, in base64), `SIGN_P12_PASSWORD` and `TAP_TOKEN` (a token allowed to write to the tap).
+[amenophis/homebrew-tap](https://github.com/amenophis/homebrew-tap). It needs four secrets: `SIGN_P12` (the
+certificate and its key, in base64), `SIGN_P12_PASSWORD`, `TAP_TOKEN` (a token allowed to write to the tap) and
+`SPARKLE_PRIVATE_KEY`.
+
+The app updates itself with [Sparkle](https://sparkle-project.org): it reads the appcast the website builds from
+the releases (`https://arbalete.co/appcast.xml`) and installs only a disk image signed with the release key, an
+EdDSA key pair made once with Sparkle's `generate_keys` (`mise run sparkle` downloads it):
+
+1. `~/sparkle/<version>/bin/generate_keys --account arbalete` creates the pair in your login keychain and prints
+   the public key.
+2. Put the public key, alone, in [packaging/sparkle/public-key](packaging/sparkle/public-key) and commit it.
+3. `~/sparkle/<version>/bin/generate_keys --account arbalete -x sparkle-private-key` exports the private key:
+   store it in the `SPARKLE_PRIVATE_KEY` secret and in a password manager, then delete the file. Never commit
+   it. Losing it means users can no longer update from inside the app.
+
+`mise run release` fails while `packaging/sparkle/public-key` holds no key. A release workflow without the
+`SPARKLE_PRIVATE_KEY` secret fails before publishing anything.
 
 ## Logo
 

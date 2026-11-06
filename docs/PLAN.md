@@ -578,6 +578,15 @@ requires notarized apps.
    installing (`postflight_steps`): adding our tap already trusts it. A disk image downloaded by hand stays
    blocked once; the README says how to open it: System Settings › Privacy & Security › Open Anyway, or
    `xattr -dr com.apple.quarantine /Applications/Arbalete.app`.
+6. **Updates inside the app**, with [Sparkle](https://sparkle-project.org) 2 (MIT, its license in the bundle's
+   Resources): `mise run sparkle` downloads a pinned release, checked against its checksum, and the bundle carries
+   its framework. A release looks once a day in `https://arbalete.co/appcast.xml` (`SUFeedURL`) and installs
+   only a disk image signed with the EdDSA key whose public half is `packaging/sparkle/public-key`
+   (`SUPublicEDKey`). The release workflow signs the disk image with `sign_update` and the private key
+   (`SPARKLE_PRIVATE_KEY`), and publishes the signature beside it (`.dmg.sig`); the website builds the appcast
+   from the releases that have one. Arbalete › Check for Updates… looks at once. The cask says
+   `auto_updates true`, so `brew upgrade` leaves updating to the app. Development builds have no feed and never
+   update themselves.
 - **Versioning**: SemVer, starting at 0.1.0; a release is a commit bumping `app/Cargo.toml`, then its tag.
 - **The release certificate**: a self-signed code signing certificate, "Arbalete Release", valid for ten years,
   the same for every release. macOS ties the permissions it gave (camera, microphone, folders) to the
@@ -587,7 +596,7 @@ requires notarized apps.
 - **Done when**: on a Mac without Arbalete, `brew install --cask amenophis/tap/arbalete` installs the latest
   release, it opens after Open Anyway, and pushing a new tag updates the cask without any manual step.
 - **Later**: a Developer ID and notarization (then Homebrew's main cask list, and no first-launch step), Intel
-  and universal builds, updates inside the app (Sparkle), proprietary codecs and Widevine (a CEF build of our
+  and universal builds, proprietary codecs and Widevine (a CEF build of our
   own), and the third-party licenses in the About window.
 
 ### Later
