@@ -793,6 +793,9 @@ struct SpaceColumn: View {
 
     private var colored: Bool { !space.theme.colors.isEmpty }
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 9) }
+    /// Its frame, from the top left corner of the window it shows in.
+    private let _frame = State<CGRect>(initialValue: .zero)
+
     private var profileName: String {
         model.state?.profiles.first { $0.id == space.profile }?.name ?? "Default"
     }
@@ -808,7 +811,8 @@ struct SpaceColumn: View {
                 Spacer()
                 ProfileChip(name: profileName) { model.run("menu/space-profile/\(space.id)") }
                 IconButton(symbol: "paintbrush.pointed.fill", label: "Edit Theme Color", size: 24) {
-                    model.run("theme/show/\(space.id)")
+                    // Like Arc's, beside the column.
+                    model.run("theme/show/\(space.id)/\(inMainWindow(_frame.wrappedValue))")
                 }
                 .opacity(0.75)
             }
@@ -871,6 +875,7 @@ struct SpaceColumn: View {
             }
         }
         .contentShape(shape)
+        .background(Frame(frame: _frame.projectedValue))
         .rightClick { model.run("menu/space/\(space.id)") }
         // Dragged onto another, it takes that one's place.
         .draggable("space:\(space.id)")

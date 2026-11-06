@@ -362,6 +362,9 @@ struct Win {
     theme: RefCell<Option<Spot>>,
     /// How far down the window the pointer was as the theme picker opened, which it centers on.
     theme_at: Cell<Option<i32>>,
+    /// The left and right edges of the Space's column in the Spaces view it opened from, which it
+    /// shows beside.
+    theme_beside: Cell<Option<(i32, i32)>>,
     /// The site controls' panel, under their button.
     site_view: RefCell<Option<Panel>>,
     site: RefCell<Option<Spot>>,
@@ -437,6 +440,7 @@ impl Win {
             theme_view: RefCell::new(None),
             theme: RefCell::new(None),
             theme_at: Cell::new(None),
+            theme_beside: Cell::new(None),
             site_view: RefCell::new(None),
             site: RefCell::new(None),
             site_button: RefCell::new(None),
@@ -4083,6 +4087,9 @@ fn show_site_controls(button: Button) {
     }
 }
 
+/// How far the theme picker shows from the Space's column it opened from, like Arc's.
+const THEME_GAP: i32 = 13;
+
 /// The theme picker's size, like Arc's.
 const THEME_SIZE: Size = Size {
     width: 365,
@@ -4091,7 +4098,7 @@ const THEME_SIZE: Size = Size {
 
 /// Shows a Space's theme picker beside the sidebar, like Arc's, centered on the pointer, with the
 /// Space's theme to edit.
-fn show_theme_picker(id: SpaceId) {
+fn show_theme_picker(id: SpaceId, beside: Option<(i32, i32)>) {
     let theme = STATE.with_borrow(|state| {
         let space = state.sidebar.spaces().iter().find(|space| space.id == id)?;
         Some(space.theme.clone())
@@ -4106,6 +4113,7 @@ fn show_theme_picker(id: SpaceId) {
     );
     #[cfg(target_os = "macos")]
     win().theme_at.set(crate::mac::pointer_y());
+    win().theme_beside.set(beside);
     controller.set_visible(1);
     place_theme_picker();
     // On macOS, the native surface takes the keyboard instead.
@@ -4115,8 +4123,9 @@ fn show_theme_picker(id: SpaceId) {
     }
 }
 
-/// Puts the theme picker, if it shows, just right of the sidebar, centered on where the pointer
-/// was, or else above the window's bottom edge; within the window.
+/// Puts the theme picker, if it shows, just right of the sidebar, or like Arc's beside the Space's
+/// column it opened from, right of it unless there is no room; centered on where the pointer was,
+/// or else above the window's bottom edge; within the window.
 fn place_theme_picker() {
     let (Some(controller), Some(size)) = (
         win().theme.with_borrow(Clone::clone),
@@ -4136,8 +4145,15 @@ fn place_theme_picker() {
         .theme_at
         .get()
         .map_or(lowest, |at| (at - height / 2).clamp(CARD_MARGIN, lowest));
+    let x = match win().theme_beside.get() {
+        Some((_, right)) if right + THEME_GAP + THEME_SIZE.width <= size.width - CARD_MARGIN => {
+            right + THEME_GAP
+        }
+        Some((left, _)) => (left - THEME_GAP - THEME_SIZE.width).max(CARD_MARGIN),
+        None => card.x + 6,
+    };
     controller.set_bounds(Some(&Rect {
-        x: card.x + 6,
+        x,
         y,
         width: THEME_SIZE.width,
         height,
@@ -6996,7 +7012,7 @@ fn run_command(command: Command) {
         (Command::HideFind, _) => hide_find(),
         (Command::ShowSiteControls(button), _) => show_site_controls(button),
         (Command::HideSiteControls, _) => hide_site_controls(),
-        (Command::ShowThemePicker(id), _) => show_theme_picker(id),
+        (Command::ShowThemePicker(id, beside), _) => show_theme_picker(id, beside),
         (Command::HideThemePicker, _) => {
             if let Some(controller) = win().theme.with_borrow(Clone::clone) {
                 controller.set_visible(0);

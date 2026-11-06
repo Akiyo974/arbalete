@@ -438,7 +438,7 @@ fn space_menu(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
         item(
             "color",
             "Edit Theme Color…",
-            Action::Run(Command::ShowThemePicker(id)),
+            Action::Run(Command::ShowThemePicker(id, None)),
         ),
         Entry::Submenu("Set Profile".to_string(), profiles(sidebar, space)),
         Entry::Separator,
@@ -948,7 +948,7 @@ mod tests {
         assert_eq!(choose("rename"), Some(edit("name")));
         assert_eq!(
             choose("color"),
-            Some(Action::Run(Command::ShowThemePicker(home.id)))
+            Some(Action::Run(Command::ShowThemePicker(home.id, None)))
         );
         let work_id = serde_json::to_string(&work).unwrap();
         assert_eq!(

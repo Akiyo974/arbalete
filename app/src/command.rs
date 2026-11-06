@@ -159,8 +159,10 @@ pub enum Command {
     ShowSiteControls(Button),
     /// `site/hide`.
     HideSiteControls,
-    /// Shows a Space's theme picker, beside the sidebar: `theme/show/<space id>`.
-    ShowThemePicker(SpaceId),
+    /// Shows a Space's theme picker, beside the sidebar: `theme/show/<space id>`; or, from the
+    /// Spaces view, beside the Space's column, from the window's top left corner:
+    /// `theme/show/<space id>/<x>/<y>/<width>/<height>`, kept as its left and right edges.
+    ShowThemePicker(SpaceId, Option<(i32, i32)>),
     /// Hides the theme picker: `theme/hide`.
     HideThemePicker,
     /// The site controls' panel takes this height: `site/height/<height>`.
@@ -945,8 +947,18 @@ impl Command {
                 if let Some(id) = path.strip_prefix("favorites/hide-hint/") {
                     return serde_json::from_str(id).ok().map(Self::HideFavoritesHint);
                 }
-                if let Some(id) = path.strip_prefix("theme/show/") {
-                    return serde_json::from_str(id).ok().map(Self::ShowThemePicker);
+                if let Some(args) = path.strip_prefix("theme/show/") {
+                    let args: Vec<_> = args.split('/').collect();
+                    let id = serde_json::from_str(args[0]).ok()?;
+                    let beside = match args[1..] {
+                        [] => None,
+                        [x, _, width, _] => {
+                            let (x, width): (i32, i32) = (x.parse().ok()?, width.parse().ok()?);
+                            Some((x, x + width))
+                        }
+                        _ => return None,
+                    };
+                    return Some(Self::ShowThemePicker(id, beside));
                 }
                 if let Some(id) = path.strip_prefix("space/toggle/") {
                     return serde_json::from_str(id).ok().map(Self::ToggleSpace);
@@ -1801,10 +1813,15 @@ mod tests {
         assert_eq!(Command::parse("space/profile/4/x"), None);
         assert_eq!(Command::parse("space/toggle/x"), None);
         assert_eq!(Command::parse("space/delete/x"), None);
-        let Some(Command::ShowThemePicker(id)) = Command::parse("theme/show/4") else {
+        let Some(Command::ShowThemePicker(id, None)) = Command::parse("theme/show/4") else {
             panic!("not a theme picker")
         };
         assert_eq!(serde_json::to_string(&id).unwrap(), "4");
+        assert!(matches!(
+            Command::parse("theme/show/4/100/20/240/600"),
+            Some(Command::ShowThemePicker(_, Some((100, 340))))
+        ));
+        assert_eq!(Command::parse("theme/show/4/100/20"), None);
         assert_eq!(Command::parse("theme/hide"), Some(Command::HideThemePicker));
         assert_eq!(Command::parse("theme/show/x"), None);
         assert_eq!(Command::parse("space/theme/4/%7B"), None);
