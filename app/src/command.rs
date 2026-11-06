@@ -2,7 +2,9 @@
 
 use arbalete_core::import::Choice;
 use arbalete_core::search::SearchEngine;
-use arbalete_core::sidebar::{ArchiveAfter, Color, NodeId, ProfileId, SpaceId, Theme};
+use arbalete_core::sidebar::{
+    ArchiveAfter, Color, DownloadLocation, NodeId, ProfileId, SpaceId, Theme,
+};
 use arbalete_core::url_routing::UrlRouting;
 use serde::Deserialize;
 
@@ -406,6 +408,10 @@ pub enum Command {
     /// Changes how long a profile's "Today" tabs stay unshown before they are archived:
     /// `profile/archive/<profile id>/<delay>`, like `twelve-hours` or `never`.
     SetArchiveAfter(ProfileId, ArchiveAfter),
+    /// Changes where a profile's downloads go:
+    /// `profile/downloads/<profile id>/<percent-encoded JSON location>`, like `"ask"` or
+    /// `{"folder": "/Users/me/Work"}`.
+    SetDownloadLocation(ProfileId, DownloadLocation),
     /// Sends the library the archived tabs: `archive/list`.
     SendArchive,
     /// Opens an archived tab again, by its rank in the archive, and shows it:
@@ -740,6 +746,14 @@ impl Command {
                     let id = serde_json::from_str(id).ok()?;
                     let after = serde_json::from_value(after.into()).ok()?;
                     return Some(Self::SetArchiveAfter(id, after));
+                }
+                if let Some((id, location)) = path
+                    .strip_prefix("profile/downloads/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let id = serde_json::from_str(id).ok()?;
+                    let location = serde_json::from_str(&percent_decode(location)?).ok()?;
+                    return Some(Self::SetDownloadLocation(id, location));
                 }
                 if let Some(rank) = path.strip_prefix("archive/restore/") {
                     return rank.parse().ok().map(Self::RestoreArchived);
@@ -1192,7 +1206,7 @@ mod tests {
         ShortcutEdit, Target,
     };
     use arbalete_core::search::SearchEngine;
-    use arbalete_core::sidebar::{ArchiveAfter, Color};
+    use arbalete_core::sidebar::{ArchiveAfter, Color, DownloadLocation};
 
     #[test]
     fn parses_known_commands() {
@@ -1611,6 +1625,17 @@ mod tests {
         };
         assert_eq!(serde_json::to_string(&id).unwrap(), "3");
         assert_eq!(Command::parse("profile/delete/x"), None);
+        let Some(Command::SetDownloadLocation(_, location)) =
+            Command::parse("profile/downloads/3/%7B%22folder%22%3A%22%2Ftmp%22%7D")
+        else {
+            panic!("not a download location")
+        };
+        assert_eq!(location, DownloadLocation::Folder("/tmp".to_string()));
+        assert!(matches!(
+            Command::parse("profile/downloads/3/%22ask%22"),
+            Some(Command::SetDownloadLocation(_, DownloadLocation::Ask))
+        ));
+        assert_eq!(Command::parse("profile/downloads/3/%22elsewhere%22"), None);
         let Some(Command::ProfilePage(id, url)) =
             Command::parse("profile/page/3/chrome%3A%2F%2Fsettings%2FsearchEngines")
         else {

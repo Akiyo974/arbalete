@@ -17,8 +17,8 @@ use arbalete_core::import::browsers::{self, Family};
 use arbalete_core::import::{self, Choice, safari};
 use arbalete_core::search::SearchEngine;
 use arbalete_core::sidebar::{
-    ArchiveAfter, Color, Error, NodeId, NodeKind, ProfileId, Sidebar, Space, SpaceId, SplitLayout,
-    Tab, View as WindowView,
+    ArchiveAfter, Color, DownloadLocation, Error, NodeId, NodeKind, ProfileId, Sidebar, Space,
+    SpaceId, SplitLayout, Tab, View as WindowView,
 };
 use arbalete_core::url_routing::Destination;
 use arbalete_core::{favicon, store};
@@ -3247,9 +3247,9 @@ fn profile_context(profile: ProfileId) -> Option<RequestContext> {
         ..Default::default()
     };
     let context = request_context_create_context(Some(&settings), None)?;
-    // Save Link As… and Save Image As… ask where from the Downloads folder, like Arc's, rather
-    // than the home folder.
-    let downloads = crate::user_home().join("Downloads");
+    // Save Link As… and Save Image As… ask where from the profile's downloads folder, like Arc's,
+    // rather than the home folder.
+    let (downloads, _) = download_folder(Some(profile));
     for name in ["savefile.default_directory", "download.default_directory"] {
         let Some(mut value) = value_create() else {
             break;
@@ -3737,7 +3737,7 @@ fn send_settings() {
     let profiles: Vec<_> = STATE.with_borrow(|state| {
         let profiles = state.sidebar.profiles().iter();
         profiles
-            .map(|p| json!({ "id": p.id, "name": p.name, "color": p.color, "searchEngine": p.search_engine, "searchSuggestions": p.search_suggestions, "archiveAfter": p.archive_after }))
+            .map(|p| json!({ "id": p.id, "name": p.name, "color": p.color, "searchEngine": p.search_engine, "searchSuggestions": p.search_suggestions, "archiveAfter": p.archive_after, "downloadLocation": p.download_location }))
             .collect()
     });
     let delays: Vec<_> = ArchiveAfter::ALL
@@ -4998,6 +4998,22 @@ fn focus_sidebar() {
     }
     if let Some(sidebar) = &win().sidebar.with_borrow(Clone::clone) {
         sidebar.request_focus();
+    }
+}
+
+/// Where a profile's downloads go, and whether they ask where each time, like Arc's: the
+/// Downloads folder unless the profile has another one.
+fn download_folder(profile: Option<ProfileId>) -> (PathBuf, bool) {
+    let location = STATE.with_borrow(|state| {
+        let profiles = state.sidebar.profiles();
+        let profile = profiles.iter().find(|p| Some(p.id) == profile);
+        profile.map(|p| p.download_location.clone())
+    });
+    let downloads = crate::user_home().join("Downloads");
+    match location.unwrap_or_default() {
+        DownloadLocation::Downloads => (downloads, false),
+        DownloadLocation::Folder(folder) => (PathBuf::from(folder), false),
+        DownloadLocation::Ask => (downloads, true),
     }
 }
 
@@ -6845,6 +6861,11 @@ fn run_command(command: Command) {
                 send_settings();
             }
         }
+        (Command::SetDownloadLocation(id, location), _) => {
+            if update_sidebar(|sidebar| sidebar.set_download_location(id, location)).is_ok() {
+                send_settings();
+            }
+        }
         (Command::SendArchive, _) => send_archive(),
         (Command::RestoreArchived(rank), _) => restore_archived(rank),
         (Command::SetSearchEngine(id, engine), _) => {
@@ -8022,12 +8043,17 @@ wrap_download_handler! {
                 callback.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 0);
                 return 1;
             }
-            // Save Link As… and Save Image As… ask where, from the Downloads folder.
+            let profile = browser.as_deref().and_then(page_tab).and_then(|tab| {
+                STATE.with_borrow(|state| state.sidebar.profile_of(tab))
+            });
+            // Save Link As… and Save Image As… ask where, from the profile's downloads folder,
+            // like a profile whose downloads always ask.
             let url = CefString::from(&item.original_url()).to_string();
-            let ask = SAVE_AS.with_borrow_mut(|urls| urls.remove(&url));
-            let dir = crate::user_home().join("Downloads");
+            let save_as = SAVE_AS.with_borrow_mut(|urls| urls.remove(&url));
+            let (dir, always_ask) = download_folder(profile);
+            let ask = save_as || always_ask;
             if let Err(error) = std::fs::create_dir_all(&dir) {
-                eprintln!("cannot create the Downloads folder: {error}");
+                eprintln!("cannot create the downloads folder: {error}");
                 return 0;
             }
             let path = DOWNLOADS.with_borrow(|downloads| {
@@ -8040,9 +8066,7 @@ wrap_download_handler! {
             DOWNLOADS.with_borrow_mut(|list| {
                 let id = downloads::next_id(list);
                 let mut download = Download::new(id, item.id(), path, url, now());
-                download.profile = browser.and_then(|browser| page_tab(browser)).and_then(|tab| {
-                    STATE.with_borrow(|state| state.sidebar.profile_of(tab))
-                });
+                download.profile = profile;
                 list.push(download);
             });
             save_downloads();

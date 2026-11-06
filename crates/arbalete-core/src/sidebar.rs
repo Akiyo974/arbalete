@@ -43,6 +43,9 @@ pub struct Profile {
     /// How long its "Today" tabs stay unshown before they are archived.
     #[serde(default)]
     pub archive_after: ArchiveAfter,
+    /// Where its downloads go.
+    #[serde(default)]
+    pub download_location: DownloadLocation,
     /// An incognito window's, with its one Space: listed nowhere, never saved, and gone with
     /// the window (`Sidebar::open_incognito`).
     #[serde(skip)]
@@ -226,6 +229,17 @@ pub struct Tab {
     /// "Today" tab is archived (Sidebar::archive_due).
     #[serde(default)]
     pub last_shown: Option<u64>,
+}
+
+/// Where a profile's downloads go, like Arc's: the Downloads folder, another folder, or wherever
+/// the user says each time.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DownloadLocation {
+    #[default]
+    Downloads,
+    Folder(String),
+    Ask,
 }
 
 /// How long a profile's "Today" tabs stay unshown before they are archived.
@@ -493,6 +507,7 @@ impl Sidebar {
             search_suggestions: false,
             pinned_extensions: Vec::new(),
             archive_after: ArchiveAfter::Never,
+            download_location: DownloadLocation::default(),
             incognito: true,
         });
         let space = SpaceId(self.next_id());
@@ -715,6 +730,7 @@ impl Sidebar {
                 search_suggestions: true,
                 pinned_extensions: Vec::new(),
                 archive_after: ArchiveAfter::default(),
+                download_location: DownloadLocation::default(),
                 incognito: false,
             },
         );
@@ -1540,6 +1556,15 @@ impl Sidebar {
         Ok(())
     }
 
+    pub fn set_download_location(
+        &mut self,
+        id: ProfileId,
+        location: DownloadLocation,
+    ) -> Result<(), Error> {
+        self.profile_mut(id)?.download_location = location;
+        Ok(())
+    }
+
     /// Removes the rows after `tab`'s among its parent's, as `clear_today` removes them.
     pub fn remove_below(&mut self, tab: NodeId) -> Result<Vec<Tab>, Error> {
         self.check_tab(tab)?;
@@ -2249,6 +2274,31 @@ mod tests {
         assert!(sidebar.node(favorites).is_none());
         assert!(sidebar.node(tab).is_none());
         assert_eq!(sidebar.delete_profile(work), Err(Error::UnknownProfile));
+    }
+
+    #[test]
+    fn keeps_where_each_profile_downloads() {
+        let mut sidebar = Sidebar::default();
+        let id = sidebar.profiles()[0].id;
+        assert_eq!(
+            sidebar.profiles()[0].download_location,
+            DownloadLocation::Downloads
+        );
+        let folder = DownloadLocation::Folder("/tmp/Work".to_string());
+        sidebar.set_download_location(id, folder.clone()).unwrap();
+        assert_eq!(sidebar.profiles()[0].download_location, folder);
+        assert_eq!(
+            serde_json::to_string(&folder).unwrap(),
+            r#"{"folder":"/tmp/Work"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&DownloadLocation::Ask).unwrap(),
+            r#""ask""#
+        );
+        assert_eq!(
+            sidebar.set_download_location(ProfileId(999), DownloadLocation::Ask),
+            Err(Error::UnknownProfile)
+        );
     }
 
     #[test]

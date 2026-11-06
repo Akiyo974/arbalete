@@ -25,6 +25,7 @@ struct SettingsDetail: Decodable {
         var searchEngine: String
         var searchSuggestions: Bool
         var archiveAfter: String
+        var downloadLocation: DownloadLocation
     }
     struct SpaceChoice: Decodable, Identifiable {
         var id: Int
@@ -44,6 +45,37 @@ struct SettingsDetail: Decodable {
     var profiles: [ProfileSettings]
     var spaces: [SpaceChoice]
     var urlRouting: UrlRouting
+}
+
+/// Where a profile's downloads go (DownloadLocation in crates/arbalete-core/src/sidebar.rs): the
+/// Downloads folder, another one, or wherever the user says each time.
+enum DownloadLocation: Codable, Hashable {
+    case downloads
+    case folder(String)
+    case ask
+
+    private struct Folder: Codable { var folder: String }
+
+    init(from decoder: Decoder) throws {
+        if let name = try? decoder.singleValueContainer().decode(String.self) {
+            self = name == "ask" ? .ask : .downloads
+        } else {
+            self = .folder(try Folder(from: decoder).folder)
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        switch self {
+        case .downloads:
+            var container = encoder.singleValueContainer()
+            try container.encode("downloads")
+        case .ask:
+            var container = encoder.singleValueContainer()
+            try container.encode("ask")
+        case .folder(let path):
+            try Folder(folder: path).encode(to: encoder)
+        }
+    }
 }
 
 /// Where the links other apps open go (crates/arbalete-core/src/url_routing.rs).
@@ -827,6 +859,15 @@ private struct ProfileDetail: View {
                     .labelsHidden()
                     .fixedSize()
                 }
+                SettingsLine()
+                SettingsRow(label: "Download location", height: 43) {
+                    DownloadLocationPicker(location: profile.downloadLocation) { location in
+                        guard let json = try? JSONEncoder().encode(location),
+                            let text = String(data: json, encoding: .utf8)
+                        else { return }
+                        settings.app.run("profile/downloads/\(profile.id)/\(percentEncoded(text))")
+                    }
+                }
             }
             Text("Your Data and Settings").font(.system(size: 12)).foregroundStyle(.tertiary)
                 .padding(.leading, 10)
@@ -845,6 +886,46 @@ private struct ProfileDetail: View {
     /// Shows one of Chromium's pages in the profile, like Arc's, the settings closing.
     private func open(_ address: String) {
         settings.app.run("profile/page/\(profile.id)/\(percentEncoded(address))")
+    }
+}
+
+/// Where a profile's downloads go, like Arc's menu: the Downloads folder, the folder picked last,
+/// Other… to pick one, then Ask every time.
+private struct DownloadLocationPicker: View {
+    let location: DownloadLocation
+    let pick: (DownloadLocation) -> Void
+
+    var body: some View {
+        Picker("", selection: Binding(get: { location }, set: choose)) {
+            Label("Downloads", systemImage: "folder.fill").tag(DownloadLocation.downloads)
+            if case .folder(let path) = location {
+                Label(FileManager.default.displayName(atPath: path), systemImage: "folder.fill")
+                    .tag(location)
+            }
+            // Picks a folder rather than being picked.
+            Text("Other…").tag(DownloadLocation.folder(""))
+            Divider()
+            Text("Ask every time").tag(DownloadLocation.ask)
+        }
+        .labelsHidden()
+        .fixedSize()
+    }
+
+    private func choose(_ picked: DownloadLocation) {
+        guard picked == .folder("") else { return pick(picked) }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.prompt = "Select"
+        let chosen: (NSApplication.ModalResponse) -> Void = { response in
+            if response == .OK, let url = panel.url { pick(.folder(url.path)) }
+        }
+        if let window = NSApp.keyWindow {
+            panel.beginSheetModal(for: window, completionHandler: chosen)
+        } else {
+            chosen(panel.runModal())
+        }
     }
 }
 
