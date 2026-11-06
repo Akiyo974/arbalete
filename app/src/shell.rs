@@ -8885,6 +8885,12 @@ wrap_display_handler! {
     }
 }
 
+/// Whether a page's popup opens as a tab: only one the user asked for, by a click or a key, so a
+/// page cannot open tabs on its own, like a script calling `window.open` in a loop.
+fn popup_allowed(user_gesture: i32) -> bool {
+    user_gesture == 1
+}
+
 // An extension's popup, whose links open tabs.
 wrap_life_span_handler! {
     struct PopupLifeSpan {}
@@ -8906,9 +8912,9 @@ wrap_life_span_handler! {
             _extra_info: Option<&mut Option<DictionaryValue>>,
             _no_javascript_access: Option<&mut i32>,
         ) -> i32 {
-            let Some(url) = target_url.map(CefString::to_string) else { return 1 };
+            let Some(url) = target_url.map(CefString::to_string).filter(|_| popup_allowed(user_gesture)) else { return 1 };
             // A link clicked with ⇧, which would open a window, shows in Peek, like Arc's.
-            if target_disposition == WindowOpenDisposition::NEW_WINDOW && user_gesture == 1 {
+            if target_disposition == WindowOpenDisposition::NEW_WINDOW {
                 post(Command::Peek(url));
             } else {
                 open_tab(&url);
@@ -8996,7 +9002,7 @@ wrap_life_span_handler! {
             target_url: Option<&CefString>,
             _target_frame_name: Option<&CefString>,
             _target_disposition: WindowOpenDisposition,
-            _user_gesture: i32,
+            user_gesture: i32,
             _popup_features: Option<&PopupFeatures>,
             _window_info: Option<&mut WindowInfo>,
             _client: Option<&mut Option<Client>>,
@@ -9004,7 +9010,7 @@ wrap_life_span_handler! {
             _extra_info: Option<&mut Option<DictionaryValue>>,
             _no_javascript_access: Option<&mut i32>,
         ) -> i32 {
-            if let Some(url) = target_url {
+            if let Some(url) = target_url.filter(|_| popup_allowed(user_gesture)) {
                 open_tab(&url.to_string());
             }
             1
@@ -9176,8 +9182,8 @@ mod tests {
     use super::{
         CARD_MARGIN, DraggableRegion, EDGE_WIDTH, FLOAT_INSET, LIBRARY_WIDTH, MemoryPressure,
         RECENT_TABS, Rect, SIDEBAR_WIDTH, SidebarMode, Size, UiState, favicon_file, lead_part,
-        lerp_rect, margin_regions, origin, pane_lengths, remember, site, slide_duration, step,
-        suspend_delays, toggled, ui_path, win,
+        lerp_rect, margin_regions, origin, pane_lengths, popup_allowed, remember, site,
+        slide_duration, step, suspend_delays, toggled, ui_path, win,
     };
     use arbalete_core::sidebar::NodeId;
 
@@ -9196,6 +9202,12 @@ mod tests {
         assert_eq!(part(1000.0), 0.78);
         assert_eq!(part(612.0), 0.5);
         assert!((part(625.0) - 0.52).abs() < 1e-9);
+    }
+
+    #[test]
+    fn only_a_popup_the_user_asked_for_opens_a_tab() {
+        assert!(popup_allowed(1));
+        assert!(!popup_allowed(0));
     }
 
     #[test]
