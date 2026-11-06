@@ -66,6 +66,7 @@ struct SidebarView: View {
                     }
                     .frame(height: 40)
                 } else {
+                    UpdateBanner(model: model)
                     Footer(model: model)
                 }
             }
@@ -1552,6 +1553,88 @@ struct Favicon: View {
             }
         }
         .frame(width: size, height: size)
+    }
+}
+
+/// Like Arc's, a card over the footer once an update is ready, which restarts into it, or once
+/// the app updated, which points to what is new (macos/Updates.swift). Hidden otherwise.
+struct UpdateBanner: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject private var updates = Updates.shared
+
+    var body: some View {
+        if let banner = updates.banner {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(title(banner))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Ink.primary)
+                    Spacer(minLength: 4)
+                    if case .updated = banner {
+                        Button { withAnimation { updates.banner = nil } } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .frame(width: 16, height: 16)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Ink.secondary)
+                        .help("Dismiss")
+                    }
+                }
+                Text(detail(banner))
+                    .font(.system(size: 11))
+                    .foregroundStyle(Ink.hint)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button { act(banner) } label: {
+                    Text(action(banner))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Ink.primary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 26)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7).fill(model.selectedInk)
+                                .shadow(color: model.selectedShadow, radius: 1, y: 1))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 6)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: Measure.radius).fill(Ink.item))
+            .padding(.bottom, 4)
+            .transition(.opacity)
+        }
+    }
+
+    private func title(_ banner: Updates.Banner) -> String {
+        switch banner {
+        case .ready: "Update Available"
+        case .updated: "Update Complete"
+        }
+    }
+
+    private func detail(_ banner: Updates.Banner) -> String {
+        switch banner {
+        case .ready: "A new version of Arbalete is ready. Restart to finish installing it."
+        case .updated(let version): "Arbalete is up to date, on version \(version)."
+        }
+    }
+
+    private func action(_ banner: Updates.Banner) -> String {
+        switch banner {
+        case .ready: "Restart and Update"
+        case .updated: "See What’s New"
+        }
+    }
+
+    private func act(_ banner: Updates.Banner) {
+        switch banner {
+        case .ready(let install): install()
+        case .updated:
+            model.run("open/\(percentEncoded("https://arbalete.co/releases.html"))")
+            withAnimation { updates.banner = nil }
+        }
     }
 }
 
