@@ -18,6 +18,23 @@ Built with Rust on Chromium, with a native SwiftUI interface on macOS.
 
 See [docs/PLAN.md](docs/PLAN.md) for the full plan.
 
+## Install
+
+On a Mac with Apple Silicon and macOS 14 or later, with [Homebrew](https://brew.sh):
+
+```sh
+brew install --cask amenophis/tap/arbalete
+```
+
+Or download the disk image from the [releases](https://github.com/amenophis/arbalete/releases).
+
+Arbalete is not notarized by Apple yet, so macOS blocks its first launch. Open it once from System Settings →
+Privacy & Security → Open Anyway, or run:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Arbalete.app
+```
+
 ## Development
 
 The tools (Rust, CMake, Ninja) are pinned in [.config/mise.toml](.config/mise.toml). On macOS,
@@ -45,6 +62,15 @@ and name it in `.config/mise.local.toml`, which is not committed:
 [env]
 ARBALETE_SIGN_IDENTITY = "Arbalete Dev"
 ```
+
+### Releasing
+
+`mise run release` bundles an optimized app, signed with `ARBALETE_SIGN_IDENTITY`, in
+`target/dmg/Arbalete-<version>-arm64.dmg`. To publish one, bump the version in `app/Cargo.toml` on `main`, then
+push its tag (`v0.1.0`): the [release workflow](.github/workflows/release.yml) builds the disk image signed with the
+release certificate, publishes it on GitHub and updates the cask in
+[amenophis/homebrew-tap](https://github.com/amenophis/homebrew-tap). It needs three secrets: `SIGN_P12` (the
+certificate and its key, in base64), `SIGN_P12_PASSWORD` and `TAP_TOKEN` (a token allowed to write to the tap).
 
 ## Logo
 
