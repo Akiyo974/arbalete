@@ -1,6 +1,6 @@
 #!/bin/sh
-# Writes a release's notes from its commits since the previous tag that change the app itself
-# (its code, its crates and its icon; not the website, CI, docs or packaging), sorted the way the
+# Writes a release's notes from its commits since the previous tag that change the app or what
+# ships it (its code, its crates, its icon, its packaging; not the website, CI or docs), sorted the way the
 # website's release notes page labels them: New (feat), Improved (perf) and Fixed (fix). Other
 # commits (docs, ci, build, refactor…) stay out.
 #
@@ -8,7 +8,7 @@
 set -eu
 tag=$1
 previous=$(git describe --tags --abbrev=0 "$tag^" 2>/dev/null || true)
-git log --no-merges --format=%s "${previous:+$previous..}$tag" -- app crates assets Cargo.toml Cargo.lock | awk '
+git log --no-merges --format=%s "${previous:+$previous..}$tag" -- app crates assets packaging Cargo.toml Cargo.lock | awk '
   function add(list, count) { sub(/^[^:]*: /, ""); list[count] = toupper(substr($0, 1, 1)) substr($0, 2) }
   /^feat(\([^)]*\))?!?: / { add(new, ++n); next }
   /^perf(\([^)]*\))?!?: / { add(improved, ++i); next }
