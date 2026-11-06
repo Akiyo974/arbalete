@@ -2698,15 +2698,20 @@ wrap_display_handler! {
     }
 
     impl DisplayHandler {
-        /// What the front end asks its host comes as marked console messages.
+        /// What the front end asks its host comes as marked console messages, only from the
+        /// front end's own scripts: an extension's panel inside it never speaks for it.
         fn on_console_message(
             &self,
             _browser: Option<&mut Browser>,
             _level: LogSeverity,
             message: Option<&CefString>,
-            _source: Option<&CefString>,
+            source: Option<&CefString>,
             _line: i32,
         ) -> i32 {
+            let source = source.map(CefString::to_string).unwrap_or_default();
+            if !source.starts_with("devtools://devtools/") {
+                return 0;
+            }
             let message = message.map(CefString::to_string).unwrap_or_default();
             let Some(asked) = message.strip_prefix("\u{1}arbalete-inspector:") else {
                 return 0;
@@ -2725,10 +2730,12 @@ wrap_load_handler! {
     struct InspectorLoad {}
 
     impl LoadHandler {
-        /// The host stands in before the front end's scripts run.
+        /// The host stands in before the front end's scripts run, under the front end's address
+        /// so that its marked console messages come from there (InspectorDisplay).
         fn on_load_start(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, _transition_type: TransitionType) {
             if let Some(frame) = frame.filter(|frame| frame.is_main() == 1) {
-                frame.execute_java_script(Some(&CefString::from(INSPECTOR_HOST)), None, 0);
+                let host = CefString::from(INSPECTOR_HOST);
+                frame.execute_java_script(Some(&host), Some(&CefString::from(INSPECTOR_URL)), 0);
             }
         }
     }
