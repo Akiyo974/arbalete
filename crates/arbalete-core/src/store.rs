@@ -32,6 +32,8 @@ pub enum LoadError {
     Io(io::Error),
     Invalid(serde_json::Error),
     UnsupportedVersion(u32),
+    /// The sidebar breaks a rule its operations rely on (`Sidebar::check_invariants`).
+    Inconsistent(String),
 }
 
 /// Writes the sidebar and the other windows' views atomically: a crash while saving leaves the
@@ -59,6 +61,10 @@ pub fn load(path: &Path) -> Result<Option<Session>, LoadError> {
     if saved.version != VERSION {
         return Err(LoadError::UnsupportedVersion(saved.version));
     }
+    saved
+        .sidebar
+        .check_invariants()
+        .map_err(LoadError::Inconsistent)?;
     Ok(Some((saved.sidebar, saved.windows)))
 }
 
@@ -132,6 +138,25 @@ mod tests {
         let path = dir.0.join("sidebar.json");
         fs::write(&path, "not json").unwrap();
         assert!(matches!(load(&path), Err(LoadError::Invalid(_))));
+    }
+
+    #[test]
+    fn rejects_a_sidebar_with_a_dangling_child() {
+        let dir = TestDir::new("store-dangling");
+        let path = dir.0.join("sidebar.json");
+        let mut sidebar = Sidebar::default();
+        let home = sidebar.spaces()[0].clone();
+        let tab = sidebar.open_tab(home.id, "https://example.com/").unwrap();
+        save(&sidebar, &[], &path).unwrap();
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let tab = serde_json::to_value(tab).unwrap().to_string();
+        json["sidebar"]["nodes"]
+            .as_object_mut()
+            .unwrap()
+            .remove(&tab);
+        fs::write(&path, json.to_string()).unwrap();
+        assert!(matches!(load(&path), Err(LoadError::Inconsistent(_))));
     }
 
     #[test]

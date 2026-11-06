@@ -567,6 +567,70 @@ impl Sidebar {
         saved
     }
 
+    /// Checks the tree the operations rely on, which a file saved by an older version or edited
+    /// by hand may break: a Space with a known profile and selecting a known tab, every node in
+    /// exactly one place under a profile's or a Space's root container, splits of two to
+    /// `MAX_SPLIT_TABS` tabs, tabs holding nothing, and ids below the next one. Says the first
+    /// problem found.
+    pub fn check_invariants(&self) -> Result<(), String> {
+        if self.spaces.is_empty() {
+            return Err("no Space".to_string());
+        }
+        let mut pending: Vec<(NodeId, Option<NodeId>)> =
+            self.profiles.iter().map(|p| (p.favorites, None)).collect();
+        for space in &self.spaces {
+            if !self.profiles.iter().any(|p| p.id == space.profile) {
+                return Err(format!("{:?} has an unknown profile", space.id));
+            }
+            if let Some(tab) = space.selected
+                && !matches!(
+                    self.nodes.get(&tab).map(|n| &n.kind),
+                    Some(NodeKind::Tab(_))
+                )
+            {
+                return Err(format!("{:?} selects {tab:?}, not a tab", space.id));
+            }
+            pending.extend([(space.pinned, None), (space.today, None)]);
+        }
+        let mut ids = (self.profiles.iter().map(|p| p.id.0))
+            .chain(self.spaces.iter().map(|s| s.id.0))
+            .chain(self.nodes.keys().map(|id| id.0));
+        if ids.any(|id| id >= self.next_id) {
+            return Err("an id is not below the next one".to_string());
+        }
+        let mut seen = std::collections::HashSet::new();
+        while let Some((id, parent)) = pending.pop() {
+            let Some(node) = self.nodes.get(&id) else {
+                return Err(format!("{id:?} is unknown"));
+            };
+            if !seen.insert(id) {
+                return Err(format!("{id:?} is in two places"));
+            }
+            if node.id != id || node.parent != parent {
+                return Err(format!("{id:?} does not know its place"));
+            }
+            let tab = matches!(node.kind, NodeKind::Tab(_));
+            let container = matches!(node.kind, NodeKind::Container);
+            if container != parent.is_none() {
+                return Err(format!("{id:?} is a root but no container, or the reverse"));
+            }
+            if tab && !node.children.is_empty() {
+                return Err(format!("{id:?} is a tab holding nodes"));
+            }
+            if !tab && parent.is_some_and(|p| self.is_split(p)) {
+                return Err(format!("{id:?} is in a split but no tab"));
+            }
+            if self.is_split(id) && !(2..=MAX_SPLIT_TABS).contains(&node.children.len()) {
+                return Err(format!("{id:?} is a split of {} tabs", node.children.len()));
+            }
+            pending.extend(node.children.iter().map(|&child| (child, Some(id))));
+        }
+        if seen.len() != self.nodes.len() {
+            return Err("a node is in no place".to_string());
+        }
+        Ok(())
+    }
+
     /// The Space the sidebar shows: the first one until another is displayed.
     pub fn displayed(&self) -> &Space {
         self.displayed
