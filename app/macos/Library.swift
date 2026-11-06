@@ -3,6 +3,7 @@
 // searching it, but for the Spaces, which fill the window.
 
 import AppKit
+import QuickLookThumbnailing
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -585,9 +586,9 @@ struct MediaGrid: View {
                 Button {
                     model.viewing = download.id
                 } label: {
-                    MediaTile(
-                        image: uiImage("arbalete://ui/media/\(download.id)"),
-                        video: mediaKind(download) == .video)
+                    FileThumbnail(path: mediaKind(download) == .image ? download.path : nil) {
+                        MediaTile(image: $0, video: mediaKind(download) == .video)
+                    }
                 }
                 .buttonStyle(.plain)
                 .help(download.name)
@@ -719,10 +720,8 @@ struct DownloadIcon: View {
     let there: Bool
 
     var body: some View {
-        Group {
-            if there, mediaKind(download) == .image,
-                let image = uiImage("arbalete://ui/media/\(download.id)")
-            {
+        FileThumbnail(path: there && mediaKind(download) == .image ? download.path : nil) {
+            if let image = $0 {
                 Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
                     .frame(width: 22, height: 26).clipped()
             } else {
@@ -733,6 +732,41 @@ struct DownloadIcon: View {
         .frame(width: 28, height: 28)
     }
 }
+
+/// A file's picture in small, at most a media tile's, or nil until it is made or without one.
+/// Quick Look makes it out of the process, so the browser never decodes a file a page chose; the
+/// full image waits for the media viewer.
+struct FileThumbnail<Content: View>: View {
+    let path: String?
+    @ViewBuilder let content: (NSImage?) -> Content
+    private let _loaded = State<NSImage?>(initialValue: nil)
+    @Environment(\.displayScale) private var scale
+
+    var body: some View {
+        content(path.flatMap { thumbnails.object(forKey: $0 as NSString) } ?? _loaded.wrappedValue)
+            .task(id: path) {
+                _loaded.wrappedValue = nil
+                guard let path, thumbnails.object(forKey: path as NSString) == nil else { return }
+                let request = QLThumbnailGenerator.Request(
+                    fileAt: URL(fileURLWithPath: path), size: CGSize(width: 132, height: 132),
+                    scale: scale, representationTypes: .thumbnail)
+                guard
+                    let made = try? await QLThumbnailGenerator.shared
+                        .generateBestRepresentation(for: request)
+                else { return }
+                let image = NSImage(cgImage: made.cgImage, size: .zero)
+                thumbnails.setObject(image, forKey: path as NSString)
+                _loaded.wrappedValue = image
+            }
+    }
+}
+
+/// The thumbnails made, the most recent kept.
+@MainActor private let thumbnails = {
+    let cache = NSCache<NSString, NSImage>()
+    cache.countLimit = 200
+    return cache
+}()
 
 /// What a download is and where it came from, like Arc's: "Image from google.com".
 func downloadKind(_ download: Download) -> String {

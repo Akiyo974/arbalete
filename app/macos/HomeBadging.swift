@@ -448,8 +448,12 @@ private struct Thumbnail: View {
     let size: CGFloat
 
     var body: some View {
+        FileThumbnail(path: picturePath) { picture($0) }
+    }
+
+    @ViewBuilder private func picture(_ image: NSImage?) -> some View {
         let radius = size * 0.14
-        if let image = picture {
+        if let image {
             Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
                 .frame(width: size, height: size)
                 .clipShape(RoundedRectangle(cornerRadius: radius))
@@ -469,13 +473,13 @@ private struct Thumbnail: View {
         }
     }
 
-    private var picture: NSImage? {
+    /// The file to show a picture of, if it is one.
+    private var picturePath: String? {
         if let download = item.download {
-            return mediaKind(download) == .image ? uiImage("arbalete://ui/media/\(download.id)") : nil
+            return mediaKind(download) == .image ? download.path : nil
         }
         let ext = (item.path as NSString).pathExtension.lowercased()
-        return ["png", "jpg", "jpeg", "gif", "heic", "webp", "tiff"].contains(ext)
-            ? NSImage(contentsOfFile: item.path) : nil
+        return ["png", "jpg", "jpeg", "gif", "heic", "webp", "tiff"].contains(ext) ? item.path : nil
     }
 }
 

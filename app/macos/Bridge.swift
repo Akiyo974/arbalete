@@ -757,12 +757,17 @@ public func placeSidebar(
 /// The image behind a url of the app's UI, like a tab's cached icon, read once.
 @MainActor func uiImage(_ url: String?) -> NSImage? {
     guard let url else { return nil }
-    if let image = images[url] { return image }
+    if let image = images.object(forKey: url as NSString) { return image }
     let path = url.withCString { arbalete_ui_file($0) }
     defer { arbalete_free_string(path) }
     let image = path.flatMap { NSImage(contentsOfFile: String(cString: $0)) }
-    if image != nil { images[url] = image }
+    if let image { images.setObject(image, forKey: url as NSString) }
     return image
 }
 
-@MainActor private var images: [String: NSImage] = [:]
+/// The images read, the most recent kept.
+@MainActor private let images = {
+    let cache = NSCache<NSString, NSImage>()
+    cache.countLimit = 500
+    return cache
+}()

@@ -65,6 +65,8 @@ fn main() {
     println!("cargo:rustc-link-lib=framework=SwiftUI");
     // The media viewer's videos (macos/MediaViewer.swift).
     println!("cargo:rustc-link-lib=framework=AVKit");
+    // The downloads' thumbnails (FileThumbnail in macos/Library.swift).
+    println!("cargo:rustc-link-lib=framework=QuickLookThumbnailing");
     // The certificate sheet (showCertificate in macos/Panels.swift).
     println!("cargo:rustc-link-lib=framework=SecurityInterface");
     // Sparkle ships in the bundle's Frameworks. Weak, since the helpers and the tests, which
