@@ -270,6 +270,8 @@ pub enum Command {
     ClearToday,
     /// Puts the url of the displayed Space's selected tab on the clipboard: `link/copy`.
     CopyLink,
+    /// Puts it there as a Markdown link, its title and url: `link/copy-markdown`.
+    CopyMarkdownLink,
     /// Moves a tab to another Space's "Today" tabs, or a folder to its pinned tabs, from its menu.
     MoveToSpace(NodeId, SpaceId),
     /// Copies a tab or a folder right after it, from its menu.
@@ -562,6 +564,7 @@ impl Command {
             "pin" => Some(Self::Pin(None)),
             "folder/new" => Some(Self::NewFolder(None)),
             "link/copy" => Some(Self::CopyLink),
+            "link/copy-markdown" => Some(Self::CopyMarkdownLink),
             "today/clear" => Some(Self::ClearToday),
             "next" => Some(Self::NextTab),
             "previous" => Some(Self::PreviousTab),
@@ -1220,6 +1223,10 @@ mod tests {
         ));
         assert_eq!(Command::parse("pin"), Some(Command::Pin(None)));
         assert_eq!(Command::parse("link/copy"), Some(Command::CopyLink));
+        assert_eq!(
+            Command::parse("link/copy-markdown"),
+            Some(Command::CopyMarkdownLink)
+        );
         assert_eq!(Command::parse("today/clear"), Some(Command::ClearToday));
         assert!(matches!(
             Command::parse("favorites/hide-hint/4"),

@@ -398,6 +398,11 @@ define_class!(
             crate::shell::run(Command::CopyLink);
         }
 
+        #[unsafe(method(arbaleteCopyMarkdownUrl:))]
+        fn copy_markdown_url(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::CopyMarkdownLink);
+        }
+
         #[unsafe(method(arbaleteClearToday:))]
         fn clear_today(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::ClearToday);
@@ -599,6 +604,25 @@ pub fn setup_menu() {
                 NSMenuItem::separatorItem(mtm),
                 item(
                     mtm,
+                    ns_string!("Hide Arbalete"),
+                    sel!(hide:),
+                    ns_string!("h"),
+                ),
+                option_item(
+                    mtm,
+                    ns_string!("Hide Others"),
+                    sel!(hideOtherApplications:),
+                    ns_string!("h"),
+                ),
+                item(
+                    mtm,
+                    ns_string!("Show All"),
+                    sel!(unhideAllApplications:),
+                    ns_string!(""),
+                ),
+                NSMenuItem::separatorItem(mtm),
+                item(
+                    mtm,
                     ns_string!("Quit Arbalete"),
                     sel!(terminate:),
                     ns_string!("q"),
@@ -650,6 +674,13 @@ pub fn setup_menu() {
                     ns_string!("Close Tab"),
                     sel!(arbaleteCloseTab:),
                     ns_string!("w"),
+                ),
+                // ⇧⌘W, like Arc's.
+                item(
+                    mtm,
+                    ns_string!("Close Window"),
+                    sel!(performClose:),
+                    ns_string!("W"),
                 ),
                 // An uppercase key equivalent adds ⇧.
                 item(
@@ -844,9 +875,9 @@ fn edit_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
         sel!(pasteAndMatchStyle:),
         ns_string!("V"),
     );
-    paste_and_match_style.setKeyEquivalentModifierMask(
-        NSEventModifierFlags::Command | NSEventModifierFlags::Option | NSEventModifierFlags::Shift,
-    );
+    // ⇧⌘V, like Arc's.
+    paste_and_match_style
+        .setKeyEquivalentModifierMask(NSEventModifierFlags::Command | NSEventModifierFlags::Shift);
     vec![
         item(mtm, ns_string!("Undo"), sel!(undo:), ns_string!("z")),
         item(mtm, ns_string!("Redo"), sel!(redo:), ns_string!("Z")),
@@ -869,6 +900,21 @@ fn edit_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
             sel!(arbaleteCopyUrl:),
             ns_string!("C"),
         ),
+        {
+            // ⌥⇧⌘C, like Arc's.
+            let item = item(
+                mtm,
+                ns_string!("Copy URL as Markdown"),
+                sel!(arbaleteCopyMarkdownUrl:),
+                ns_string!("c"),
+            );
+            item.setKeyEquivalentModifierMask(
+                NSEventModifierFlags::Command
+                    | NSEventModifierFlags::Option
+                    | NSEventModifierFlags::Shift,
+            );
+            item
+        },
         NSMenuItem::separatorItem(mtm),
         item(
             mtm,
@@ -900,6 +946,19 @@ fn window_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
             ns_string!("m"),
         ),
         item(mtm, ns_string!("Zoom"), sel!(performZoom:), ns_string!("")),
+        {
+            // ⌃⌘F, like Arc's; AppKit then adds no item of its own.
+            let item = item(
+                mtm,
+                ns_string!("Enter Full Screen"),
+                sel!(toggleFullScreen:),
+                ns_string!("f"),
+            );
+            item.setKeyEquivalentModifierMask(
+                NSEventModifierFlags::Command | NSEventModifierFlags::Control,
+            );
+            item
+        },
         NSMenuItem::separatorItem(mtm),
         item(
             mtm,

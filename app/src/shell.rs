@@ -6611,6 +6611,14 @@ fn run_command(command: Command) {
                 crate::mac::copy(&url);
             }
         }
+        (Command::CopyMarkdownLink, _) => {
+            let link = STATE.with_borrow_mut(|state| {
+                active_tab(&mut state.sidebar).map(|tab| format!("[{}]({})", tab.label(), tab.url))
+            });
+            if let Some(link) = link {
+                crate::mac::copy(&link);
+            }
+        }
         (Command::MoveToSpace(id, space), _) => move_to_space(id, space),
         (Command::DuplicateRow(id), _) => {
             let _ = update_sidebar(|sidebar| sidebar.duplicate_below(id));

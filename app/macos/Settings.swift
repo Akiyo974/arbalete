@@ -94,6 +94,7 @@ let shortcuts: [(String, [(String, String)])] = [
     ("Tabs", [
         ("New Tab", "⌘T"), ("Edit Address", "⌘L"), ("Close Tab", "⌘W"),
         ("Reopen Closed Tab", "⇧⌘T"), ("Pin or Unpin Tab", "⌘D"), ("Copy URL", "⇧⌘C"),
+        ("Copy URL as Markdown", "⌥⇧⌘C"),
         ("Next Tab", "⌥⌘↓ or ⌘}"), ("Previous Tab", "⌥⌘↑ or ⌘{"),
         ("Switch Between Recent Tabs", "⌃⇥, ⌃⇧⇥"), ("Favorite 1 to 8", "⌘1 … ⌘8"),
         ("Last Favorite", "⌘9"), ("Clear Today", "⇧⌘K"),
@@ -109,7 +110,8 @@ let shortcuts: [(String, [(String, String)])] = [
         ("Hide or Show Sidebar", "⌘S"), ("Show or Hide Toolbar", "⇧⌘D"),
         ("New Little Arbalete Window", "⌥⌘N"), ("Open Little Arbalete in Space", "⌘O"),
         ("Library", "⇧⌘L"), ("History", "⌘Y"), ("Downloads", "⇧⌘J"), ("Settings", "⌘,"),
-        ("Minimize", "⌘M"), ("Quit", "⌘Q"),
+        ("Close Window", "⇧⌘W"), ("Enter Full Screen", "⌃⌘F"), ("Minimize", "⌘M"),
+        ("Hide Arbalete", "⌘H"), ("Hide Others", "⌥⌘H"), ("Quit", "⌘Q"),
     ]),
 ]
 
