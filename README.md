@@ -3,7 +3,7 @@
 A cross-platform browser inspired by Arc: vertical sidebar, Spaces, profiles and link routing.
 Built with Rust on Chromium, with a native SwiftUI interface on macOS.
 
-> **Status:** early development. Nothing is usable yet.
+> **Status:** early development, preview builds for macOS. Website: [arbalete.co](https://arbalete.co).
 
 ## Goals
 

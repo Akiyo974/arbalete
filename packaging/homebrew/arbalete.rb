@@ -7,7 +7,7 @@ cask "arbalete" do
   url "https://github.com/amenophis/arbalete/releases/download/v#{version}/Arbalete-#{version}-arm64.dmg"
   name "Arbalete"
   desc "Browser inspired by Arc, on Chromium"
-  homepage "https://github.com/amenophis/arbalete"
+  homepage "https://arbalete.co"
 
   depends_on arch: :arm64
   depends_on macos: ">= :sonoma"
