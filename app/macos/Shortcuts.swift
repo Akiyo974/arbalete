@@ -330,10 +330,7 @@ private struct ShortcutRow: View {
             Text(shortcut.title).font(.system(size: 13)).lineLimit(1)
             Spacer(minLength: 6)
             if conflict {
-                Image(systemName: "exclamationmark.circle.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color(red: 0.96, green: 0.21, blue: 0.22))
-                    .help(conflictText(shortcut, conflicts))
+                ConflictDot(text: conflictText(shortcut, conflicts))
             }
             KeyCap(
                 keys: shortcut.keys, recording: model.recording == shortcut.id
@@ -394,8 +391,77 @@ private func conflictText(_ shortcut: Shortcut, _ conflicts: [Shortcut]) -> Stri
     }
 }
 
+/// The red dot of a shortcut whose keys are another's too, like Arc's: hovered, it says whose in
+/// a dark capsule above it, in a window of its own so that nothing of the list covers it.
+private struct ConflictDot: View {
+    let text: String
+    private let anchor = State(initialValue: NSView())
+
+    var body: some View {
+        Image(systemName: "exclamationmark.circle.fill")
+            .font(.system(size: 12))
+            .foregroundStyle(Color(red: 0.96, green: 0.21, blue: 0.22))
+            .background(Anchor(view: anchor.wrappedValue))
+            .onHover { over in
+                if over { CapsuleTip.shared.show(text, over: anchor.wrappedValue) } else { CapsuleTip.shared.hide() }
+            }
+            .onDisappear { CapsuleTip.shared.hide() }
+    }
+
+    private struct Anchor: NSViewRepresentable {
+        let view: NSView
+        func makeNSView(context: Context) -> NSView { view }
+        func updateNSView(_ view: NSView, context: Context) {}
+    }
+}
+
+/// A dark capsule over a view, like Arc's tooltips.
+@MainActor
+private final class CapsuleTip {
+    static let shared = CapsuleTip()
+    private let panel: NSPanel = {
+        let panel = NSPanel(
+            contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered,
+            defer: true)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        panel.level = .popUpMenu
+        return panel
+    }()
+
+    func show(_ text: String, over view: NSView) {
+        guard let window = view.window else { return }
+        let host = NSHostingView(
+            rootView: Text(text).font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(Capsule().fill(Color(white: 0.17)))
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
+                .padding(8))
+        let size = host.fittingSize
+        let dot = window.convertToScreen(view.convert(view.bounds, to: nil))
+        // Measured on Arc's: centred on the dot, its bottom 6 points over the dot's top.
+        panel.setFrame(
+            NSRect(x: dot.midX - size.width / 2, y: dot.maxY + 6 - 8, width: size.width, height: size.height),
+            display: false)
+        panel.contentView = host
+        window.addChildWindow(panel, ordered: .above)
+    }
+
+    func hide() {
+        panel.parent?.removeChildWindow(panel)
+        panel.orderOut(nil)
+    }
+}
+
 /// A shortcut's keys on a white cap, like Arc's: a blue edge under the pointer, blue keys while
-/// it records.
+/// it records, in a halo that comes and goes.
 private struct KeyCap: View {
     let keys: Keys
     let recording: Bool
@@ -421,11 +487,32 @@ private struct KeyCap: View {
                                 ? blue
                                 : hovered.wrappedValue
                                     ? Color(red: 0.6, green: 0.68, blue: 0.8) : Color(white: 0.2),
-                            lineWidth: recording ? 1.5 : hovered.wrappedValue ? 1 : 0.5))
+                            lineWidth: recording ? 2 : hovered.wrappedValue ? 1 : 0.5))
+                .background {
+                    if recording { Halo(color: blue) }
+                }
                 .animation(.easeOut(duration: 0.15), value: hovered.wrappedValue)
         }
         .buttonStyle(.plain)
         .onHover { hovered.wrappedValue = $0 }
+    }
+}
+
+/// The halo around a cap recording keys, like Arc's: a soft blue ring fading in and out.
+private struct Halo: View {
+    let color: Color
+    private let shown = State(initialValue: false)
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 8)
+            .strokeBorder(color.opacity(0.35), lineWidth: 3.5)
+            .padding(-3.5)
+            .opacity(shown.wrappedValue ? 1 : 0)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
+                    shown.wrappedValue = true
+                }
+            }
     }
 }
 
