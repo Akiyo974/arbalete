@@ -552,6 +552,40 @@ path stays for what has not moved yet.
    window stays CEF's: Chromium prompts only from a Chrome-style page.
 - **Done (2026-11-05)**: every page in a native container, every panel a view of a native window.
 
+### Phase 15 — Release (macOS)
+Arbalete ships as a free download first: no Apple developer account ($99 a year) for now, so builds are signed
+ad hoc and not notarized. It installs with Homebrew from a tap of our own, since Homebrew's main cask list
+requires notarized apps.
+
+1. **A global tap**, `amenophis/homebrew-tap`: one repository for every app of the account, one cask per app in
+   `Casks/` (like `yoanbernabeu/homebrew-tap`). Arbalete installs with
+   `brew install --cask amenophis/tap/arbalete` and updates with `brew upgrade`.
+2. **A release build**, `mise run release`: the bundle of `mise run app` built in release mode, its version
+   (`CFBundleShortVersionString`, `CFBundleVersion`) taken from `app/Cargo.toml`, signed ad hoc, the framework
+   and helpers one by one as today. Packed into `Arbalete-<version>-arm64.dmg` with `hdiutil` (no other tool),
+   holding the app, a link to `/Applications`, and CEF's and Chromium's license files, which redistributing
+   them requires.
+3. **A release workflow** on a `v*` tag pushed from `main`:
+   1. checks the tag matches the version in `app/Cargo.toml`;
+   2. builds the DMG on `macos-latest` (Apple Silicon), CEF from the same cache as CI;
+   3. publishes a GitHub release with the DMG, its SHA-256 and notes generated from the commits;
+   4. updates `Casks/arbalete.rb` in the tap (version and SHA-256) with a token allowed to write to that
+      repository only (`TAP_TOKEN`, a fine-grained token stored as a secret).
+4. **The cask**: the DMG's URL on GitHub releases, `depends_on arch: :arm64` and the oldest macOS CEF supports,
+   `zap` for the data folder, caches and preferences, and caveats for the first launch.
+5. **First launch**: macOS blocks an app that is not notarized. The cask's caveats and the README say how to
+   open it once: System Settings › Privacy & Security › Open Anyway, or
+   `xattr -dr com.apple.quarantine /Applications/Arbalete.app`. The cask does not remove the quarantine
+   itself: the user chooses.
+- **Versioning**: SemVer, starting at 0.1.0; a release is a commit bumping `app/Cargo.toml`, then its tag.
+- **Known limit**: an ad hoc signature changes with each build, so macOS asks again for permissions it gave
+  (camera, microphone, folders) after each update. A Developer ID signature removes that.
+- **Done when**: on a Mac without Arbalete, `brew install --cask amenophis/tap/arbalete` installs the latest
+  release, it opens after Open Anyway, and pushing a new tag updates the cask without any manual step.
+- **Later**: a Developer ID and notarization (then Homebrew's main cask list, and no first-launch step), Intel
+  and universal builds, updates inside the app (Sparkle), proprietary codecs and Widevine (a CEF build of our
+  own), and the third-party licenses in the About window.
+
 ### Later
 - **Linux and Windows**, last and not planned for now: CI on both (system libraries CEF needs, loading `libcef`
   in tests, Windows sandbox bootstrap), an interface of their own, full acceptance testing on each OS, signed
