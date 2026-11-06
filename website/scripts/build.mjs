@@ -92,6 +92,45 @@ function earlier(list) {
 </details>`;
 }
 
+/**
+ * The feed the app looks for updates in (app/macos/Updates.swift): one item per release whose disk
+ * image the release workflow signed for it, previews left out. The `.sig` asset holds the
+ * enclosure's `sparkle:edSignature="…" length="…"`, as Sparkle's sign_update prints them.
+ */
+async function appcast(list) {
+  const items = [];
+  for (const release of list) {
+    const dmg = release.assets?.find((asset) => asset.name.endsWith(".dmg"));
+    const sig = release.assets?.find((asset) => asset.name === `${dmg?.name}.sig`);
+    if (release.prerelease || !sig) continue;
+    const response = await fetch(sig.browser_download_url);
+    if (!response.ok) throw new Error(`${sig.name}: ${response.status}`);
+    const signature = (await response.text()).match(/sparkle:edSignature="([^"]+)"\s+length="(\d+)"/);
+    if (!signature) throw new Error(`${sig.name} holds no signature`);
+    // Like CFBundleVersion and CFBundleShortVersionString, both the app's version.
+    const version = escape(release.tag_name.replace(/^v/, ""));
+    items.push(`    <item>
+      <title>${title(release)}</title>
+      <pubDate>${new Date(release.published_at).toUTCString()}</pubDate>
+      <sparkle:version>${version}</sparkle:version>
+      <sparkle:shortVersionString>${version}</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:fullReleaseNotesLink>https://arbalete.co/releases.html</sparkle:fullReleaseNotesLink>
+      <description>${escape(release.body_html?.trim() || "")}</description>
+      <enclosure url="${escape(dmg.browser_download_url)}" length="${signature[2]}" type="application/octet-stream" sparkle:edSignature="${escape(signature[1])}"/>
+    </item>`);
+  }
+  return `<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Arbalete</title>
+    <link>https://arbalete.co/releases.html</link>
+${items.join("\n")}
+  </channel>
+</rss>
+`;
+}
+
 async function page(template, current, extra = {}) {
   const header = (await read("partials/header.html")).replace(
     "{{current-releases}}", current === "releases" ? ' aria-current="page"' : "");
@@ -121,6 +160,7 @@ await writeFile(new URL("index.html", dist), await page(await read("index.html")
 await writeFile(
   new URL("releases.html", dist),
   await page(await read("releases.template.html"), "releases", { "<!-- @releases -->": releasesHtml }));
+await writeFile(new URL("appcast.xml", dist), await appcast(list));
 await cp(new URL("styles.css", src), new URL("styles.css", dist));
 await cp(new URL("assets/", src), new URL("assets/", dist), { recursive: true });
 // The logo's files stay in the repository's assets folder, the one place they live.
