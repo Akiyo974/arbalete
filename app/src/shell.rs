@@ -599,6 +599,14 @@ fn close_incognito(id: u32) {
     if let Some(dir) = INCOGNITO.with_borrow_mut(|incognito| incognito.remove(&profile)) {
         let _ = std::fs::remove_dir_all(dir);
     }
+    // Its downloads leave the list, never saved; their files stay.
+    DOWNLOADS.with_borrow_mut(|list| {
+        list.retain(|download| download.profile != Some(profile));
+        DOWNLOAD_CALLBACKS.with_borrow_mut(|callbacks| {
+            callbacks.retain(|id, _| list.iter().any(|download| download.id == *id));
+        });
+    });
+    send_downloads();
 }
 
 /// Opens another window, offset from the focused one, showing `view` of the sidebar; `fresh`, on
@@ -1248,7 +1256,12 @@ fn set_developer_mode(site: String, on: bool) {
 /// Saves the downloads list. A list that cannot be written is not worth stopping a download for.
 fn save_downloads() {
     let path = DATA_DIR.get().expect("set").join(downloads::FILE_NAME);
-    if let Err(error) = DOWNLOADS.with_borrow(|list| downloads::save(list, &path)) {
+    let list = DOWNLOADS.with_borrow(|list| {
+        downloads::lasting(list, |profile| {
+            INCOGNITO.with_borrow(|incognito| incognito.contains_key(&profile))
+        })
+    });
+    if let Err(error) = downloads::save(&list, &path) {
         eprintln!("cannot save the downloads: {error}");
     }
 }

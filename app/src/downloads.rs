@@ -104,6 +104,16 @@ pub fn save(downloads: &[Download], path: &Path) -> io::Result<()> {
     fs::rename(temporary, path)
 }
 
+/// The downloads kept across sessions: not those of a profile `incognito` says is one, whose
+/// entries go with the window while their files stay, like Chrome's.
+pub fn lasting(downloads: &[Download], incognito: impl Fn(ProfileId) -> bool) -> Vec<Download> {
+    downloads
+        .iter()
+        .filter(|download| !download.profile.is_some_and(&incognito))
+        .cloned()
+        .collect()
+}
+
 /// Loads the list, empty when there is none or it cannot be read, in which case the file is set
 /// aside so the next save does not overwrite it: a download still in progress when the app quit
 /// failed, and a finished one whose file is gone is marked missing.
@@ -289,6 +299,22 @@ mod tests {
         assert_eq!(loaded[1].state, State::Failed);
         assert!(loaded[2].missing);
         assert_eq!(next_id(&loaded), 3);
+    }
+
+    #[test]
+    fn keeps_no_incognito_download_across_sessions() {
+        let profile = |id: u64| serde_json::from_str::<ProfileId>(&id.to_string()).unwrap();
+        let download = |id, profile| {
+            let mut download = Download::new(id, id, PathBuf::from("/d/f"), String::new(), 0);
+            download.profile = profile;
+            download
+        };
+        let list = [
+            download(0, None),
+            download(1, Some(profile(1))),
+            download(2, Some(profile(2))),
+        ];
+        assert_eq!(lasting(&list, |id| id == profile(2)), list[..2]);
     }
 
     #[test]
