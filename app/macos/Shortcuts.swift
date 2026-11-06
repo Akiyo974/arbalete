@@ -113,6 +113,8 @@ private let shortcutDescriptions: [String: String] = [
     "togglePin": "Pins the tab shown, or unpins it.",
     "print": "Prints the page shown, or saves it as a PDF.",
     "captureArea": "Captures a part of the page, to copy or save.",
+    "captureFull": "Captures the whole page, scrolled to its end, to copy or save.",
+    "capturePortrait": "Copies the page framed on a color, like a portrait.",
     "toggleSidebar": "Shows or hides the sidebar.",
     "toggleToolbar": "Shows or hides the toolbar above the page.",
     "addPane": "Adds a page beside the one shown, in a Split View.",

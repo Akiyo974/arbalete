@@ -420,6 +420,16 @@ define_class!(
         fn capture_area(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::CaptureArea);
         }
+
+        #[unsafe(method(arbaleteCaptureFull:))]
+        fn capture_full(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::CaptureFull);
+        }
+
+        #[unsafe(method(arbaleteCapturePortrait:))]
+        fn capture_portrait(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::Capture);
+        }
     }
 
     unsafe impl CrAppControlProtocol for ArbaleteApplication {
@@ -725,6 +735,19 @@ pub fn setup_menu() {
                     ns_string!("Capture Part of the Page"),
                     sel!(arbaleteCaptureArea:),
                     ns_string!("2"),
+                ),
+                // Without keys, like Arc's.
+                item(
+                    mtm,
+                    ns_string!("Capture Full Page"),
+                    sel!(arbaleteCaptureFull:),
+                    ns_string!(""),
+                ),
+                item(
+                    mtm,
+                    ns_string!("Capture in Portrait Mode"),
+                    sel!(arbaleteCapturePortrait:),
+                    ns_string!(""),
                 ),
             ],
         ),
