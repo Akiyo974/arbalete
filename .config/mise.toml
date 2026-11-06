@@ -35,14 +35,17 @@ run = [
 
 [tasks.app]
 description = "Bundle the app"
+# A development bundle, "Arbalete Dev", stands apart from an installed Arbalete: its own
+# identifier, so its own preferences, permissions and default browser registration (its data
+# folder too, app/src/main.rs). mise run release names the release's.
 run = [
   # Bundling in place over a previous build invalidates its code signature on macOS.
   "rm -rf target/bundle",
   # Versioned like the app's crate.
-  "bundle-cef-app arbalete -o target/bundle -i io.github.amenophis.arbalete -d Arbalete -v \"$(sed -n 's/^version = \"\\(.*\\)\"/\\1/p' app/Cargo.toml)\"",
+  "bundle-cef-app arbalete -o target/bundle -i \"${ARBALETE_BUNDLE_ID:-io.github.amenophis.arbalete.dev}\" -d Arbalete -v \"$(sed -n 's/^version = \"\\(.*\\)\"/\\1/p' app/Cargo.toml)\"",
   # The bundle and its name in the menu bar and the Finder take a capital, unlike the executable.
   "mv target/bundle/arbalete.app target/bundle/Arbalete.app",
-  "plutil -replace CFBundleName -string Arbalete target/bundle/Arbalete.app/Contents/Info.plist",
+  "plutil -replace CFBundleName -string \"${ARBALETE_BUNDLE_NAME:-Arbalete Dev}\" target/bundle/Arbalete.app/Contents/Info.plist",
   # Like Arc's, what the system writes for the app (times, apps' names, its panels) speaks the
   # system's language, around Arbalete's own English.
   "plutil -replace CFBundleAllowMixedLocalizations -bool YES target/bundle/Arbalete.app/Contents/Info.plist",
@@ -59,7 +62,7 @@ run = [
   "plutil -insert CFBundleDocumentTypes -json '[{\"CFBundleTypeName\":\"HTML document\",\"CFBundleTypeRole\":\"Viewer\",\"LSItemContentTypes\":[\"public.html\",\"public.xhtml\"]}]' target/bundle/Arbalete.app/Contents/Info.plist",
   # The helpers take their own identifiers, like CEF's: sharing the app's, one of them could
   # receive the links macOS sends to the default browser.
-  "for helper in target/bundle/Arbalete.app/Contents/Frameworks/*Helper*.app; do suffix=$(basename \"$helper\" .app | sed -n 's/.*(\\(.*\\))/.\\1/p' | tr A-Z a-z); plutil -replace CFBundleIdentifier -string \"io.github.amenophis.arbalete.helper$suffix\" \"$helper/Contents/Info.plist\"; done",
+  "for helper in target/bundle/Arbalete.app/Contents/Frameworks/*Helper*.app; do suffix=$(basename \"$helper\" .app | sed -n 's/.*(\\(.*\\))/.\\1/p' | tr A-Z a-z); plutil -replace CFBundleIdentifier -string \"${ARBALETE_BUNDLE_ID:-io.github.amenophis.arbalete.dev}.helper$suffix\" \"$helper/Contents/Info.plist\"; done",
   # Ad hoc signatures change on every build, so macOS asks again for each permission. A stable
   # identity, set in .config/mise.local.toml (not committed), keeps permissions across builds.
   # The framework and the helpers, which read and write the data, are signed one by one: --deep
@@ -72,7 +75,7 @@ run = [
 description = "Bundle an optimized app, signed with ARBALETE_SIGN_IDENTITY, in a disk image"
 # bundle-cef-app builds the dev profile only: optimized here, in a folder of its own, so that
 # the development build stays as it is.
-env = { CARGO_TARGET_DIR = "target/release-build", CARGO_PROFILE_DEV_OPT_LEVEL = "3", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_DEV_DEBUG_ASSERTIONS = "false", CARGO_PROFILE_DEV_OVERFLOW_CHECKS = "false", CARGO_PROFILE_DEV_INCREMENTAL = "false" }
+env = { ARBALETE_BUNDLE_ID = "io.github.amenophis.arbalete", ARBALETE_BUNDLE_NAME = "Arbalete", CARGO_TARGET_DIR = "target/release-build", CARGO_PROFILE_DEV_OPT_LEVEL = "3", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_DEV_DEBUG_ASSERTIONS = "false", CARGO_PROFILE_DEV_OVERFLOW_CHECKS = "false", CARGO_PROFILE_DEV_INCREMENTAL = "false" }
 run = [
   "mise run app",
   # The app beside a link to Applications, to drag it onto (packaging/dmg).

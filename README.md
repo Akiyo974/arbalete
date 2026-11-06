@@ -49,6 +49,10 @@ mise run run     # bundle the app and run it
 
 `mise run setup` downloads CEF (about 350 MB) to `~/cef` once; every build uses it through `CEF_PATH`.
 
+Development builds are "Arbalete Dev": their own bundle identifier (`io.github.amenophis.arbalete.dev`) and data
+folder (`~/Library/Application Support/Arbalete Dev`), so an installed Arbalete keeps its own data, preferences and
+permissions. `ARBALETE_DATA_DIR` points either to another folder.
+
 In Visual Studio Code, install the recommended extensions and open the repository from a shell where mise is
 active (`code .`), so that rust-analyzer builds with the same toolchain and `CEF_PATH`. The mise tasks are VS Code
 tasks, and "Debug the app" builds and debugs the app on a session of its own in the temporary folder.

@@ -67,6 +67,7 @@ fn main() {
 
 /// Where Arbalete keeps its data, resolved because CEF compares paths after resolving symlinks.
 /// `ARBALETE_DATA_DIR` overrides it, to run the app on another session (benchmarks, tests).
+/// A development build keeps its own, "Arbalete Dev", away from an installed Arbalete's.
 fn data_dir() -> PathBuf {
     let dir = std::env::var_os("ARBALETE_DATA_DIR").map_or_else(default_data_dir, PathBuf::from);
     std::fs::create_dir_all(&dir).unwrap();
@@ -75,14 +76,20 @@ fn data_dir() -> PathBuf {
 
 fn default_data_dir() -> PathBuf {
     let home = home();
+    let dev = cfg!(debug_assertions);
     if cfg!(target_os = "macos") {
-        home.join("Library/Application Support/Arbalete")
+        home.join("Library/Application Support")
+            .join(if dev { "Arbalete Dev" } else { "Arbalete" })
     } else if cfg!(target_os = "windows") {
-        PathBuf::from(std::env::var_os("APPDATA").unwrap()).join("Arbalete")
+        PathBuf::from(std::env::var_os("APPDATA").unwrap()).join(if dev {
+            "Arbalete Dev"
+        } else {
+            "Arbalete"
+        })
     } else {
         std::env::var_os("XDG_DATA_HOME")
             .map_or_else(|| home.join(".local/share"), PathBuf::from)
-            .join("arbalete")
+            .join(if dev { "arbalete-dev" } else { "arbalete" })
     }
 }
 
