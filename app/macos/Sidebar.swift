@@ -57,7 +57,7 @@ struct SidebarView: View {
                 }
                 .clipped()
                 .animation(.easeInOut(duration: spaceSlide), value: model.draftSpace != nil)
-                RecentDownloads(model: model)
+                // Hidden until it shows on hover like Arc's (docs/PLAN.md, phase 13).
                 if model.state?.incognito == true {
                     // Like Arc's, only a button for a new tab.
                     HStack {

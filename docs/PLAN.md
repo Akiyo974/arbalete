@@ -525,6 +525,8 @@ from Arc rely on them. Items that belong to a phase above stay there.
   weight, line height) and icons' strokes, from screenshots overlaid on Arc's, then fixed.
 - Done when an overlay of each screen shows no difference left. Arbalete still draws its own icons and copies
   no asset.
+- To do: the sidebar's recent downloads, hidden for now, shown on hover like Arc's (timing and motion from a
+  recording).
 
 ### Phase 14 — Pages in native containers (macOS)
 Decided in [0002](decisions/0002-native-page-containers.md), after a spike (branch `spike/native-containers`):
