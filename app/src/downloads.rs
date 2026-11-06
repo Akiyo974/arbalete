@@ -155,6 +155,20 @@ pub fn media_type(name: &str) -> Option<&'static str> {
     })
 }
 
+/// Whether a download comes from the Chrome Web Store, whose extensions Chromium installs once
+/// downloaded: the store's page, or Google's update service it fetches them from.
+pub fn from_web_store(url: &str) -> bool {
+    let host = url
+        .strip_prefix("https://")
+        .and_then(|rest| rest.split(['/', '?', '#']).next());
+    matches!(
+        host,
+        Some(
+            "chromewebstore.google.com" | "clients2.google.com" | "clients2.googleusercontent.com"
+        )
+    )
+}
+
 /// The id for a new download in the list.
 pub fn next_id(downloads: &[Download]) -> u32 {
     downloads
@@ -203,6 +217,26 @@ mod tests {
         assert_eq!(media_type("clip.final.webm"), Some("video/webm"));
         assert_eq!(media_type("report.pdf"), None);
         assert_eq!(media_type("png"), None);
+    }
+
+    #[test]
+    fn tells_downloads_from_the_web_store() {
+        assert!(from_web_store(
+            "https://clients2.google.com/service/update2/crx?response=redirect&x=id%3Dabc"
+        ));
+        assert!(from_web_store(
+            "https://clients2.googleusercontent.com/crx/blobs/abc/extension.crx"
+        ));
+        assert!(!from_web_store("https://example.com/extension.crx"));
+        assert!(!from_web_store(
+            "http://clients2.google.com/service/update2/crx"
+        ));
+        assert!(!from_web_store(
+            "https://clients2.google.com.example.com/x.crx"
+        ));
+        assert!(!from_web_store(
+            "https://clients2.google.com@example.com/x.crx"
+        ));
     }
 
     #[test]

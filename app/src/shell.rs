@@ -8369,9 +8369,10 @@ wrap_download_handler! {
             let (Some(item), Some(callback)) = (item, callback) else { return 0 };
             let name = suggested_name.map(CefString::to_string).unwrap_or_default();
             // The Web Store's extensions, which Chromium installs once downloaded: kept out of the
-            // downloads, in a temporary folder.
+            // downloads, in a temporary folder. Another site's are ordinary downloads.
             let mime = CefString::from(&item.mime_type()).to_string();
-            if mime == "application/x-chrome-extension" || name.ends_with(".crx") {
+            let extension = mime == "application/x-chrome-extension" || name.ends_with(".crx");
+            if extension && downloads::from_web_store(&CefString::from(&item.original_url()).to_string()) {
                 let path = std::env::temp_dir().join(&name);
                 callback.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 0);
                 return 1;
