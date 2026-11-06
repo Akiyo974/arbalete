@@ -8,6 +8,8 @@ on:
 
 permissions:
   contents: write
+  # To start the website's deployment, which lists the new release.
+  actions: write
 
 jobs:
   release:
@@ -88,3 +90,10 @@ jobs:
           git add Casks/arbalete.rb
           git commit -m "arbalete $VERSION"
           git push origin HEAD:main
+
+      # A release published with the workflow's token starts no other workflow: the website's
+      # "release: published" never fires, so its deployment is started here.
+      - name: Deploy the website
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run website.yml --ref main

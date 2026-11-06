@@ -1,13 +1,11 @@
 name: Website
 
 # The website (website/) deploys on its own, apart from the app's releases: on a change to it on
-# main, by hand, and when a release is published, which its release notes list.
+# main, by hand, and when the release workflow publishes a release, which its notes list.
 on:
   push:
     branches: [main]
     paths: ["website/**", "assets/favicon.svg", ".github/workflows/website.yml"]
-  release:
-    types: [published]
   workflow_dispatch:
 
 permissions:
