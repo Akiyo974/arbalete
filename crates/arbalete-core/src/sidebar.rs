@@ -332,6 +332,10 @@ pub enum Error {
     InvalidTheme,
     /// Profiles have different names, like Arc's.
     NameTaken,
+    /// Like Arc's, the first profile, the Default one, cannot be deleted.
+    DefaultProfile,
+    /// Like Arc's, only a profile no Space uses can be deleted.
+    ProfileInUse,
 }
 
 /// What a window shows of the sidebar: its displayed Space, each Space's selected tab and the
@@ -735,11 +739,31 @@ impl Sidebar {
     }
 
     pub fn rename_profile(&mut self, id: ProfileId, name: &str) -> Result<(), Error> {
-        if name.trim().is_empty() {
-            return Err(Error::EmptyTitle);
-        }
-        self.profile_mut(id)?.name = name.to_string();
+        self.profile_mut(id)?;
+        self.check_profile_name(Some(id), name)?;
+        self.profile_mut(id)?.name = name.trim().to_string();
         Ok(())
+    }
+
+    /// Deletes a profile no Space uses, with its favorites, like Arc's; never the first one, the
+    /// Default one.
+    pub fn delete_profile(&mut self, id: ProfileId) -> Result<(), Error> {
+        let index = self.profiles().iter().position(|p| p.id == id);
+        match index.ok_or(Error::UnknownProfile)? {
+            0 => Err(Error::DefaultProfile),
+            _ if self.spaces.iter().any(|s| s.profile == id) => Err(Error::ProfileInUse),
+            index => {
+                let profile = self.profiles.remove(index);
+                let mut pending = vec![profile.favorites];
+                while let Some(id) = pending.pop() {
+                    if let Some(node) = self.nodes.remove(&id) {
+                        self.splits.remove(&id);
+                        pending.extend(node.children);
+                    }
+                }
+                Ok(())
+            }
+        }
     }
 
     /// A profile's name is not blank, and no other profile has it, whatever the case.
@@ -2209,12 +2233,35 @@ mod tests {
     }
 
     #[test]
+    fn deletes_a_profile_no_space_uses_but_the_default_one() {
+        let mut sidebar = Sidebar::default();
+        let default = sidebar.profiles()[0].id;
+        let work = sidebar.create_profile("Work", &[]).unwrap();
+        let office = sidebar.add_space("Office", work).unwrap();
+        let tab = sidebar.open_tab(office, "https://work.example/").unwrap();
+        let favorites = sidebar.profiles()[1].favorites;
+        sidebar.move_node(tab, favorites, 0).unwrap();
+        assert_eq!(sidebar.delete_profile(work), Err(Error::ProfileInUse));
+        assert_eq!(sidebar.delete_profile(default), Err(Error::DefaultProfile));
+        sidebar.set_space_profile(office, default).unwrap();
+        sidebar.delete_profile(work).unwrap();
+        assert_eq!(sidebar.profiles().len(), 1);
+        assert!(sidebar.node(favorites).is_none());
+        assert!(sidebar.node(tab).is_none());
+        assert_eq!(sidebar.delete_profile(work), Err(Error::UnknownProfile));
+    }
+
+    #[test]
     fn renames_and_recolors_a_profile() {
         let mut sidebar = Sidebar::default();
         let id = sidebar.profiles()[0].id;
         sidebar.rename_profile(id, "Personal").unwrap();
         sidebar.set_profile_color(id, Color::Green).unwrap();
         assert_eq!(sidebar.rename_profile(id, " "), Err(Error::EmptyTitle));
+        sidebar.create_profile("Work", &[]).unwrap();
+        assert_eq!(sidebar.rename_profile(id, "work "), Err(Error::NameTaken));
+        sidebar.rename_profile(id, " personal ").unwrap();
+        sidebar.rename_profile(id, "Personal").unwrap();
         let profile = &sidebar.profiles()[0];
         assert_eq!(
             (profile.name.as_str(), profile.color),

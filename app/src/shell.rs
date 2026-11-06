@@ -4989,6 +4989,23 @@ fn focus_sidebar() {
     }
 }
 
+/// Deletes a profile no Space uses, like Arc's, with its web data, history included: like a
+/// rename, the Default profile or one in use from the UI is ignored.
+fn delete_profile(profile: ProfileId) {
+    if update_sidebar(|sidebar| sidebar.delete_profile(profile)).is_err() {
+        return;
+    }
+    CONTEXTS.with_borrow_mut(|contexts| contexts.remove(&profile));
+    HISTORIES.with_borrow_mut(|histories| histories.remove(&profile));
+    let dir = profile_dir(profile);
+    if let Err(error) = std::fs::remove_dir_all(&dir)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        eprintln!("cannot delete the profile's data: {error}");
+    }
+    send_settings();
+}
+
 /// Creates a profile used by `spaces`, from Arc's Create a new Profile dialog, and shows the
 /// displayed Space's page again when it changes profile. Like a rename, a blank or taken name from
 /// the UI is ignored.
@@ -6797,6 +6814,7 @@ fn run_command(command: Command) {
         }
         (Command::NewProfile, _) => ask("arbalete:new-profile", &json!(null)),
         (Command::CreateProfile { name, spaces }, _) => create_profile(&name, &spaces),
+        (Command::DeleteProfile(id), _) => delete_profile(id),
         // Like a folder, an unknown profile or a blank name from the UI is ignored.
         (Command::RenameProfile(id, name), _) => {
             if update_sidebar(|sidebar| sidebar.rename_profile(id, &name)).is_ok() {

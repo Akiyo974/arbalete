@@ -1,6 +1,6 @@
 // Arc's profile dialogs, cards over their window, which they dim: Create a new Profile, in two
 // steps from the settings (its name, then the Spaces that use it), in one for a Space, from its
-// profile menus. Measured on Arc's.
+// profile menus; Rename your Profile and Delete this Profile, from the settings. Measured on Arc's.
 
 import AppKit
 import SwiftUI
@@ -274,5 +274,96 @@ private struct SpaceChoice: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Rename your Profile, like Arc's, from the settings' list of profiles.
+struct RenameProfileDialog: View {
+    let profile: SettingsDetail.ProfileSettings
+    let names: [String]
+    let close: () -> Void
+    let rename: (String) -> Void
+    private let _name: State<String>
+    @FocusState private var naming: Bool
+
+    init(
+        profile: SettingsDetail.ProfileSettings, names: [String], close: @escaping () -> Void,
+        rename: @escaping (String) -> Void
+    ) {
+        (self.profile, self.names, self.close, self.rename) = (profile, names, close, rename)
+        _name = State(initialValue: profile.name)
+    }
+
+    private var name: String { _name.wrappedValue.trimmingCharacters(in: .whitespaces) }
+    private var taken: Bool {
+        names.contains {
+            $0 != profile.name && $0.trimmingCharacters(in: .whitespaces).lowercased() == name.lowercased()
+        }
+    }
+
+    var body: some View {
+        DialogCard {
+            DialogText(
+                title: "Rename your Profile",
+                text: "This won’t affect the names of any of the Spaces associated with this Profile.")
+            DialogField(text: _name.projectedValue, focus: $naming)
+                .onAppear { naming = true }
+            if taken {
+                Text("A Profile with that name already exists.").font(.system(size: 12))
+                    .foregroundStyle(color("#ff6b6b"))
+                    .padding(.top, 6)
+            }
+            DialogButtons(cancel: "Cancel", confirm: "Save", enabled: !name.isEmpty && !taken, back: close) {
+                if name != profile.name { rename(name) }
+                close()
+            }
+        }
+    }
+}
+
+/// Delete this Profile, like Arc's: once its name is typed, it goes with its web data.
+struct DeleteProfileDialog: View {
+    let profile: SettingsDetail.ProfileSettings
+    let close: () -> Void
+    let delete: () -> Void
+    private let _typed = State(initialValue: "")
+    @FocusState private var typing: Bool
+
+    var body: some View {
+        DialogCard {
+            DialogText(
+                title: "Delete this Profile",
+                text: "Deleting “\(profile.name)” will permanently remove any cookies, history, preferences, and logins that belong to this Profile.")
+            Text("To continue, please type the name of this Profile:").font(.system(size: 14))
+                .foregroundStyle(.white.opacity(0.7))
+                .padding(.top, 16)
+            DialogField(text: _typed.projectedValue, focus: $typing)
+                .onAppear { typing = true }
+            DialogButtons(
+                cancel: "Cancel", confirm: "Delete", enabled: _typed.wrappedValue == profile.name,
+                back: close
+            ) {
+                delete()
+                close()
+            }
+        }
+    }
+}
+
+/// A field of the dialogs, filled, like Arc's rename field.
+private struct DialogField: View {
+    let text: Binding<String>
+    let focus: FocusState<Bool>.Binding
+
+    var body: some View {
+        TextField("", text: text)
+            .textFieldStyle(.plain)
+            .focused(focus)
+            .font(.system(size: 15))
+            .padding(.horizontal, 12)
+            .frame(height: 34)
+            .background(RoundedRectangle(cornerRadius: 6).fill(color("#2e3442")))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.white.opacity(0.15)))
+            .padding(.top, 20)
     }
 }

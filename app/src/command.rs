@@ -398,6 +398,8 @@ pub enum Command {
     },
     /// Renames a profile: `profile/rename/<profile id>/<percent-encoded name>`.
     RenameProfile(ProfileId, String),
+    /// Deletes a profile no Space uses, with its web data: `profile/delete/<profile id>`.
+    DeleteProfile(ProfileId),
     /// Changes how long a profile's "Today" tabs stay unshown before they are archived:
     /// `profile/archive/<profile id>/<delay>`, like `twelve-hours` or `never`.
     SetArchiveAfter(ProfileId, ArchiveAfter),
@@ -827,6 +829,9 @@ impl Command {
                         _ => return None,
                     };
                     return on.parse().ok().map(|on| Self::SetSetting(setting, on));
+                }
+                if let Some(id) = path.strip_prefix("profile/delete/") {
+                    return serde_json::from_str(id).ok().map(Self::DeleteProfile);
                 }
                 if let Some(json) = path.strip_prefix("profile/create/") {
                     #[derive(serde::Deserialize)]
@@ -1591,6 +1596,11 @@ mod tests {
         assert_eq!(name, "Work");
         assert_eq!(serde_json::to_string(&spaces).unwrap(), "[4]");
         assert_eq!(Command::parse("profile/create/%7B%7D"), None);
+        let Some(Command::DeleteProfile(id)) = Command::parse("profile/delete/3") else {
+            panic!("not a deletion")
+        };
+        assert_eq!(serde_json::to_string(&id).unwrap(), "3");
+        assert_eq!(Command::parse("profile/delete/x"), None);
         assert_eq!(Command::parse("profile/rename/1"), None);
         assert_eq!(Command::parse("profile/rename/x/a"), None);
     }

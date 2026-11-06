@@ -656,7 +656,8 @@ private struct ProfilesSettings: View {
                 HStack(alignment: .top, spacing: 10) {
                     ProfileList(
                         detail: detail, picked: profile?.id, pick: { picked.wrappedValue = $0 },
-                        create: { settings.app.newProfile(for: nil, names: detail.profiles.map(\.name)) })
+                        create: { settings.app.newProfile(for: nil, names: detail.profiles.map(\.name)) },
+                        rename: rename, delete: delete)
                         .frame(width: 205)
                     if let profile {
                         ProfileDetail(settings: settings, detail: detail, profile: profile)
@@ -665,15 +666,48 @@ private struct ProfilesSettings: View {
             }
         }
     }
+
+    private func rename(_ profile: SettingsDetail.ProfileSettings) {
+        let names = settings.detail?.profiles.map(\.name) ?? []
+        showDialog { close in
+            RenameProfileDialog(profile: profile, names: names, close: close) {
+                settings.app.run("profile/rename/\(profile.id)/\(percentEncoded($0))")
+            }
+        }
+    }
+
+    private func delete(_ profile: SettingsDetail.ProfileSettings) {
+        showDialog { close in
+            DeleteProfileDialog(profile: profile, close: close) {
+                settings.app.run("profile/delete/\(profile.id)")
+            }
+        }
+    }
 }
 
-/// The profiles, like Arc's list: each with how many Spaces use it, and under them the button
-/// creating one.
+/// The profiles, like Arc's list: each with how many Spaces use it, renamed with a double click,
+/// and under them the buttons creating one, deleting the picked one and renaming it.
 private struct ProfileList: View {
     let detail: SettingsDetail
     let picked: Int?
     let pick: (Int) -> Void
     let create: () -> Void
+    let rename: (SettingsDetail.ProfileSettings) -> Void
+    let delete: (SettingsDetail.ProfileSettings) -> Void
+
+    private var profile: SettingsDetail.ProfileSettings? {
+        detail.profiles.first { $0.id == picked }
+    }
+
+    /// Why the picked profile cannot be deleted, like Arc's, if it cannot.
+    private var undeletable: String? {
+        guard let profile else { return "" }
+        if profile.id == detail.profiles.first?.id { return "The Default Profile cannot be deleted." }
+        if detail.spaces.contains(where: { $0.profile == profile.name }) {
+            return "Only Profiles not assigned to any Spaces can be deleted."
+        }
+        return nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -695,6 +729,16 @@ private struct ProfileList: View {
             Rectangle().fill(settingsLine).frame(height: 1)
             HStack(spacing: 0) {
                 footerButton("plus", help: "Create a new Profile", action: create)
+                Rectangle().fill(settingsLine).frame(width: 1, height: 16)
+                footerButton("minus", help: undeletable ?? "Delete this Profile") {
+                    profile.map(delete)
+                }
+                .disabled(undeletable != nil)
+                Rectangle().fill(settingsLine).frame(width: 1, height: 16)
+                footerButton("rectangle.and.pencil.and.ellipsis", help: "Rename your Profile") {
+                    profile.map(rename)
+                }
+                .disabled(profile == nil)
                 Spacer()
             }
             .frame(height: 30)
@@ -723,6 +767,7 @@ private struct ProfileList: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(TapGesture(count: 2).onEnded { rename(profile) })
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
     }
