@@ -554,20 +554,21 @@ path stays for what has not moved yet.
 
 ### Phase 15 — Release (macOS)
 Arbalete ships as a free download first: no Apple developer account ($99 a year) for now, so builds are signed
-ad hoc and not notarized. It installs with Homebrew from a tap of our own, since Homebrew's main cask list
+with a certificate of our own and not notarized. It installs with Homebrew from a tap of our own, since Homebrew's main cask list
 requires notarized apps.
 
 1. **A global tap**, `amenophis/homebrew-tap`: one repository for every app of the account, one cask per app in
    `Casks/` (like `yoanbernabeu/homebrew-tap`). Arbalete installs with
    `brew install --cask amenophis/tap/arbalete` and updates with `brew upgrade`.
 2. **A release build**, `mise run release`: the bundle of `mise run app` built in release mode, its version
-   (`CFBundleShortVersionString`, `CFBundleVersion`) taken from `app/Cargo.toml`, signed ad hoc, the framework
-   and helpers one by one as today. Packed into `Arbalete-<version>-arm64.dmg` with `hdiutil` (no other tool),
+   (`CFBundleShortVersionString`, `CFBundleVersion`) taken from `app/Cargo.toml`, signed with the release
+   certificate (`ARBALETE_SIGN_IDENTITY`), the framework and helpers one by one as today. Packed into `Arbalete-<version>-arm64.dmg` with `hdiutil` (no other tool),
    holding the app, a link to `/Applications`, and CEF's and Chromium's license files, which redistributing
    them requires.
 3. **A release workflow** on a `v*` tag pushed from `main`:
    1. checks the tag matches the version in `app/Cargo.toml`;
-   2. builds the DMG on `macos-latest` (Apple Silicon), CEF from the same cache as CI;
+   2. imports the release certificate into a temporary keychain and builds the DMG on `macos-latest` (Apple
+      Silicon), CEF from the same cache as CI;
    3. publishes a GitHub release with the DMG, its SHA-256 and notes generated from the commits;
    4. updates `Casks/arbalete.rb` in the tap (version and SHA-256) with a token allowed to write to that
       repository only (`TAP_TOKEN`, a fine-grained token stored as a secret).
@@ -578,8 +579,11 @@ requires notarized apps.
    `xattr -dr com.apple.quarantine /Applications/Arbalete.app`. The cask does not remove the quarantine
    itself: the user chooses.
 - **Versioning**: SemVer, starting at 0.1.0; a release is a commit bumping `app/Cargo.toml`, then its tag.
-- **Known limit**: an ad hoc signature changes with each build, so macOS asks again for permissions it gave
-  (camera, microphone, folders) after each update. A Developer ID signature removes that.
+- **The release certificate**: a self-signed code signing certificate, "Arbalete Release", valid for ten years,
+  the same for every release. macOS ties the permissions it gave (camera, microphone, folders) to the
+  signature: an ad hoc one changes with each build, and macOS would ask again after each update. Stored as
+  secrets of the repository (`SIGN_P12`, the certificate and its key in base64, and `SIGN_P12_PASSWORD`), with
+  a copy kept by its owner: losing it costs every user their permissions once.
 - **Done when**: on a Mac without Arbalete, `brew install --cask amenophis/tap/arbalete` installs the latest
   release, it opens after Open Anyway, and pushing a new tag updates the cask without any manual step.
 - **Later**: a Developer ID and notarization (then Homebrew's main cask list, and no first-launch step), Intel
