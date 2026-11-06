@@ -2,19 +2,6 @@
 
 use cef::{args::Args, *};
 
-#[path = "../scheme.rs"]
-mod scheme;
-
-wrap_app! {
-    struct HelperApp {}
-
-    impl App {
-        fn on_register_custom_schemes(&self, registrar: Option<&mut SchemeRegistrar>) {
-            scheme::register(registrar);
-        }
-    }
-}
-
 fn main() {
     let args = Args::new();
 
@@ -33,9 +20,5 @@ fn main() {
     };
 
     let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
-    execute_process(
-        Some(args.as_main_args()),
-        Some(&mut HelperApp::new()),
-        std::ptr::null_mut(),
-    );
+    execute_process(Some(args.as_main_args()), None, std::ptr::null_mut());
 }
