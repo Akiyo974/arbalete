@@ -750,8 +750,8 @@ func downloadKind(_ download: Download) -> String {
 }
 
 /// The Spaces side by side, like Arc's: a column each, in sidebar order, in its theme's colors,
-/// with its name, its tabs, a brush for its theme, a handle to move it and its menu; a click
-/// shows it. The "+" after them creates a Space.
+/// with its name, its profile, its tabs, a brush for its theme, a handle to move it and its menu;
+/// like Arc's, a click on it does nothing else. The "+" after them creates a Space.
 struct ManageSpacesView: View {
     @ObservedObject var model: AppModel
 
@@ -871,10 +871,6 @@ struct SpaceColumn: View {
             }
         }
         .contentShape(shape)
-        .onTapGesture {
-            model.run("space/\(space.id)")
-            model.closeLibrary()
-        }
         .rightClick { model.run("menu/space/\(space.id)") }
         // Dragged onto another, it takes that one's place.
         .draggable("space:\(space.id)")
