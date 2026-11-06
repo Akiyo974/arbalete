@@ -1,6 +1,7 @@
 // Builds the website into website/dist: puts the shared header and footer into both pages, fills
 // the release notes from GitHub Releases and copies the styles and assets. Node 20 or later, no
-// dependencies. GITHUB_TOKEN, when set, lifts the API's rate limit.
+// dependencies. GITHUB_TOKEN, when set, lifts the API's rate limit; POSTHOG_KEY, set only for
+// GitHub Pages, adds the visit counting (partials/analytics.html), so local builds count nothing.
 //
 //   node website/scripts/build.mjs
 
@@ -59,7 +60,7 @@ function latest(release) {
       <div class="latest-line"><span class="badge">Latest</span><span>${day(release.published_at)}${preview}</span></div>
       <h2 id="latest-title">${title(release)}</h2>
     </div>
-    <a class="btn btn-primary" href="${escape(download(release))}">
+    <a class="btn btn-primary" href="${escape(download(release))}" data-event="download_clicked" data-place="releases" data-version="${escape(release.tag_name)}">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
       Download for macOS
     </a>
@@ -98,7 +99,13 @@ async function page(template, current, extra = {}) {
     ? `<a href="https://github.com/${repo}/releases.atom">RSS</a>\n      `
     : "";
   const footer = (await read("partials/footer.html")).replace("{{rss}}", rss);
-  let html = template.replace("<!-- @header -->", header).replace("<!-- @footer -->", footer);
+  const analytics = process.env.POSTHOG_KEY
+    ? (await read("partials/analytics.html")).replace("{{posthog-key}}", process.env.POSTHOG_KEY)
+    : "";
+  let html = template
+    .replace("<!-- @analytics -->", analytics)
+    .replace("<!-- @header -->", header)
+    .replace("<!-- @footer -->", footer);
   for (const [marker, value] of Object.entries(extra)) html = html.replace(marker, value);
   return html;
 }

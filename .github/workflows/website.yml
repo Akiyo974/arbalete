@@ -34,6 +34,8 @@ jobs:
       - name: Build
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # PostHog's project key (EU), public: it can only send events.
+          POSTHOG_KEY: phc_AT8fJDvQpTrnChDu3P8NLtsyz7vQa5rq4gKyFTPGxZCg
         run: node website/scripts/build.mjs
       - uses: actions/upload-pages-artifact@v5
         with:
