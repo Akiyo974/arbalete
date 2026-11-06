@@ -584,7 +584,9 @@ requires notarized apps.
    only a disk image signed with the EdDSA key whose public half is `packaging/sparkle/public-key`
    (`SUPublicEDKey`). The release workflow signs the disk image with `sign_update` and the private key
    (`SPARKLE_PRIVATE_KEY`), and publishes the signature beside it (`.dmg.sig`); the website builds the appcast
-   from the releases that have one. Arbalete › Check for Updates… looks at once. The cask says
+   from the releases that have one. Like Arc's, an update downloads silently, then a card over the sidebar's
+   footer offers to restart into it (it otherwise installs as the app quits); after an update, the card says
+   so once, with a link to the release notes. Arbalete › Check for Updates… looks at once, in Sparkle's window. The cask says
    `auto_updates true`, so `brew upgrade` leaves updating to the app. Development builds have no feed and never
    update themselves.
 - **Versioning**: SemVer, starting at 0.1.0; a release is a commit bumping `app/Cargo.toml`, then its tag.
