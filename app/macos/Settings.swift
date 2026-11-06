@@ -833,9 +833,7 @@ private struct ProfileDetail: View {
                 .padding(.top, 10)
             VStack(spacing: 0) {
                 ForEach(dataPages, id: \.0) { label, symbol, tint, address in
-                    DataRow(label: label, symbol: symbol, tint: tint) {
-                        settings.app.run("open/\(percentEncoded(address))")
-                    }
+                    DataRow(label: label, symbol: symbol, tint: tint) { open(address) }
                 }
             }
             .padding(.vertical, 9)
