@@ -2133,8 +2133,16 @@ fn place_native_sidebar() {
     );
 }
 
-/// Loads the sidebar saved by the previous session; a file that cannot be read is replaced on the
-/// next save. The first launch offers to import the browsers found, if any, before the start page.
+/// Sets a data file that cannot be loaded aside, so starting over from defaults does not lose it.
+pub fn keep_broken(path: &Path) {
+    match store::set_aside(path) {
+        Ok(aside) => eprintln!("kept {} as {}", path.display(), aside.display()),
+        Err(error) => eprintln!("cannot set {} aside: {error}", path.display()),
+    }
+}
+
+/// Loads the sidebar saved by the previous session; a file that cannot be read is set aside, so the
+/// next save does not overwrite it. The first launch offers to import the browsers found, if any, before the start page.
 fn restore(path: PathBuf) {
     let first_launch = match store::load(&path) {
         Ok(Some((sidebar, windows))) => {
@@ -2148,6 +2156,7 @@ fn restore(path: PathBuf) {
         Ok(None) => true,
         Err(error) => {
             eprintln!("cannot restore the session: {error:?}");
+            keep_broken(&path);
             false
         }
     };

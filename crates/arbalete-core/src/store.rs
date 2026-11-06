@@ -4,7 +4,11 @@
 
 use crate::sidebar::{Sidebar, View};
 use serde::{Deserialize, Serialize};
-use std::{fs, io, path::Path};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 const VERSION: u32 = 1;
 
@@ -56,6 +60,22 @@ pub fn load(path: &Path) -> Result<Option<Session>, LoadError> {
         return Err(LoadError::UnsupportedVersion(saved.version));
     }
     Ok(Some((saved.sidebar, saved.windows)))
+}
+
+/// Moves a file that cannot be loaded out of the way, so the next save does not overwrite it:
+/// `session.json` becomes `session.broken-<seconds since 1970>.json` next to it.
+pub fn set_aside(path: &Path) -> io::Result<PathBuf> {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs());
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    let mut name = format!("{stem}.broken-{seconds}");
+    if let Some(extension) = path.extension() {
+        name = format!("{name}.{}", extension.to_string_lossy());
+    }
+    let aside = path.with_file_name(name);
+    fs::rename(path, &aside)?;
+    Ok(aside)
 }
 
 #[cfg(test)]
@@ -112,5 +132,18 @@ mod tests {
         let path = dir.0.join("sidebar.json");
         fs::write(&path, "not json").unwrap();
         assert!(matches!(load(&path), Err(LoadError::Invalid(_))));
+    }
+
+    #[test]
+    fn sets_a_broken_file_aside_with_its_bytes() {
+        let dir = TestDir::new("store-set-aside");
+        let path = dir.0.join(FILE_NAME);
+        fs::write(&path, "not json").unwrap();
+        let aside = set_aside(&path).unwrap();
+        assert!(!path.exists());
+        assert_eq!(aside.parent(), path.parent());
+        let name = aside.file_name().unwrap().to_string_lossy();
+        assert!(name.starts_with("session.broken-") && name.ends_with(".json"));
+        assert_eq!(fs::read(&aside).unwrap(), b"not json");
     }
 }

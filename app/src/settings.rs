@@ -98,12 +98,19 @@ pub fn save(settings: &Settings, path: &Path) -> io::Result<()> {
     fs::rename(temporary, path)
 }
 
-/// Loads the settings, the default ones when there are none or they cannot be read.
+/// Loads the settings, the default ones when there are none or they cannot be read, in which case
+/// the file is set aside so the next save does not overwrite it.
 pub fn load(path: &Path) -> Settings {
-    fs::read(path)
+    if !path.exists() {
+        return Settings::default();
+    }
+    let settings = fs::read(path)
         .ok()
-        .and_then(|json| serde_json::from_slice(&json).ok())
-        .unwrap_or_default()
+        .and_then(|json| serde_json::from_slice(&json).ok());
+    settings.unwrap_or_else(|| {
+        crate::shell::keep_broken(path);
+        Settings::default()
+    })
 }
 
 #[cfg(test)]
@@ -144,6 +151,15 @@ mod tests {
         assert_eq!(load(&path).sidebar_width, 260);
         fs::write(&path, "not json").unwrap();
         assert_eq!(load(&path), Settings::default());
+        // The unreadable file is kept aside, so the next save does not overwrite it.
+        assert!(!path.exists());
+        let aside: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.to_string_lossy().contains("settings.broken-"))
+            .collect();
+        assert_eq!(aside.len(), 1);
+        assert_eq!(fs::read(&aside[0]).unwrap(), b"not json");
         fs::remove_dir_all(dir).unwrap();
     }
 }

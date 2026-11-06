@@ -104,13 +104,18 @@ pub fn save(downloads: &[Download], path: &Path) -> io::Result<()> {
     fs::rename(temporary, path)
 }
 
-/// Loads the list, empty when there is none or it cannot be read: a download still in progress
-/// when the app quit failed, and a finished one whose file is gone is marked missing.
+/// Loads the list, empty when there is none or it cannot be read, in which case the file is set
+/// aside so the next save does not overwrite it: a download still in progress when the app quit
+/// failed, and a finished one whose file is gone is marked missing.
 pub fn load(path: &Path) -> Vec<Download> {
+    if !path.exists() {
+        return Vec::new();
+    }
     let saved: Option<Saved> = fs::read(path)
         .ok()
         .and_then(|json| serde_json::from_slice(&json).ok());
     let Some(saved) = saved.filter(|saved| saved.version == VERSION) else {
+        crate::shell::keep_broken(path);
         return Vec::new();
     };
     let mut downloads = saved.downloads;
