@@ -203,6 +203,8 @@ thread_local! {
     /// The sites' permission requests the user has not answered yet, oldest first.
     static PERMISSION_REQUESTS: RefCell<Vec<PermissionRequest>> = const { RefCell::new(Vec::new()) };
     static NEXT_PERMISSION_REQUEST: Cell<u64> = const { Cell::new(0) };
+    /// The shown page whose renderer last ended, by its browser's id, and when.
+    static LAST_CRASH: Cell<Option<(i32, i64)>> = const { Cell::new(None) };
     /// The incognito windows' profiles, with the temporary folder that stands for their
     /// directory, removed with the window: their web data stays in memory.
     static INCOGNITO: RefCell<HashMap<ProfileId, PathBuf>> = RefCell::default();
@@ -7790,6 +7792,44 @@ wrap_keyboard_handler! {
     }
 }
 
+wrap_task! {
+    struct PageEnded {
+        browser: Browser,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            page_ended(&self.browser);
+        }
+    }
+}
+
+/// Brings back a page whose renderer ended: a hidden tab's closes, to open again at its url when
+/// shown, like an unloaded one; a page shown reloads, unless it ended a moment ago, as one that
+/// crashes as it loads would, which the user's reload tries again.
+fn page_ended(browser: &Browser) {
+    let hidden = page_tab(browser).filter(|tab| {
+        PAGES.with_borrow(|pages| {
+            pages
+                .get(tab)
+                .is_some_and(|live| live.hidden_since.is_some())
+        })
+    });
+    if let Some(tab) = hidden {
+        close_page(tab);
+        fall_asleep(tab);
+        return;
+    }
+    let (id, now) = (browser.identifier(), now());
+    let again = LAST_CRASH
+        .get()
+        .is_some_and(|(last, at)| last == id && now - at < 60_000);
+    LAST_CRASH.set(Some((id, now)));
+    if !again {
+        browser.reload();
+    }
+}
+
 /// Who takes a shortcut first: the settings' choice, or its default.
 fn shortcut_priority(id: &str) -> settings::Priority {
     let changed = app_settings()
@@ -7819,6 +7859,15 @@ wrap_request_handler! {
             }
             post(Command::Peek(url));
             1
+        }
+
+        /// A page whose renderer crashed or was killed comes back, rather than staying blank:
+        /// where Chrome shows "Aw, Snap!", page_ended.
+        fn on_render_process_terminated(&self, browser: Option<&mut Browser>, _status: TerminationStatus, _error_code: i32, _error_string: Option<&CefString>) {
+            // Once Chromium is done telling it, which a reload now would disturb.
+            if let Some(browser) = browser {
+                post_task(ThreadId::UI, Some(&mut PageEnded::new(browser.clone())));
+            }
         }
 
         /// A link clicked with ⇧ shows in Peek, and one clicked with ⌘ opens in a tab, like
