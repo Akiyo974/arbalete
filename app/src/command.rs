@@ -80,6 +80,17 @@ impl Button {
     }
 }
 
+/// A change to a shortcut, from the settings' Shortcuts pane.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ShortcutEdit {
+    /// Its keys: the key equivalent and AppKit's modifier mask.
+    Set(String, String, u64),
+    Remove(String),
+    Reset(String),
+    Priority(String, crate::settings::Priority),
+    ResetAll,
+}
+
 /// The app's settings the settings window turns on or off (app/src/settings.rs).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Setting {
@@ -272,6 +283,9 @@ pub enum Command {
     CopyLink,
     /// Puts it there as a Markdown link, its title and url: `link/copy-markdown`.
     CopyMarkdownLink,
+    /// Changes a shortcut: `shortcut/set/<id>/<modifiers>/<key>`, `shortcut/remove/<id>`,
+    /// `shortcut/reset/<id>`, `shortcut/priority/<id>/<websites|both|app>`, `shortcuts/reset`.
+    Shortcut(ShortcutEdit),
     /// Moves a tab to another Space's "Today" tabs, or a folder to its pinned tabs, from its menu.
     MoveToSpace(NodeId, SpaceId),
     /// Copies a tab or a folder right after it, from its menu.
@@ -742,6 +756,33 @@ impl Command {
                     };
                     return percent_decode(site).map(|site| Self::DeveloperMode(site, on));
                 }
+                if path == "shortcuts/reset" {
+                    return Some(Self::Shortcut(ShortcutEdit::ResetAll));
+                }
+                if let Some(rest) = path.strip_prefix("shortcut/") {
+                    let (verb, rest) = rest.split_once('/')?;
+                    return Some(Self::Shortcut(match verb {
+                        "remove" => ShortcutEdit::Remove(rest.to_string()),
+                        "reset" => ShortcutEdit::Reset(rest.to_string()),
+                        "priority" => {
+                            let (id, priority) = rest.split_once('/')?;
+                            let priority = match priority {
+                                "websites" => crate::settings::Priority::Websites,
+                                "both" => crate::settings::Priority::Both,
+                                "app" => crate::settings::Priority::App,
+                                _ => return None,
+                            };
+                            ShortcutEdit::Priority(id.to_string(), priority)
+                        }
+                        "set" => {
+                            let (id, rest) = rest.split_once('/')?;
+                            let (modifiers, key) = rest.split_once('/')?;
+                            let key = percent_decode(key)?;
+                            ShortcutEdit::Set(id.to_string(), key, modifiers.parse().ok()?)
+                        }
+                        _ => return None,
+                    }));
+                }
                 if let Some((setting, on)) = path
                     .strip_prefix("settings/")
                     .and_then(|r| r.split_once('/'))
@@ -1097,7 +1138,8 @@ fn percent_decode(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Button, ButtonView, Command, ExtensionTarget, LittleAction, PeekAction, Setting, Target,
+        Button, ButtonView, Command, ExtensionTarget, LittleAction, PeekAction, Setting,
+        ShortcutEdit, Target,
     };
     use arbalete_core::search::SearchEngine;
     use arbalete_core::sidebar::{ArchiveAfter, Color};
@@ -1223,6 +1265,26 @@ mod tests {
         ));
         assert_eq!(Command::parse("pin"), Some(Command::Pin(None)));
         assert_eq!(Command::parse("link/copy"), Some(Command::CopyLink));
+        assert_eq!(
+            Command::parse("shortcut/set/togglePin/1179648/k"),
+            Some(Command::Shortcut(ShortcutEdit::Set(
+                "togglePin".into(),
+                "k".into(),
+                1179648
+            )))
+        );
+        assert_eq!(
+            Command::parse("shortcut/priority/find/websites"),
+            Some(Command::Shortcut(ShortcutEdit::Priority(
+                "find".into(),
+                crate::settings::Priority::Websites
+            )))
+        );
+        assert_eq!(
+            Command::parse("shortcuts/reset"),
+            Some(Command::Shortcut(ShortcutEdit::ResetAll))
+        );
+        assert_eq!(Command::parse("shortcut/priority/find/never"), None);
         assert_eq!(
             Command::parse("link/copy-markdown"),
             Some(Command::CopyMarkdownLink)

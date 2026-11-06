@@ -5,7 +5,7 @@
 
 use crate::command::{
     Button, ButtonView, Command, DownloadAction, ExtensionTarget, HitTarget, LittleAction,
-    PeekAction, Setting, SiteData, Target, Zoom,
+    PeekAction, Setting, ShortcutEdit, SiteData, Target, Zoom,
 };
 use crate::downloads::{self, Download};
 use crate::extensions;
@@ -3729,9 +3729,55 @@ fn send_settings() {
     });
     // Like Arc's, the setting says when another app has ⌥⌘N.
     let taken = settings.little_hotkey && !LITTLE_HOTKEY.get();
-    let detail = json!({ "settings": settings, "littleHotkeyTaken": taken, "engines": engines, "delays": delays, "profiles": profiles, "spaces": spaces, "urlRouting": routing });
+    #[cfg(target_os = "macos")]
+    let defaults = crate::mac::default_shortcuts();
+    #[cfg(not(target_os = "macos"))]
+    let defaults = std::collections::BTreeMap::<String, settings::Keys>::new();
+    let priorities: std::collections::BTreeMap<_, _> = defaults
+        .keys()
+        .map(|id| (id.clone(), settings::default_priority(id)))
+        .collect();
+    let detail = json!({ "settings": settings, "littleHotkeyTaken": taken, "shortcutDefaults": defaults, "shortcutPriorities": priorities, "engines": engines, "delays": delays, "profiles": profiles, "spaces": spaces, "urlRouting": routing });
     let event = format!(r#"new CustomEvent("arbalete:settings", {{ detail: {detail} }})"#);
     SETTINGS_VIEW.with(|view| dispatch(view, &event));
+}
+
+/// Gives the menu's shortcuts the keys the settings changed.
+pub fn apply_shortcuts() {
+    #[cfg(target_os = "macos")]
+    crate::mac::apply_shortcuts(&app_settings().shortcuts);
+}
+
+/// Changes a shortcut from the settings, saves it, and applies it to the menu.
+fn edit_shortcut(edit: ShortcutEdit) {
+    let mut settings = app_settings();
+    let shortcuts = &mut settings.shortcuts;
+    match edit {
+        ShortcutEdit::Set(id, key, modifiers) => {
+            shortcuts.entry(id).or_default().keys = Some(settings::Keys { key, modifiers });
+        }
+        ShortcutEdit::Remove(id) => {
+            let keys = settings::Keys {
+                key: String::new(),
+                modifiers: 0,
+            };
+            shortcuts.entry(id).or_default().keys = Some(keys);
+        }
+        ShortcutEdit::Reset(id) => {
+            if let Some(changed) = shortcuts.get_mut(&id) {
+                changed.keys = None;
+            }
+        }
+        ShortcutEdit::Priority(id, priority) => {
+            shortcuts.entry(id).or_default().priority = Some(priority);
+        }
+        ShortcutEdit::ResetAll => shortcuts.clear(),
+    }
+    shortcuts.retain(|_, changed| *changed != settings::ShortcutOverride::default());
+    SETTINGS.set(settings);
+    save_settings();
+    apply_shortcuts();
+    send_settings();
 }
 
 /// Registers ⌥⌘N as the setting says, which another app may already have.
@@ -6611,6 +6657,7 @@ fn run_command(command: Command) {
                 crate::mac::copy(&url);
             }
         }
+        (Command::Shortcut(edit), _) => edit_shortcut(edit),
         (Command::CopyMarkdownLink, _) => {
             let link = STATE.with_borrow_mut(|state| {
                 active_tab(&mut state.sidebar).map(|tab| format!("[{}]({})", tab.label(), tab.url))
@@ -7022,6 +7069,7 @@ wrap_browser_process_handler! {
             DATA_DIR.set(self.data_dir.clone()).expect("one context");
             SETTINGS.set(settings::load(&self.data_dir.join(settings::FILE_NAME)));
             apply_little_hotkey();
+            apply_shortcuts();
             restore(self.data_dir.join(store::FILE_NAME));
             check_archive();
             DOWNLOADS.set(downloads::load(&self.data_dir.join(downloads::FILE_NAME)));
@@ -7771,6 +7819,10 @@ wrap_client! {
             Some(ContentMenuHandler::new())
         }
 
+        fn keyboard_handler(&self) -> Option<KeyboardHandler> {
+            Some(ContentKeyboard::new())
+        }
+
         fn download_handler(&self) -> Option<DownloadHandler> {
             Some(ContentDownloadHandler::new())
         }
@@ -7779,6 +7831,34 @@ wrap_client! {
             (!self.little).then(ContentRequestHandler::new)
         }
     }
+}
+
+// Gives Arbalete the shortcuts it takes before the page, as their priority says (settings::Priority):
+// the others reach the page first, and the menu only when the page leaves them.
+wrap_keyboard_handler! {
+    struct ContentKeyboard {}
+
+    impl KeyboardHandler {
+        fn on_pre_key_event(&self, _browser: Option<&mut Browser>, event: Option<&KeyEvent>, os_event: *mut u8, _is_keyboard_shortcut: Option<&mut i32>) -> i32 {
+            let Some(event) = event else { return 0 };
+            if event.type_ != KeyEventType::RAWKEYDOWN || os_event.is_null() {
+                return 0;
+            }
+            #[cfg(target_os = "macos")]
+            return crate::mac::take_shortcut(os_event.cast(), shortcut_priority).into();
+            #[cfg(not(target_os = "macos"))]
+            0
+        }
+    }
+}
+
+/// Who takes a shortcut first: the settings' choice, or its default.
+fn shortcut_priority(id: &str) -> settings::Priority {
+    let changed = app_settings()
+        .shortcuts
+        .get(id)
+        .and_then(|changed| changed.priority);
+    changed.unwrap_or_else(|| settings::default_priority(id))
 }
 
 wrap_request_handler! {

@@ -9,6 +9,7 @@ struct SettingsDetail: Decodable {
     struct General: Decodable {
         var warnBeforeQuit: Bool
         var littleHotkey: Bool
+        var shortcuts: [String: ShortcutOverride]
         var restoreSession: Bool
         var suspendTabs: Bool
         var awakeSites: [String]
@@ -34,6 +35,10 @@ struct SettingsDetail: Decodable {
     var settings: General
     /// ⌥⌘N is on but another app, like Arc, has it.
     var littleHotkeyTaken: Bool
+    /// Each changeable shortcut's keys as the menus were built (app/macos/Shortcuts.swift).
+    var shortcutDefaults: [String: Keys]
+    /// Who takes each shortcut first unless changed: "websites", "both" or "app".
+    var shortcutPriorities: [String: String]
     var engines: [Choice]
     var delays: [Choice]
     var profiles: [ProfileSettings]
@@ -87,32 +92,6 @@ enum Destination: Codable, Hashable {
 let profileColors = [
     "purple": "#6e56cf", "blue": "#3e7bfa", "green": "#30a46c", "yellow": "#e5b800",
     "orange": "#f76b15", "red": "#e5484d", "pink": "#d6409f", "gray": "#8b8d98",
-]
-
-/// Every shortcut, as the app's menus and keyboard monitor define them (app/src/mac.rs).
-let shortcuts: [(String, [(String, String)])] = [
-    ("Tabs", [
-        ("New Tab", "⌘T"), ("Edit Address", "⌘L"), ("Close Tab", "⌘W"),
-        ("Reopen Closed Tab", "⇧⌘T"), ("Pin or Unpin Tab", "⌘D"), ("Copy URL", "⇧⌘C"),
-        ("Copy URL as Markdown", "⌥⇧⌘C"),
-        ("Next Tab", "⌥⌘↓ or ⌘}"), ("Previous Tab", "⌥⌘↑ or ⌘{"),
-        ("Switch Between Recent Tabs", "⌃⇥, ⌃⇧⇥"), ("Favorite 1 to 8", "⌘1 … ⌘8"),
-        ("Last Favorite", "⌘9"), ("Clear Today", "⇧⌘K"),
-    ]),
-    ("Spaces", [("Next Space", "⌥⌘→"), ("Previous Space", "⌥⌘←"), ("Space 1 to 9", "⌃1 … ⌃9")]),
-    ("Page", [
-        ("Back", "⌘["), ("Forward", "⌘]"), ("Reload", "⌘R"), ("Force Reload", "⇧⌘R"),
-        ("Stop Loading", "⌘."), ("Find", "⌘F"), ("Find Next", "⌘G"), ("Find Previous", "⇧⌘G"),
-        ("Actual Size", "⌘0"), ("Zoom In", "⌘="), ("Zoom Out", "⌘-"), ("Print", "⌘P"),
-    ]),
-    ("Developer", [("View Source", "⌥⌘U"), ("Developer Tools", "⌥⌘I or F12")]),
-    ("Window", [
-        ("Hide or Show Sidebar", "⌘S"), ("Show or Hide Toolbar", "⇧⌘D"),
-        ("New Little Arbalete Window", "⌥⌘N"), ("Open Little Arbalete in Space", "⌘O"),
-        ("Library", "⇧⌘L"), ("History", "⌘Y"), ("Downloads", "⇧⌘J"), ("Settings", "⌘,"),
-        ("Close Window", "⇧⌘W"), ("Enter Full Screen", "⌃⌘F"), ("Minimize", "⌘M"),
-        ("Hide Arbalete", "⌘H"), ("Hide Others", "⌥⌘H"), ("Quit", "⌘Q"),
-    ]),
 ]
 
 @MainActor
@@ -246,7 +225,7 @@ struct SettingsView: View {
             switch settings.pane {
             case "Profiles": ProfilesSettings(settings: settings)
             case "Links": LinksSettings(settings: settings)
-            case "Shortcuts": ShortcutsSettings()
+            case "Shortcuts": ShortcutsSettings(settings: settings)
             case "Advanced": AdvancedSettings(settings: settings)
             default: GeneralSettings(settings: settings)
             }
@@ -828,107 +807,6 @@ private struct DataRow: View {
         .buttonStyle(.plain)
         .padding(.horizontal, 4)
         .onHover { hovered.wrappedValue = $0 }
-    }
-}
-
-/// Like Arc's Shortcuts pane: every shortcut in a searchable list of key caps, and what they are
-/// for beside it.
-private struct ShortcutsSettings: View {
-    private let query = State(initialValue: "")
-
-    var body: some View {
-        let typed = query.wrappedValue.trimmingCharacters(in: .whitespaces).lowercased()
-        let found = shortcuts.flatMap(\.1).filter {
-            typed.isEmpty || $0.0.lowercased().contains(typed) || $0.1.lowercased().contains(typed)
-        }
-        .sorted { $0.0 < $1.0 }
-        HStack(alignment: .top, spacing: 16) {
-            VStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Type a feature name or shortcut", text: query.projectedValue)
-                        .textFieldStyle(.plain)
-                }
-                .font(.system(size: 13))
-                .padding(.horizontal, 14)
-                .frame(height: 40)
-                .background(Color.ink((0x000000, 0.04), (0xFFFFFF, 0.06)))
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
-                        Section {
-                            ForEach(found, id: \.0) { action, keys in
-                                HStack {
-                                    Text(action).font(.system(size: 13))
-                                    Spacer()
-                                    KeyCap(keys: keys)
-                                }
-                                .padding(.leading, 24)
-                                .padding(.trailing, 16)
-                                .frame(height: 48)
-                                .overlay(alignment: .bottom) {
-                                    Rectangle().fill(settingsLine).frame(height: 1).padding(.leading, 24)
-                                }
-                            }
-                        } header: {
-                            Text("Default Shortcuts").font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(.secondary)
-                                .padding(.leading, 16)
-                                .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
-                                .background(.background)
-                                .overlay(alignment: .bottom) {
-                                    Rectangle().fill(settingsLine).frame(height: 1)
-                                }
-                        }
-                    }
-                }
-            }
-            .frame(width: 340, height: 450)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(settingsEdge))
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 3) {
-                    KeyTile(symbol: "command")
-                    KeyTile(symbol: "face.smiling")
-                }
-                .padding(.bottom, 16)
-                Text("Shortcuts").font(.system(size: 15, weight: .bold))
-                Text("Every action Arbalete offers from the keyboard. A page keeps the shortcuts Arbalete leaves free.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(width: 193, alignment: .leading)
-        }
-        .padding(.top, 20)
-        .frame(width: 556)
-    }
-}
-
-/// A shortcut's keys on a white cap, like Arc's.
-private struct KeyCap: View {
-    let keys: String
-
-    var body: some View {
-        Text(keys).font(.system(size: 11.5, weight: .medium))
-            .foregroundStyle(Color(white: 0.43))
-            .lineLimit(1)
-            .padding(.horizontal, 8)
-            .frame(minWidth: 63, minHeight: 24)
-            .background(RoundedRectangle(cornerRadius: 4).fill(Color(white: 0.99)))
-            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color(white: 0.8), lineWidth: 0.5))
-    }
-}
-
-/// A large blue key, like the ones over Arc's shortcuts' explanation.
-private struct KeyTile: View {
-    let symbol: String
-
-    var body: some View {
-        Image(systemName: symbol).font(.system(size: 24, weight: .medium))
-            .foregroundStyle(Color.accentColor)
-            .frame(width: 65, height: 64)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.accentColor.opacity(0.22)))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.accentColor, lineWidth: 1.5))
     }
 }
 

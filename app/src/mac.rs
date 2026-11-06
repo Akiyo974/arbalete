@@ -2,6 +2,7 @@
 
 use crate::command::{Command, Zoom};
 use crate::menu::{Action, Entry};
+use crate::settings::{Keys, Priority, ShortcutOverride};
 use crate::swipe::{Phase, Scroll};
 use block2::RcBlock;
 use cef::application_mac::{CefAppProtocol, CrAppControlProtocol, CrAppProtocol};
@@ -12,6 +13,7 @@ use objc2::{
     runtime::{AnyClass, AnyObject, Bool, NSObjectProtocol, Sel},
     sel,
 };
+use objc2_app_kit::NSUserInterfaceItemIdentification;
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSApp, NSApplication, NSAutoresizingMaskOptions, NSColor,
     NSControlStateValueOff, NSControlStateValueOn, NSDownArrowFunctionKey, NSEvent, NSEventMask,
@@ -25,6 +27,7 @@ use objc2_foundation::{
     NSNumber, NSProcessInfo, NSRect, NSRectEdge, NSSize, NSString, NSURL, ns_string,
 };
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
@@ -864,6 +867,161 @@ pub fn setup_menu() {
         }
     }
     NSApp(mtm).setMainMenu(Some(&menu_bar));
+    crate::shell::apply_shortcuts();
+}
+
+thread_local! {
+    /// Each changeable shortcut's keys as the menu was built: what resetting it brings back.
+    static DEFAULT_SHORTCUTS: RefCell<BTreeMap<String, Keys>> = RefCell::default();
+}
+
+/// The standard actions whose shortcuts the settings can change, besides the app's own.
+const CHANGEABLE: [&str; 7] = [
+    "hide:",
+    "hideOtherApplications:",
+    "terminate:",
+    "performClose:",
+    "performMiniaturize:",
+    "toggleFullScreen:",
+    "pasteAndMatchStyle:",
+];
+
+/// A menu item's shortcut's name in the settings: its action, without the app's prefix, its tag
+/// for the numbered ones and "-alt" for a second shortcut the menu does not show, like F12.
+fn shortcut_id(item: &NSMenuItem) -> Option<String> {
+    let action = item.action()?;
+    let name = action.name().to_str().ok()?;
+    let own = name.strip_prefix("arbalete");
+    if own.is_none() && !CHANGEABLE.contains(&name) {
+        return None;
+    }
+    let mut id = own.unwrap_or(name).trim_end_matches(':').to_string();
+    if let Some(first) = id.get(..1) {
+        id = first.to_lowercase() + &id[1..];
+    }
+    if item.tag() != 0 {
+        id = format!("{id}-{}", item.tag());
+    }
+    if item.isHidden() {
+        id.push_str("-alt");
+    }
+    Some(id)
+}
+
+/// Gives the menu's changeable shortcuts the keys the settings changed, or their defaults, and
+/// names each, which the settings' Shortcuts pane reads from the menu.
+pub fn apply_shortcuts(overrides: &BTreeMap<String, ShortcutOverride>) {
+    let mtm = MainThreadMarker::new().expect("main thread");
+    let Some(menu) = NSApp(mtm).mainMenu() else {
+        return;
+    };
+    let mut items: Vec<Retained<NSMenuItem>> = menu.itemArray().iter().collect();
+    while let Some(item) = items.pop() {
+        if let Some(submenu) = item.submenu() {
+            items.extend(submenu.itemArray().iter());
+            continue;
+        }
+        let Some(id) = shortcut_id(&item) else {
+            continue;
+        };
+        item.setIdentifier(Some(&NSString::from_str(&id)));
+        let default = DEFAULT_SHORTCUTS.with_borrow_mut(|defaults| {
+            defaults
+                .entry(id.clone())
+                .or_insert_with(|| Keys {
+                    key: item.keyEquivalent().to_string(),
+                    modifiers: item.keyEquivalentModifierMask().bits() as u64,
+                })
+                .clone()
+        });
+        let keys = overrides
+            .get(&id)
+            .and_then(|o| o.keys.clone())
+            .unwrap_or(default);
+        item.setKeyEquivalent(&NSString::from_str(&keys.key));
+        item.setKeyEquivalentModifierMask(NSEventModifierFlags::from_bits_retain(
+            keys.modifiers as usize,
+        ));
+    }
+}
+
+thread_local! {
+    /// The shortcut pressed last that a page took first, and when: pressed again soon after, a
+    /// shortcut whose priority is both goes to Arbalete.
+    static LAST_SHORTCUT: RefCell<Option<(String, f64)>> = const { RefCell::new(None) };
+}
+
+/// Runs the menu's shortcut a key event is, before the page has it, if its priority says
+/// Arbalete takes it first; whether it did.
+pub fn take_shortcut(event: *mut NSEvent, priority: impl Fn(&str) -> Priority) -> bool {
+    // SAFETY: CEF gives the event it handles.
+    let Some(event) = (unsafe { event.as_ref() }) else {
+        return false;
+    };
+    let mtm = MainThreadMarker::new().expect("main thread");
+    let Some(menu) = NSApp(mtm).mainMenu() else {
+        return false;
+    };
+    let Some(id) = shortcut_of(&menu, event) else {
+        return false;
+    };
+    let take = match priority(&id) {
+        Priority::App => true,
+        Priority::Websites => false,
+        // Like Arc's: the page's on a first press, Arbalete's on a second within half a second.
+        Priority::Both => LAST_SHORTCUT.with_borrow_mut(|last| {
+            let now = event.timestamp();
+            let again = last
+                .as_ref()
+                .is_some_and(|(pressed, at)| *pressed == id && now - at < 0.5);
+            *last = (!again).then(|| (id.clone(), now));
+            again
+        }),
+    };
+    take && menu.performKeyEquivalent(event)
+}
+
+/// The changeable menu shortcut a key event is, by name.
+fn shortcut_of(menu: &NSMenu, event: &NSEvent) -> Option<String> {
+    // A modifier pressed alone comes as another kind of event, which has no characters.
+    if event.r#type() != NSEventType::KeyDown {
+        return None;
+    }
+    let typed = event
+        .charactersIgnoringModifiers()?
+        .to_string()
+        .to_lowercase();
+    let flags = event.modifierFlags();
+    let wanted = NSEventModifierFlags::Command
+        | NSEventModifierFlags::Control
+        | NSEventModifierFlags::Option;
+    let mut items: Vec<Retained<NSMenuItem>> = menu.itemArray().iter().collect();
+    while let Some(item) = items.pop() {
+        if let Some(submenu) = item.submenu() {
+            items.extend(submenu.itemArray().iter());
+            continue;
+        }
+        let Some(id) = item.identifier() else {
+            continue;
+        };
+        let key = item.keyEquivalent().to_string();
+        if key.is_empty() || key.to_lowercase() != typed {
+            continue;
+        }
+        let mask = item.keyEquivalentModifierMask();
+        let shift = mask.contains(NSEventModifierFlags::Shift) || key != key.to_lowercase();
+        if (mask & wanted) == (flags & wanted)
+            && shift == flags.contains(NSEventModifierFlags::Shift)
+        {
+            return Some(id.to_string());
+        }
+    }
+    None
+}
+
+/// Each changeable shortcut's default keys, by name.
+pub fn default_shortcuts() -> BTreeMap<String, Keys> {
+    DEFAULT_SHORTCUTS.with_borrow(Clone::clone)
 }
 
 /// Standard editing actions: they reach the focused web view, page or UI, through the responder

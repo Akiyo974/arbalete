@@ -29,6 +29,44 @@ pub struct Settings {
     /// The sites turned in or out of developer mode, by host (and port), unlike their default
     /// (developer_mode in app/src/shell.rs).
     pub developer_sites: BTreeMap<String, bool>,
+    /// The shortcuts changed in the settings, by menu action (mac::apply_shortcuts).
+    pub shortcuts: BTreeMap<String, ShortcutOverride>,
+}
+
+/// A shortcut changed from its default, like Arc's: other keys, none, or who takes them first.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ShortcutOverride {
+    pub keys: Option<Keys>,
+    pub priority: Option<Priority>,
+}
+
+/// A menu item's key equivalent and its modifiers, AppKit's mask; no key for none.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Keys {
+    pub key: String,
+    pub modifiers: u64,
+}
+
+/// A shortcut's priority unless the settings change it: Arbalete's for the shortcuts Chrome keeps
+/// from pages, like ⌘W and ⌘T, the page's for the others, like ⌘F in a document editor.
+pub fn default_priority(id: &str) -> Priority {
+    match id {
+        "closeTab" | "newTab" | "newWindow" | "newIncognito" | "reopenTab" | "performClose"
+        | "terminate" => Priority::App,
+        _ => Priority::Websites,
+    }
+}
+
+/// Who takes a shortcut a page wants too, like Arc's: the page, the page then Arbalete on a second
+/// press, or Arbalete.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Priority {
+    Websites,
+    Both,
+    #[default]
+    App,
 }
 
 impl Default for Settings {
@@ -42,6 +80,7 @@ impl Default for Settings {
             awake_sites: Vec::new(),
             sidebar_width: 260,
             developer_sites: BTreeMap::new(),
+            shortcuts: BTreeMap::new(),
         }
     }
 }
@@ -81,6 +120,16 @@ mod tests {
             awake_sites: vec!["mail.google.com".into()],
             sidebar_width: 320,
             developer_sites: BTreeMap::from([("example.com".into(), true)]),
+            shortcuts: BTreeMap::from([(
+                "newTab".into(),
+                ShortcutOverride {
+                    keys: Some(Keys {
+                        key: "y".into(),
+                        modifiers: 1 << 20,
+                    }),
+                    priority: Some(Priority::Websites),
+                },
+            )]),
         };
         save(&settings, &path).unwrap();
         assert_eq!(load(&path), settings);
