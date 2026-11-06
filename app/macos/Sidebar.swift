@@ -1650,6 +1650,8 @@ struct Footer: View {
     /// The menu's and the "+"'s frames, from the window's top left corner.
     private let _menuFrame = State<CGRect>(initialValue: .zero)
     private let _plusFrame = State<CGRect>(initialValue: .zero)
+    /// Its own frame, whose width the library button's recent items take.
+    private let _frame = State<CGRect>(initialValue: .zero)
     private let _clicks = State<Any?>(initialValue: nil)
 
     /// Like Arc's, a new Space's form leaves only the Spaces' icons.
@@ -1657,7 +1659,7 @@ struct Footer: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            LibraryEntry(model: model, recent: model.recent)
+            LibraryEntry(model: model, recent: model.recent, width: _frame.wrappedValue.width)
             .opacity(drafting ? 0 : 1)
             .disabled(drafting)
             SpaceIcons(model: model)
@@ -1671,6 +1673,7 @@ struct Footer: View {
                 .background(Frame(frame: _plusFrame.projectedValue))
         }
         .frame(height: 40)
+        .background(Frame(frame: _frame.projectedValue))
         .foregroundStyle(model.buttonInk)
         .overlay(alignment: .bottomTrailing) {
             if menuShown {

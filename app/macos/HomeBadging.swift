@@ -164,6 +164,8 @@ private func isScreenshot(_ url: URL) -> Bool {
 struct LibraryEntry: View {
     @ObservedObject var model: AppModel
     @ObservedObject var recent: RecentItems
+    /// The footer's width, which the recent items take, inside the sidebar.
+    let width: CGFloat
     private let hoveredButton = State(initialValue: false)
     private let hoveredFlyout = State(initialValue: false)
     private let open = State(initialValue: false)
@@ -194,7 +196,7 @@ struct LibraryEntry: View {
         .rightClick { showSourcesMenu(sources) }
         .overlay(alignment: .bottomLeading) {
             if open.wrappedValue && !recent.items.isEmpty {
-                Flyout(model: model, recent: recent)
+                Flyout(model: model, recent: recent, width: width)
                     // Measured on Arc's: its last row 2 points over the button.
                     .padding(.bottom, 30)
                     .offset(x: -2)
@@ -346,6 +348,7 @@ private struct Badge: View {
 private struct Flyout: View {
     @ObservedObject var model: AppModel
     @ObservedObject var recent: RecentItems
+    let width: CGFloat
 
     var body: some View {
         VStack(spacing: 8) {
@@ -353,7 +356,7 @@ private struct Flyout: View {
                 RecentRow(model: model, recent: recent, item: item)
             }
         }
-        .frame(width: 300)
+        .frame(width: width)
     }
 }
 
@@ -375,11 +378,13 @@ private struct RecentRow: View {
             }
             .frame(width: 43, height: 43)
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.title).font(.system(size: 14)).foregroundStyle(Ink.primary).lineLimit(1)
-                    .truncationMode(.tail)
+                // Like the tabs' titles, in the theme's title color; cut in the middle, like the
+                // Finder's, to keep the extension.
+                Text(item.title).font(.system(size: 14)).foregroundStyle(model.titleInk)
+                    .lineLimit(1).truncationMode(.middle)
                 TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    Text(subtitle).font(.system(size: 12)).foregroundStyle(Ink.secondary)
-                        .lineLimit(1)
+                    Text(subtitle).font(.system(size: 12))
+                        .foregroundStyle(model.titleInk.opacity(0.6)).lineLimit(1)
                 }
             }
             Spacer(minLength: 4)
@@ -388,7 +393,7 @@ private struct RecentRow: View {
                     model.run("download/cancel/\(download.id)")
                 } label: {
                     Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(Ink.secondary)
+                        .foregroundStyle(model.titleInk.opacity(0.6))
                         .frame(width: 20, height: 20)
                         .contentShape(Rectangle())
                 }
