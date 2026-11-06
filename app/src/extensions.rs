@@ -259,7 +259,11 @@ struct Content {
 /// What a message sent in the session answers.
 enum Pending {
     /// Attaching to an extension's service worker, in a browser context.
-    Attach { context: String, helper: bool },
+    Attach {
+        context: String,
+        extension: String,
+        helper: bool,
+    },
     /// The helper's list of targets and their tab ids, in a browser context.
     TabIds(String),
     /// The helper's list of a profile's extensions, as Chromium has them now.
@@ -274,8 +278,8 @@ struct Bridge {
     pending: HashMap<i32, Pending>,
     /// The workers attached to, by target id.
     attached: HashSet<String>,
-    /// The extensions' workers' sessions, with their browser context.
-    workers: HashMap<String, String>,
+    /// The extensions' workers' sessions, with their browser context and extension id.
+    workers: HashMap<String, (String, String)>,
     /// The helper's session in each browser context.
     helpers: HashMap<String, String>,
     /// The helper's extension id, which its folder's path sets.
@@ -354,10 +358,7 @@ pub fn icon_file(path: &str) -> Option<(PathBuf, &'static str)> {
 /// context: Chromium writes its preferences, which list the extensions, only later. The
 /// extension shows in its profile's list, and the windows Chromium opened for it close.
 fn worker_started(context: &str, url: &str) {
-    let Some(id) = url
-        .strip_prefix("chrome-extension://")
-        .and_then(|rest| rest.split('/').next())
-    else {
+    let Some(id) = extension_id(url) else {
         return;
     };
     let Some(profile) = BRIDGE.with_borrow(|bridge| bridge.profile_of(context)) else {
@@ -679,7 +680,7 @@ fn push_state(context: &str) {
         let workers: Vec<String> = bridge
             .workers
             .iter()
-            .filter(|(_, worker)| *worker == context)
+            .filter(|(_, (worker, _))| worker == context)
             .map(|(session, _)| session.clone())
             .collect();
         let state = bridge
@@ -743,28 +744,35 @@ fn target_seen(target: &Value) {
         return;
     }
     let url = target["url"].as_str().unwrap_or_default();
-    let extension = url
-        .strip_prefix("chrome-extension://")
-        .and_then(|rest| rest.split('/').next());
+    let extension = extension_id(url).unwrap_or_default().to_string();
     if helper {
-        BRIDGE.with_borrow_mut(|bridge| bridge.helper_id = extension.map(str::to_string));
+        BRIDGE.with_borrow_mut(|bridge| bridge.helper_id = Some(extension.clone()));
     } else {
         worker_started(&context, url);
     }
     let params = json!({ "targetId": id, "flatten": true });
     let message = json!({ "method": "Target.attachToTarget", "params": params });
-    send(message, Some(Pending::Attach { context, helper }));
+    let pending = Pending::Attach {
+        context,
+        extension,
+        helper,
+    };
+    send(message, Some(pending));
 }
 
 /// Shims an extension's worker once attached, or asks the helper for the tab ids.
-fn attached(session: &str, context: String, helper: bool) {
+fn attached(session: &str, context: String, extension: String, helper: bool) {
     if helper {
         BRIDGE
             .with_borrow_mut(|bridge| bridge.helpers.insert(context.clone(), session.to_string()));
         ask_tab_ids(&context);
         return;
     }
-    BRIDGE.with_borrow_mut(|bridge| bridge.workers.insert(session.to_string(), context));
+    BRIDGE.with_borrow_mut(|bridge| {
+        bridge
+            .workers
+            .insert(session.to_string(), (context, extension))
+    });
     // A worker that stops and starts again keeps its session, with no new target: the binding
     // stays only while the Runtime domain is enabled, which also reports the running execution
     // context and each new start's (context_created).
@@ -779,7 +787,9 @@ fn attached(session: &str, context: String, helper: bool) {
 
 /// Shims a worker's new execution context, then gives it its profile's active tab.
 fn context_created(session: &str, id: &Value) {
-    let Some(context) = BRIDGE.with_borrow(|bridge| bridge.workers.get(session).cloned()) else {
+    let Some(context) =
+        BRIDGE.with_borrow(|bridge| bridge.workers.get(session).map(|(c, _)| c.clone()))
+    else {
         return;
     };
     let params = json!({ "expression": SHIM, "contextId": id });
@@ -813,11 +823,11 @@ fn tab_ids(context: &str, targets: &[Value]) {
 }
 
 /// Where a shim's call came from, to answer it there: a service worker's session in the
-/// bridge, or a popup's browser.
+/// bridge, or a popup's browser, with its extension's id.
 #[derive(Clone)]
 enum Caller {
     Worker(String),
-    Popup(BrowserHost),
+    Popup(BrowserHost, String),
 }
 
 impl Caller {
@@ -826,7 +836,7 @@ impl Caller {
         let params = json!({ "expression": expression });
         match self {
             Self::Worker(session) => send_in(session, "Runtime.evaluate", params, None),
-            Self::Popup(host) => {
+            Self::Popup(host, _) => {
                 let message = json!({ "id": 0, "method": "Runtime.evaluate", "params": params });
                 host.send_dev_tools_message(Some(message.to_string().as_bytes()));
             }
@@ -837,12 +847,43 @@ impl Caller {
     fn profile(&self) -> Option<ProfileId> {
         match self {
             Self::Worker(session) => {
-                BRIDGE.with_borrow(|bridge| bridge.profile_of(bridge.workers.get(session)?))
+                BRIDGE.with_borrow(|bridge| bridge.profile_of(&bridge.workers.get(session)?.0))
             }
             // Popups open in the displayed Space's profile.
-            Self::Popup(_) => Some(crate::shell::displayed_profile()),
+            Self::Popup(..) => Some(crate::shell::displayed_profile()),
         }
     }
+
+    /// The id of the caller's extension, from its own worker or page, never from the call.
+    fn extension(&self) -> Option<String> {
+        match self {
+            Self::Worker(session) => {
+                BRIDGE.with_borrow(|bridge| Some(bridge.workers.get(session)?.1.clone()))
+            }
+            Self::Popup(_, extension) => Some(extension.clone()),
+        }
+    }
+
+    /// The tab id the caller's shim gives the active tab, if it knows one.
+    fn active_tab_id(&self) -> Option<i64> {
+        let profile = self.profile()?;
+        BRIDGE.with_borrow(|bridge| bridge.state(profile)["tabs"][0]["id"].as_i64())
+    }
+}
+
+/// The extension id of a `chrome-extension://` URL.
+fn extension_id(url: &str) -> Option<&str> {
+    url.strip_prefix("chrome-extension://")?
+        .split('/')
+        .next()
+        .filter(|id| !id.is_empty())
+}
+
+/// Whether an extension may open `url` in a tab: only a web page or a blank one, never a
+/// `javascript:` URL, which would run in the active page, nor a local file or a Chrome page.
+fn extension_may_open(url: &str) -> bool {
+    let url = url.trim().to_ascii_lowercase();
+    url.starts_with("http:") || url.starts_with("https:") || url == "about:blank"
 }
 
 /// What Chromium asks the user about in the app's Chrome-style window, where only it can: an
@@ -873,8 +914,7 @@ thread_local! {
 /// extension that runs none of its code, and asks there (chrome_task_page_loaded). One task at a
 /// time: a request meanwhile is refused.
 fn request_permissions(caller: Caller, call: &Value) {
-    let (Some(request), Some(extension)) = (call["request"].as_i64(), call["extension"].as_str())
-    else {
+    let (Some(request), Some(extension)) = (call["request"].as_i64(), caller.extension()) else {
         return;
     };
     let busy = CHROME_TASK.with_borrow(Option::is_some);
@@ -1010,12 +1050,20 @@ fn binding_called(payload: &str, caller: Caller) {
         request_permissions(caller, &call);
         return;
     }
-    let Some(url) = call["props"]["url"].as_str() else {
+    let Some(url) = call["props"]["url"]
+        .as_str()
+        .filter(|url| extension_may_open(url))
+    else {
         return;
     };
     match call["method"].as_str() {
         Some("create") => crate::shell::run(crate::command::Command::Open(url.to_string())),
-        Some("update") => crate::shell::run(crate::command::Command::Navigate(url.to_string())),
+        // The shim shows only the active tab: another tab's update is not for it.
+        Some("update")
+            if call["tabId"].is_null() || call["tabId"].as_i64() == caller.active_tab_id() =>
+        {
+            crate::shell::run(crate::command::Command::Navigate(url.to_string()));
+        }
         _ => {}
     }
 }
@@ -1061,9 +1109,13 @@ fn message_received(message: &Value) {
         return;
     };
     match BRIDGE.with_borrow_mut(|bridge| bridge.pending.remove(&id)) {
-        Some(Pending::Attach { context, helper }) => {
+        Some(Pending::Attach {
+            context,
+            extension,
+            helper,
+        }) => {
             if let Some(session) = message["result"]["sessionId"].as_str() {
-                attached(session, context, helper);
+                attached(session, context, extension, helper);
             }
         }
         Some(Pending::TabIds(context)) => {
@@ -1128,10 +1180,15 @@ wrap_dev_tools_message_observer! {
     impl DevToolsMessageObserver {
         fn on_dev_tools_message(&self, browser: Option<&mut Browser>, message: Option<&[u8]>) -> i32 {
             let Some(message) = parse(message) else { return 0 };
+            // Only the extension's own page may call: not a web page the popup went to.
             if message["method"] == "Runtime.bindingCalled"
+                && let Some(extension) = extension_id(&self.url)
+                && let Some(frame) = browser.as_deref().and_then(Browser::main_frame)
+                && CefString::from(&frame.url()).to_string().starts_with(&format!("chrome-extension://{extension}/"))
                 && let Some(host) = browser.as_deref().and_then(Browser::host)
             {
-                binding_called(message["params"]["payload"].as_str().unwrap_or_default(), Caller::Popup(host));
+                let caller = Caller::Popup(host, extension.to_string());
+                binding_called(message["params"]["payload"].as_str().unwrap_or_default(), caller);
             }
             // The shim is added for new documents: the popup's may load.
             if message["id"] == 2
@@ -1253,6 +1310,30 @@ mod tests {
             Some(profile.0.join("Extensions/block/2.0_0/i128.png"))
         );
         assert!(installed(&profile.0.join("missing")).is_empty());
+    }
+
+    #[test]
+    fn lets_extensions_open_only_web_pages_and_a_blank_one() {
+        for url in [
+            "https://example.com/",
+            "http://example.com/",
+            " HTTPS://example.com/",
+            "about:blank",
+        ] {
+            assert!(extension_may_open(url), "{url}");
+        }
+        for url in [
+            "javascript:alert(1)",
+            " JavaScript:alert(1)",
+            "file:///etc/passwd",
+            "chrome://settings",
+            "data:text/html,<script>alert(1)</script>",
+            "chrome-extension://abc/page.html",
+            "about:settings",
+            "",
+        ] {
+            assert!(!extension_may_open(url), "{url}");
+        }
     }
 
     #[test]

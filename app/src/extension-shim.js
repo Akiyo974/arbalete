@@ -46,7 +46,7 @@
     chrome.permissions.request = (permissions, ...rest) => {
       asked += 1;
       const granted = new Promise((resolve) => answers.set(asked, resolve));
-      ask({ method: "permissions", request: asked, extension: chrome.runtime.id, permissions });
+      ask({ method: "permissions", request: asked, permissions });
       return granted.then((value) => reply(rest, value));
     };
   });
