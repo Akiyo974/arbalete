@@ -1,27 +1,43 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
-  "schedule": ["before 6am on monday"],
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "schedule": [
+    "before 6am on monday"
+  ],
   "semanticCommits": "enabled",
   "mise": {
-    "managerFilePatterns": ["/(^|/)\\.config/mise\\.toml$/"]
+    "managerFilePatterns": [
+      "/(^|/)\\.config/mise\\.toml$/"
+    ]
   },
   "packageRules": [
     {
       "description": "Dependency updates are build changes, never features or fixes in the release notes.",
-      "matchPackageNames": ["*"],
+      "matchPackageNames": [
+        "*"
+      ],
       "semanticCommitType": "build",
       "semanticCommitScope": "deps"
     },
     {
-      "matchManagers": ["github-actions"],
+      "matchManagers": [
+        "github-actions"
+      ],
       "semanticCommitType": "ci",
       "semanticCommitScope": null
     },
     {
-      "description": "Moves with the CEF the workflows export and cache: updated by hand, together.",
-      "matchPackageNames": ["cef"],
-      "enabled": false
+      "description": "Chromium itself: one pull request of its own, never merged automatically, to try by hand before merging. The workspace's Cargo.toml is CEF's one version.",
+      "matchPackageNames": [
+        "cef"
+      ],
+      "labels": [
+        "chromium"
+      ],
+      "automerge": false
     }
   ]
 }
