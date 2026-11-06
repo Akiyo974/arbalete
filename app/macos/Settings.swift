@@ -88,12 +88,6 @@ enum Destination: Codable, Hashable {
     }
 }
 
-/// The palette of profiles and Spaces (Color in crates/arbalete-core/src/sidebar.rs).
-let profileColors = [
-    "purple": "#6e56cf", "blue": "#3e7bfa", "green": "#30a46c", "yellow": "#e5b800",
-    "orange": "#f76b15", "red": "#e5484d", "pink": "#d6409f", "gray": "#8b8d98",
-]
-
 @MainActor
 final class SettingsModel: ObservableObject {
     @Published var detail: SettingsDetail?
@@ -662,7 +656,7 @@ private struct ProfilesSettings: View {
                 HStack(alignment: .top, spacing: 10) {
                     ProfileList(
                         detail: detail, picked: profile?.id, pick: { picked.wrappedValue = $0 },
-                        create: { settings.app.run("profile/new") })
+                        create: { settings.app.newProfile(for: nil, names: detail.profiles.map(\.name)) })
                         .frame(width: 205)
                     if let profile {
                         ProfileDetail(settings: settings, detail: detail, profile: profile)
@@ -673,7 +667,8 @@ private struct ProfilesSettings: View {
     }
 }
 
-/// The profiles, like Arc's list: each with how many Spaces use it, then a button creating one.
+/// The profiles, like Arc's list: each with how many Spaces use it, and under them the button
+/// creating one.
 private struct ProfileList: View {
     let detail: SettingsDetail
     let picked: Int?
@@ -686,45 +681,62 @@ private struct ProfileList: View {
                 .padding(.horizontal, 10)
                 .frame(height: 28)
             Rectangle().fill(settingsLine).frame(height: 1)
-            ForEach(detail.profiles) { profile in
-                let used = detail.spaces.filter { $0.profile == profile.name }.count
-                Button {
-                    pick(profile.id)
-                } label: {
-                    HStack {
-                        Circle().fill(color(profileColors[profile.color] ?? "#8b8d98"))
-                            .frame(width: 8, height: 8)
-                        Text(profile.name).font(.system(size: 13))
-                        Spacer()
-                        Text(used == 0 ? "Not used" : used == 1 ? "1 Space" : "\(used) Spaces")
-                            .font(.system(size: 12))
-                            .foregroundStyle(used == 0 ? .tertiary : .secondary)
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(Array(detail.profiles.enumerated()), id: \.element.id) { index, profile in
+                        if index > 0 {
+                            Rectangle().fill(settingsLine).frame(height: 1).padding(.horizontal, 14)
+                        }
+                        row(profile)
                     }
-                    .padding(.horizontal, 8)
-                    .frame(height: 32)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(profile.id == picked ? Color.accentColor.opacity(0.18) : .clear))
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 4)
+                .padding(.vertical, 6)
             }
-            Button(action: create) {
-                Label("New Profile", systemImage: "plus").font(.system(size: 13))
-                    .padding(.horizontal, 8)
-                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-                    .contentShape(Rectangle())
+            Rectangle().fill(settingsLine).frame(height: 1)
+            HStack(spacing: 0) {
+                footerButton("plus", help: "Create a new Profile", action: create)
+                Spacer()
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
-            Spacer(minLength: 0)
+            .frame(height: 30)
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(settingsEdge))
+    }
+
+    private func row(_ profile: SettingsDetail.ProfileSettings) -> some View {
+        let used = detail.spaces.filter { $0.profile == profile.name }.count
+        return Button {
+            pick(profile.id)
+        } label: {
+            HStack {
+                Text(profile.name).font(.system(size: 13))
+                Spacer()
+                Text(used == 0 ? "Not used" : used == 1 ? "1 Space" : "\(used) Spaces")
+                    .font(.system(size: 12))
+                    .foregroundStyle(used == 0 ? .tertiary : .secondary)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 32)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(profile.id == picked ? Color.accentColor.opacity(0.18) : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+    }
+
+    /// A button of the list's footer, like Arc's: a symbol, 30 points wide.
+    private func footerButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 13))
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help(help)
     }
 }
 

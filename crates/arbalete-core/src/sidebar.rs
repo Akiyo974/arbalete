@@ -330,6 +330,8 @@ pub enum Error {
     FavoritesFull,
     /// A theme holds at most `MAX_THEME_COLORS` `#rrggbb` colors, and factors from 0 to 1.
     InvalidTheme,
+    /// Profiles have different names, like Arc's.
+    NameTaken,
 }
 
 /// What a window shows of the sidebar: its displayed Space, each Space's selected tab and the
@@ -715,13 +717,20 @@ impl Sidebar {
         id
     }
 
-    /// Creates a profile with a Space of the same name, so the profile has somewhere to open tabs.
-    pub fn create_profile(&mut self, name: &str) -> Result<ProfileId, Error> {
-        if name.trim().is_empty() {
-            return Err(Error::EmptyTitle);
+    /// Creates a profile used by `spaces`, like Arc's Create a Profile dialog: none leaves it
+    /// unused.
+    pub fn create_profile(&mut self, name: &str, spaces: &[SpaceId]) -> Result<ProfileId, Error> {
+        self.check_profile_name(None, name)?;
+        if !spaces
+            .iter()
+            .all(|id| self.spaces().iter().any(|s| s.id == *id))
+        {
+            return Err(Error::UnknownSpace);
         }
-        let profile = self.add_profile(name);
-        self.add_space(name, profile)?;
+        let profile = self.add_profile(name.trim());
+        for &space in spaces {
+            self.space_mut(space)?.profile = profile;
+        }
         Ok(profile)
     }
 
@@ -730,6 +739,22 @@ impl Sidebar {
             return Err(Error::EmptyTitle);
         }
         self.profile_mut(id)?.name = name.to_string();
+        Ok(())
+    }
+
+    /// A profile's name is not blank, and no other profile has it, whatever the case.
+    fn check_profile_name(&self, id: Option<ProfileId>, name: &str) -> Result<(), Error> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(Error::EmptyTitle);
+        }
+        let taken = self
+            .profiles()
+            .iter()
+            .any(|p| Some(p.id) != id && p.name.trim().to_lowercase() == name.to_lowercase());
+        if taken {
+            return Err(Error::NameTaken);
+        }
         Ok(())
     }
 
@@ -2034,16 +2059,29 @@ mod tests {
     }
 
     #[test]
-    fn creates_a_profile_with_a_space_of_its_own() {
+    fn creates_a_profile_for_the_spaces_picked() {
         let mut sidebar = Sidebar::default();
-        let work = sidebar.create_profile("Work").unwrap();
+        let home = sidebar.spaces()[0].id;
+        let office = sidebar
+            .add_space("Office", sidebar.profiles()[0].id)
+            .unwrap();
+        let work = sidebar.create_profile(" Work ", &[office]).unwrap();
         let profile = &sidebar.profiles()[1];
         assert_eq!((profile.id, profile.name.as_str()), (work, "Work"));
         assert_eq!(profile.color, Color::Purple);
-        let space = &sidebar.spaces()[1];
-        assert_eq!((space.profile, space.title.as_str()), (work, "Work"));
-        assert_eq!(sidebar.create_profile(" "), Err(Error::EmptyTitle));
-        assert_eq!(sidebar.profiles().len(), 2);
+        assert_eq!(sidebar.spaces()[1].profile, work);
+        assert_ne!(sidebar.spaces()[0].profile, work);
+        // Like Arc's, a profile no Space uses yet.
+        let unused = sidebar.create_profile("Later", &[]).unwrap();
+        assert!(sidebar.spaces().iter().all(|s| s.profile != unused));
+        assert_eq!(sidebar.create_profile(" ", &[]), Err(Error::EmptyTitle));
+        assert_eq!(sidebar.create_profile("work", &[]), Err(Error::NameTaken));
+        assert_eq!(
+            sidebar.create_profile("Elsewhere", &[home, SpaceId(999)]),
+            Err(Error::UnknownSpace)
+        );
+        assert_eq!(sidebar.spaces()[0].profile, sidebar.profiles()[0].id);
+        assert_eq!(sidebar.profiles().len(), 3);
         assert_eq!(sidebar.spaces().len(), 2);
     }
 
@@ -2507,7 +2545,7 @@ mod tests {
     #[test]
     fn creates_a_space_and_displays_it() {
         let mut sidebar = Sidebar::default();
-        let work = sidebar.create_profile("Work").unwrap();
+        let work = sidebar.create_profile("Work", &[]).unwrap();
         let space = sidebar.create_space("Mail", work).unwrap();
         let created = sidebar.displayed();
         assert_eq!(created.id, space);
@@ -2522,7 +2560,7 @@ mod tests {
             sidebar.create_space("a", ProfileId(999)),
             Err(Error::UnknownProfile)
         );
-        assert_eq!(sidebar.spaces().len(), 3);
+        assert_eq!(sidebar.spaces().len(), 2);
         assert_eq!(sidebar.displayed().id, space);
     }
 
@@ -3074,8 +3112,8 @@ mod tests {
     fn numbers_the_favorites_of_each_profile() {
         let mut sidebar = Sidebar::default();
         let home = home(&sidebar);
-        let work = sidebar.create_profile("Work").unwrap();
-        let office = sidebar.spaces()[1].id;
+        let work = sidebar.create_profile("Work", &[]).unwrap();
+        let office = sidebar.add_space("Work", work).unwrap();
         let personal = sidebar.open_tab(home.id, "personal").unwrap();
         let job = sidebar.open_tab(office, "job").unwrap();
         let favorites = sidebar.favorites_of(home.id).unwrap();

@@ -388,12 +388,16 @@ pub enum Command {
     SeparateAll(NodeId),
     /// Closes a split's tabs, which may be reopened: `pane/close-split/<split id>`.
     CloseSplit(NodeId),
-    /// Creates a profile, with a Space of its own, for the UI to rename: `profile/new`.
+    /// Asks the UI for the Create a new Profile dialog, like Arc's: `profile/new`.
     NewProfile,
+    /// Creates a profile used by some Spaces, from that dialog:
+    /// `profile/create/<percent-encoded JSON {"name": …, "spaces": [<space id>, …]}>`.
+    CreateProfile {
+        name: String,
+        spaces: Vec<SpaceId>,
+    },
     /// Renames a profile: `profile/rename/<profile id>/<percent-encoded name>`.
     RenameProfile(ProfileId, String),
-    /// Changes a profile's color: `profile/color/<profile id>/<color>`, like `blue`.
-    ColorProfile(ProfileId, Color),
     /// Changes how long a profile's "Today" tabs stay unshown before they are archived:
     /// `profile/archive/<profile id>/<delay>`, like `twelve-hours` or `never`.
     SetArchiveAfter(ProfileId, ArchiveAfter),
@@ -455,8 +459,6 @@ pub enum Command {
     MoveSpace(SpaceId, usize),
     /// Attaches a Space to another profile: `space/profile/<space id>/<profile id>`.
     SetSpaceProfile(SpaceId, ProfileId),
-    /// Attaches a Space to a new profile for the UI to rename, from its menu.
-    NewSpaceProfile(SpaceId),
     /// Opens the import assistant: `import/show`.
     ShowImport,
     /// The import assistant is listening: send it the browsers found, `import/ready`.
@@ -826,12 +828,15 @@ impl Command {
                     };
                     return on.parse().ok().map(|on| Self::SetSetting(setting, on));
                 }
-                if let Some((id, color)) = path
-                    .strip_prefix("profile/color/")
-                    .and_then(|r| r.split_once('/'))
-                {
-                    let id = serde_json::from_str(id).ok()?;
-                    return parse_color(color).map(|color| Self::ColorProfile(id, color));
+                if let Some(json) = path.strip_prefix("profile/create/") {
+                    #[derive(serde::Deserialize)]
+                    struct Created {
+                        name: String,
+                        spaces: Vec<SpaceId>,
+                    }
+                    let Created { name, spaces } =
+                        serde_json::from_str(&percent_decode(json)?).ok()?;
+                    return Some(Self::CreateProfile { name, spaces });
                 }
                 if let Some(args) = path.strip_prefix("space/create/") {
                     let mut args = args.split('/');
@@ -1578,15 +1583,14 @@ mod tests {
         };
         assert_eq!(serde_json::to_string(&id).unwrap(), "1");
         assert_eq!(name, "Café/2");
-        let Some(Command::ColorProfile(id, color)) = Command::parse("profile/color/1/blue") else {
-            panic!("not a color")
+        let Some(Command::CreateProfile { name, spaces }) =
+            Command::parse("profile/create/%7B%22name%22%3A%22Work%22%2C%22spaces%22%3A%5B4%5D%7D")
+        else {
+            panic!("not a creation")
         };
-        assert_eq!(
-            serde_json::to_string(&(id, color)).unwrap(),
-            r#"[1,"blue"]"#
-        );
-        assert_eq!(Command::parse("profile/color/1/teal"), None);
-        assert_eq!(Command::parse("profile/color/x/blue"), None);
+        assert_eq!(name, "Work");
+        assert_eq!(serde_json::to_string(&spaces).unwrap(), "[4]");
+        assert_eq!(Command::parse("profile/create/%7B%7D"), None);
         assert_eq!(Command::parse("profile/rename/1"), None);
         assert_eq!(Command::parse("profile/rename/x/a"), None);
     }

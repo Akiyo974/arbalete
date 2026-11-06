@@ -79,6 +79,8 @@ struct SpaceDraft: View {
                                 model.run("space/profile/\(space.id)/\(profile.id)")
                             }
                         }
+                        Divider()
+                        Button("New Profile…") { model.newProfile(for: space.id) }
                     }
                     .menuStyle(.borderlessButton)
                     .font(.system(size: 13, weight: .semibold))
@@ -90,7 +92,7 @@ struct SpaceDraft: View {
                     Image(systemName: "info.circle")
                         .foregroundStyle(Ink.secondary)
                         .frame(width: 24)
-                        .help("A profile keeps its own history, cookies, passwords and extensions.")
+                        .help("You can use a Profile to give this Space its own logins, history, and browsing data.")
                 }
                 Button {
                     model.run("theme/show/\(space.id)")

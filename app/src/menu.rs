@@ -486,7 +486,7 @@ fn profiles(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
         item(
             "new-profile",
             "New Profile…",
-            Action::Run(Command::NewSpaceProfile(space.id)),
+            Action::Ask("arbalete:new-profile", json!(space.id)),
         ),
     ]);
     profiles
@@ -913,7 +913,8 @@ mod tests {
     #[test]
     fn a_space_edits_itself_changes_its_profile_and_deletes_itself() {
         let mut sidebar = Sidebar::default();
-        let work = sidebar.create_profile("Work").unwrap();
+        let work = sidebar.create_profile("Work", &[]).unwrap();
+        sidebar.add_space("Work", work).unwrap();
         let home = sidebar.spaces()[0].clone();
         let target = Target::Space(home.id);
         let menu = build(&sidebar, target).unwrap();
@@ -956,7 +957,7 @@ mod tests {
         );
         assert_eq!(
             choose("new-profile"),
-            Some(Action::Run(Command::NewSpaceProfile(home.id)))
+            Some(Action::Ask("arbalete:new-profile", json!(home.id)))
         );
         assert_eq!(
             choose("new-folder"),
@@ -975,7 +976,7 @@ mod tests {
     #[test]
     fn a_spaces_profile_pill_lists_the_profiles_its_own_checked() {
         let mut sidebar = Sidebar::default();
-        let work = sidebar.create_profile("Work").unwrap();
+        let work = sidebar.create_profile("Work", &[]).unwrap();
         let home = sidebar.spaces()[0].id;
         let target = Target::SpaceProfile(home);
         let menu = build(&sidebar, target).unwrap();

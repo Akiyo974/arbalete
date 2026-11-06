@@ -4989,14 +4989,17 @@ fn focus_sidebar() {
     }
 }
 
-/// Creates a profile and asks the sidebar to rename it, like a new folder.
-fn new_profile() {
-    let profile = update_sidebar(|sidebar| {
-        sidebar
-            .create_profile("New Profile")
-            .expect("a name that is not blank")
-    });
-    ask("arbalete:rename-profile", &json!(profile));
+/// Creates a profile used by `spaces`, from Arc's Create a new Profile dialog, and shows the
+/// displayed Space's page again when it changes profile. Like a rename, a blank or taken name from
+/// the UI is ignored.
+fn create_profile(name: &str, spaces: &[SpaceId]) {
+    let displayed = STATE.with_borrow(|state| state.sidebar.displayed().id);
+    if update_sidebar(|sidebar| sidebar.create_profile(name, spaces)).is_ok() {
+        send_settings();
+        if spaces.contains(&displayed) {
+            show_selected();
+        }
+    }
 }
 
 /// Creates a Space in the displayed Space's profile and shows it, with `tab` moved into it and
@@ -5038,20 +5041,6 @@ fn update_spaces(
     let now = STATE.with_borrow(|state| state.sidebar.displayed().id);
     if changed && (now != displayed || now == space) {
         show_selected();
-    }
-}
-
-/// Attaches a Space to a new profile and asks the sidebar to rename it.
-fn new_space_profile(space: SpaceId) {
-    let profile = update_sidebar(|sidebar| {
-        let profile = sidebar.add_profile("New Profile");
-        sidebar.set_space_profile(space, profile).map(|()| profile)
-    });
-    if let Ok(profile) = profile {
-        if STATE.with_borrow(|state| state.sidebar.displayed().id == space) {
-            show_selected();
-        }
-        ask("arbalete:rename-profile", &json!(profile));
     }
 }
 
@@ -6806,18 +6795,11 @@ fn run_command(command: Command) {
                 show_selected();
             }
         }
-        (Command::NewProfile, _) => {
-            new_profile();
-            send_settings();
-        }
+        (Command::NewProfile, _) => ask("arbalete:new-profile", &json!(null)),
+        (Command::CreateProfile { name, spaces }, _) => create_profile(&name, &spaces),
         // Like a folder, an unknown profile or a blank name from the UI is ignored.
         (Command::RenameProfile(id, name), _) => {
             if update_sidebar(|sidebar| sidebar.rename_profile(id, &name)).is_ok() {
-                send_settings();
-            }
-        }
-        (Command::ColorProfile(id, color), _) => {
-            if update_sidebar(|sidebar| sidebar.set_profile_color(id, color)).is_ok() {
                 send_settings();
             }
         }
@@ -6887,7 +6869,6 @@ fn run_command(command: Command) {
         (Command::SetSpaceProfile(id, profile), _) => {
             update_spaces(id, |sidebar| sidebar.set_space_profile(id, profile));
         }
-        (Command::NewSpaceProfile(id), _) => new_space_profile(id),
         (Command::DeleteSpace(id), _) => update_spaces(id, |sidebar| sidebar.delete_space(id)),
         (Command::MoveSpace(id, index), _) => {
             let _ = update_sidebar(|sidebar| sidebar.move_space(id, index));
@@ -9104,7 +9085,8 @@ mod tests {
             .open_tab(home, "https://example.com/")
             .unwrap();
         state.sidebar.move_node(tab, favorites, 0).unwrap();
-        state.sidebar.create_profile("Work").unwrap();
+        let work = state.sidebar.create_profile("Work", &[]).unwrap();
+        state.sidebar.add_space("Work", work).unwrap();
         let json = state.to_json();
         let page = &json["pages"][0];
         assert_eq!(page["favorites"][0]["url"], "https://example.com/");
@@ -9269,7 +9251,7 @@ mod tests {
     #[test]
     fn sends_every_profile_with_its_name_and_color() {
         let mut state = UiState::default();
-        let work = state.sidebar.create_profile("Work").unwrap();
+        let work = state.sidebar.create_profile("Work", &[]).unwrap();
         state
             .sidebar
             .set_profile_color(work, arbalete_core::sidebar::Color::Blue)

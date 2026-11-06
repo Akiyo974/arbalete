@@ -35,8 +35,6 @@ final class AppModel: ObservableObject {
     @Published var archive: [ArchivedTab] = []
     /// The sidebar shows the library, on a section, under what its field searches.
     @Published var libraryShown = false
-    /// The list of profiles shows above the footer.
-    @Published var profilesShown = false
     /// The node a drag in the sidebar carries, whether a tab, and where it would land
     /// (SidebarDrop.swift); once the drag ends, nowhere shows where it would land.
     @Published var dragged: Int? {
@@ -197,8 +195,8 @@ final class AppModel: ObservableObject {
             if let gesture = try? JSONDecoder().decode(Gesture.self, from: detail) {
                 swiped(gesture.phase, gesture.dx)
             }
-        case "arbalete:rename-profile":
-            profilesShown = true
+        case "arbalete:new-profile":
+            newProfile(for: try? JSONDecoder().decode(Int.self, from: detail))
         case "arbalete:library":
             openLibrary(.spaces)
         case "arbalete:open-library":

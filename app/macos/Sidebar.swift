@@ -1586,9 +1586,6 @@ struct Footer: View {
                 .opacity(drafting ? 0 : 1)
                 .disabled(drafting)
                 .background(Frame(frame: _plusFrame.projectedValue))
-                .popover(isPresented: $model.profilesShown, arrowEdge: .top) {
-                    ProfilesView(model: model)
-                }
         }
         .frame(height: 40)
         .foregroundStyle(model.buttonInk)
