@@ -380,6 +380,7 @@ struct CommandBarView: View {
             .padding(.horizontal, resultsPadding)
             .padding(.vertical, resultsInset)
             .frame(maxHeight: .infinity, alignment: .top)
+            .background(lightVeil)
         } else {
             let rows = bar.rows
             VStack(spacing: 0) {
@@ -434,8 +435,13 @@ struct CommandBarView: View {
                 }
             }
             .frame(maxHeight: .infinity, alignment: .top)
+            .background(lightVeil)
         }
     }
+
+    /// Measured on Arc's light theme: a near-white panel, #F8F8F8, that still lets the page
+    /// through; the dark one keeps its material as it is.
+    private var lightVeil: Color { Color.ink((0xFFFFFF, 0.85), (0x000000, 0)) }
 
     private func label(_ row: CommandRow) -> String? {
         switch row {
