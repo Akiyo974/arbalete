@@ -1395,6 +1395,11 @@ pub fn pop_up(entries: Vec<Entry>) {
     menu.popUpMenuPositioningItem_atLocation_inView(None, NSEvent::mouseLocation(), None);
 }
 
+thread_local! {
+    /// The share picker of the menu showing, whose Share submenu needs it.
+    static SHARE_PICKER: RefCell<Option<Retained<NSSharingServicePicker>>> = const { RefCell::new(None) };
+}
+
 fn native_menu(
     mtm: MainThreadMarker,
     entries: Vec<Entry>,
@@ -1423,6 +1428,22 @@ fn native_menu(
                 let item = NSMenuItem::new(mtm);
                 item.setTitle(&NSString::from_str(&title));
                 item.setSubmenu(Some(&native_menu(mtm, entries, actions)));
+                item
+            }
+            Entry::Share(url) => {
+                let Some(link) = NSURL::URLWithString(&NSString::from_str(&url)) else {
+                    continue;
+                };
+                let items = NSArray::from_retained_slice(&[Retained::into_super(
+                    Retained::into_super(link),
+                )]);
+                // SAFETY: the picker takes the items a share menu offers, like links.
+                let picker = unsafe {
+                    NSSharingServicePicker::initWithItems(NSSharingServicePicker::alloc(), &items)
+                };
+                let item = picker.standardShareMenuItem(mtm);
+                // Kept while the menu shows, which its item needs.
+                SHARE_PICKER.set(Some(picker));
                 item
             }
             Entry::Separator => NSMenuItem::separatorItem(mtm),

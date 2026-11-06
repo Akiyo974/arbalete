@@ -10,6 +10,8 @@ use serde_json::json;
 pub enum Entry {
     Item(Item),
     Submenu(String, Vec<Entry>),
+    /// The system's Share submenu for a link, its services with their icons, like Arc's.
+    Share(String),
     Separator,
 }
 
@@ -206,26 +208,26 @@ pub fn tabs_menu(sidebar: &Sidebar, ids: &[NodeId]) -> Vec<Entry> {
 fn tab_menu(sidebar: &Sidebar, id: NodeId, tab: &Tab) -> Vec<Entry> {
     let pinned = sidebar.is_pinned(id);
     let pin = if pinned { "Unpin Tab" } else { "Pin Tab" };
-    let mute = if tab.muted { "Unmute Tab" } else { "Mute Tab" };
-    // In Arc's order: the link first, then the tab's own settings.
+    let mute = if tab.muted { "Unmute" } else { "Mute" };
+    // In Arc's order: the link first, then the tab's own settings; a "Today" tab, like Arc's,
+    // pins with ⌘D or a drag rather than from its menu.
     let mut menu = vec![
         copy_link(&tab.url),
-        item(
-            "copy-markdown",
-            "Copy Link as Markdown",
-            Action::CopyLink(format!("[{}]({})", tab.label(), tab.url)),
-        ),
-        item("share", "Share…", Action::Share(tab.url.clone())),
+        share(&tab.url),
         Entry::Separator,
         item(
             "rename",
-            "Rename Tab",
+            "Rename…",
             Action::Ask("arbalete:rename", json!(id)),
         ),
         item("mute", mute, Action::Run(Command::ToggleMute(id))),
-        Entry::Separator,
-        item("pin", pin, Action::Run(Command::Pin(Some(id)))),
     ];
+    if pinned {
+        menu.extend([
+            Entry::Separator,
+            item("pin", pin, Action::Run(Command::Pin(Some(id)))),
+        ]);
+    }
     if let Some(saved) = tab.saved_url.as_deref().filter(|_| pinned) {
         menu.push(Entry::Submenu(
             "Edit Pinned Page".to_string(),
@@ -251,22 +253,41 @@ fn tab_menu(sidebar: &Sidebar, id: NodeId, tab: &Tab) -> Vec<Entry> {
     let tab = id;
     menu.extend([
         Entry::Separator,
+        item(
+            "add-split",
+            "Add Split View",
+            Action::Run(Command::AddPane(Some(tab))),
+        ),
         duplicate(tab),
         move_to(sidebar, tab),
         Entry::Separator,
-        item("close", "Close Tab", Action::Run(Command::Close(Some(tab)))),
+        // Like Arc's, a "Today" tab closed goes to the archive; a pinned one stays.
+        item(
+            "close",
+            if pinned { "Close Tab" } else { "Archive Tab" },
+            Action::Run(Command::Close(Some(tab))),
+        ),
     ]);
     // Pinned tabs stay: only "Today" tabs close those below them.
     if !pinned {
         menu.push(Entry::Item(Item {
             id: "close-below".to_string(),
-            title: "Close Tabs Below".to_string(),
+            title: "Archive Tabs Below".to_string(),
             checked: false,
             enabled: has_rows_below(sidebar, sidebar.row_of(tab)),
             action: Action::Run(Command::CloseTabsBelow(tab)),
         }));
     }
     menu
+}
+
+/// Like Arc's, the system's Share submenu for a link; a single item elsewhere.
+fn share(url: &str) -> Entry {
+    if cfg!(target_os = "macos") {
+        Entry::Share(url.to_string())
+    } else {
+        item("share", "Share…", Action::Share(url.to_string()))
+    }
 }
 
 /// A split row's menu, like Arc's: the split's own items, then each tab's as a submenu.
@@ -640,6 +661,7 @@ mod tests {
                     titles.extend(titles_of(entries));
                     titles
                 }
+                Entry::Share(_) => vec!["Share ▸".to_string()],
                 Entry::Separator => vec!["-".to_string()],
             })
             .collect()
@@ -710,14 +732,12 @@ mod tests {
             titles(&menu),
             [
                 "Copy Link",
-                "Copy Link as Markdown",
-                "Share…",
+                "Share ▸",
                 "-",
-                "Rename Tab",
-                "Mute Tab",
+                "Rename…",
+                "Mute",
                 "-",
-                "Pin Tab",
-                "-",
+                "Add Split View",
                 "Duplicate",
                 "Move to ▸",
                 "  ✓ Home",
@@ -725,8 +745,8 @@ mod tests {
                 "  -",
                 "  New Space…",
                 "-",
-                "Close Tab",
-                "(Close Tabs Below)",
+                "Archive Tab",
+                "(Archive Tabs Below)",
             ]
         );
         let work_id = serde_json::to_string(&work).unwrap();
@@ -760,7 +780,7 @@ mod tests {
         );
         sidebar.toggle_mute(tab).unwrap();
         let menu = build(&sidebar, Target::Node(tab)).unwrap();
-        assert_eq!(titles(&menu)[5], "Unmute Tab");
+        assert_eq!(titles(&menu)[4], "Unmute");
         assert_eq!(choose(&sidebar, tab, "unknown"), None);
     }
 
@@ -771,7 +791,7 @@ mod tests {
         let tab = sidebar.open_tab(home, "https://a.test/").unwrap();
         sidebar.open_tab(home, "https://b.test/").unwrap();
         let menu = build(&sidebar, Target::Node(tab)).unwrap();
-        assert_eq!(titles(&menu).last().unwrap(), "Close Tabs Below");
+        assert_eq!(titles(&menu).last().unwrap(), "Archive Tabs Below");
         assert_eq!(
             choose(&sidebar, tab, "close-below"),
             Some(Action::Run(Command::CloseTabsBelow(tab)))
@@ -784,10 +804,10 @@ mod tests {
         let pinned = sidebar.spaces()[0].pinned;
         let tab = sidebar.add_tab(pinned, "a", "a").unwrap();
         let menu = build(&sidebar, Target::Node(tab)).unwrap();
-        assert_eq!(titles(&menu)[7], "Unpin Tab");
+        assert_eq!(titles(&menu)[6], "Unpin Tab");
         // Its saved url is the current one: there is nothing to replace it with yet.
         assert_eq!(
-            titles(&menu)[8..11],
+            titles(&menu)[7..10],
             [
                 "Edit Pinned Page ▸",
                 "  (Replace Pinned URL with Current)",
