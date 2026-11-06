@@ -14,12 +14,22 @@ CEF_PATH = "{{env.HOME}}/cef"
 # Sparkle, the app's updater (app/macos/Updates.swift), in a folder named by its version.
 SPARKLE_PATH = "{{env.HOME}}/sparkle/2.10.1"
 
+# CEF's version, the cef crate's in the workspace's Cargo.toml, picks the CEF to download and the
+# bundling tool to install.
 [tasks.cef]
 description = "Download CEF to CEF_PATH"
-run = [
-  "cargo install --locked export-cef-dir --version =156.0.0",
-  "export-cef-dir --force \"$CEF_PATH\"",
-]
+run = """
+version=$(sed -n 's/^cef = "=\\(.*\\)"/\\1/p' Cargo.toml)
+cargo install --locked export-cef-dir --version "=$version"
+export-cef-dir --force "$CEF_PATH"
+"""
+
+[tasks.cef-bundler]
+description = "Install bundle-cef-app, the CEF bundling tool"
+run = """
+version=$(sed -n 's/^cef = "=\\(.*\\)"/\\1/p' Cargo.toml)
+cargo install --locked cef --version "=$version" --features build-util --bin bundle-cef-app
+"""
 
 # Sparkle's release archive, checked against its checksum, once per version.
 [tasks.sparkle]
@@ -37,8 +47,7 @@ rm "$archive"
 
 [tasks.setup]
 description = "Download CEF and Sparkle, and install the CEF bundling tool"
-depends = ["cef", "sparkle"]
-run = "cargo install --locked cef --version =156.0.0 --features build-util --bin bundle-cef-app"
+depends = ["cef", "sparkle", "cef-bundler"]
 
 [tasks.check]
 description = "Run every check listed in CONTRIBUTING.md"
