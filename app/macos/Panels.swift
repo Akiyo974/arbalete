@@ -839,6 +839,9 @@ final class PermissionPrompt: ObservableObject {
     }
 
     @Published var request: Request?
+    /// When the request showed, before which its answers do nothing, like Chromium's: a page
+    /// cannot have a click it asked for land on Allow as the prompt appears under it.
+    private var shown = Date.distantPast
     let app: AppModel
 
     init(app: AppModel) {
@@ -849,7 +852,16 @@ final class PermissionPrompt: ObservableObject {
         guard name == "arbalete:permission" else { return }
         let request = try? JSONDecoder().decode(Request.self, from: detail)
         // The app sends it again after each command: only a new one changes the view.
-        if request != self.request { self.request = request }
+        if request != self.request {
+            self.request = request
+            shown = Date()
+        }
+    }
+
+    /// Gives the site the user's answer, once the request has shown for half a second.
+    func answer(_ allow: Bool) {
+        guard let request, Date().timeIntervalSince(shown) >= 0.5 else { return }
+        app.run("permission/\(allow ? "allow" : "block")/\(request.id)")
     }
 }
 
@@ -860,11 +872,12 @@ struct PermissionView: View {
 
     var body: some View {
         if let request = prompt.request {
-            let app = prompt.app
             VStack(alignment: .leading, spacing: 12) {
+                // Cut at the head, a long site keeps its end, the domain it belongs to, in view.
                 (Text(request.site).fontWeight(.semibold) + Text(" wants to"))
                     .font(.system(size: 14))
                     .lineLimit(2)
+                    .truncationMode(.head)
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(request.asks, id: \.self) { ask in
                         HStack(spacing: 9) {
@@ -877,12 +890,8 @@ struct PermissionView: View {
                     }
                 }
                 HStack(spacing: 8) {
-                    PermissionButton(title: "Block", prominent: false) {
-                        app.run("permission/block/\(request.id)")
-                    }
-                    PermissionButton(title: "Allow", prominent: true) {
-                        app.run("permission/allow/\(request.id)")
-                    }
+                    PermissionButton(title: "Block", prominent: false) { prompt.answer(false) }
+                    PermissionButton(title: "Allow", prominent: true) { prompt.answer(true) }
                 }
             }
             .padding(14)
