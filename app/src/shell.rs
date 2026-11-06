@@ -218,6 +218,12 @@ thread_local! {
     static STATE: RefCell<UiState> = RefCell::default();
     /// Where the sidebar is saved, once the previous session is restored.
     static SESSION_FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    /// The session changed since it was last written (save_session).
+    static SESSION_CHANGED: Cell<bool> = const { Cell::new(false) };
+    /// The pages' titles the history has yet to keep, by profile and address.
+    static NEW_TITLES: RefCell<HashMap<(ProfileId, String), String>> = RefCell::default();
+    /// The changes above are to be written soon (save_later).
+    static SAVE_POSTED: Cell<bool> = const { Cell::new(false) };
     /// Each profile's history, opened on its first visit.
     static HISTORIES: RefCell<HashMap<ProfileId, History>> = RefCell::default();
     /// The pages' developer tools open, by tab.
@@ -1125,8 +1131,53 @@ fn other_windows() -> Vec<WindowView> {
     })
 }
 
-/// Saves the sidebar, and what the other windows show of it, once the session is restored.
+/// How long a change waits to be written, at most: a page changing its title many times a
+/// second writes the session and the history once a second.
+const SAVE_DELAY_MS: i64 = 1000;
+
+/// Saves the sidebar, and what the other windows show of it, once the session is restored: soon,
+/// or right away while the app quits.
 fn save_session() {
+    if SESSION_FILE.with_borrow(Option::is_none) {
+        return;
+    }
+    SESSION_CHANGED.set(true);
+    if CLOSING.get() {
+        save_pending();
+    } else {
+        save_later();
+    }
+}
+
+/// Writes the changes waiting to be in a moment, unless it is already planned.
+fn save_later() {
+    if !SAVE_POSTED.replace(true) {
+        post_delayed_task(ThreadId::UI, Some(&mut SavePending::new()), SAVE_DELAY_MS);
+    }
+}
+
+wrap_task! {
+    struct SavePending {}
+
+    impl Task {
+        fn execute(&self) {
+            save_pending();
+        }
+    }
+}
+
+/// Writes the changes waiting to be: the pages' new titles and the session.
+fn save_pending() {
+    SAVE_POSTED.set(false);
+    for ((profile, url), title) in NEW_TITLES.take() {
+        update_history(profile, |history| history.set_title(&url, &title));
+    }
+    if SESSION_CHANGED.replace(false) {
+        write_session();
+    }
+}
+
+fn write_session() {
     let Some(path) = SESSION_FILE.with_borrow(Clone::clone) else {
         return;
     };
@@ -5127,6 +5178,7 @@ fn delete_profile(profile: ProfileId) {
     }
     CONTEXTS.with_borrow_mut(|contexts| contexts.remove(&profile));
     HISTORIES.with_borrow_mut(|histories| histories.remove(&profile));
+    NEW_TITLES.with_borrow_mut(|titles| titles.retain(|(of, _), _| *of != profile));
     let dir = profile_dir(profile);
     if let Err(error) = std::fs::remove_dir_all(&dir)
         && error.kind() != std::io::ErrorKind::NotFound
@@ -7238,7 +7290,10 @@ pub fn close() {
     {
         host.close_browser(1);
     }
-    if !CLOSING.replace(true) {
+    if !CLOSING.get() {
+        // Written while the sidebar still shows the focused window's view, which closing changes.
+        save_pending();
+        CLOSING.set(true);
         QUIT_WINDOWS.set(Some(other_windows()));
     }
     let windows: Vec<_> = WINDOWS.with_borrow(|windows| {
@@ -7447,6 +7502,9 @@ pub fn window_can_close(id: u32) -> bool {
         close_incognito(id);
         hand_pages_over(id);
         return true;
+    }
+    if !CLOSING.get() {
+        save_pending();
     }
     CLOSING.set(true);
     let hosts: Vec<_> = PAGES.with_borrow(|pages| {
@@ -8686,9 +8744,12 @@ wrap_display_handler! {
 
         fn on_title_change(&self, browser: Option<&mut Browser>, title: Option<&CefString>) {
             let title = title.map(CefString::to_string).unwrap_or_default();
-            if let Some(frame) = browser.as_ref().and_then(|browser| browser.main_frame()) {
+            // An incognito window keeps no history, and its folder goes with it.
+            let incognito = INCOGNITO.with_borrow(|incognito| incognito.contains_key(&self.profile));
+            if let Some(frame) = browser.as_ref().and_then(|browser| browser.main_frame()).filter(|_| !incognito) {
                 let url = CefString::from(&frame.url()).to_string();
-                update_history(self.profile, |history| history.set_title(&url, &title));
+                NEW_TITLES.with_borrow_mut(|titles| titles.insert((self.profile, url), title.clone()));
+                save_later();
             }
             let Some(browser) = browser else { return };
             let Some(tab) = page_tab(browser) else {
@@ -9111,6 +9172,8 @@ wrap_life_span_handler! {
 fn browser_closed() {
     OPEN_BROWSERS.set(OPEN_BROWSERS.get() - 1);
     if OPEN_BROWSERS.get() == 0 {
+        // A delayed task never runs once the loop has quit.
+        save_pending();
         quit_message_loop();
     } else if CLOSING.get() {
         // A browser ready to close while another is not yet cancels the window's close, and with
