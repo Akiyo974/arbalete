@@ -1,5 +1,5 @@
 // The small panels above the page: the find bar (ui/src/Find.tsx), the bar at the page's top in
-// toolbar mode (ui/src/Toolbar.tsx), and the site controls (ui/src/Site.tsx).
+// toolbar mode (ui/src/Toolbar.tsx), the site controls (ui/src/Site.tsx) and the permission prompt.
 
 import AppKit
 import SecurityInterface
@@ -792,6 +792,107 @@ struct SiteSetting: View {
         }
         .buttonStyle(.plain)
         .help(help)
+    }
+}
+
+/// A site's permission request, which the prompt asks the user about (sync_permission_prompt in
+/// app/src/shell.rs).
+@MainActor
+final class PermissionPrompt: ObservableObject {
+    struct Request: Decodable, Equatable {
+        struct Ask: Decodable, Hashable {
+            var text: String
+            var symbol: String
+        }
+        var id: UInt64
+        var site: String
+        var asks: [Ask]
+    }
+
+    @Published var request: Request?
+    let app: AppModel
+
+    init(app: AppModel) {
+        self.app = app
+    }
+
+    func handle(_ name: String, _ detail: Data) {
+        guard name == "arbalete:permission" else { return }
+        let request = try? JSONDecoder().decode(Request.self, from: detail)
+        // The app sends it again after each command: only a new one changes the view.
+        if request != self.request { self.request = request }
+    }
+}
+
+/// The permission prompt, like Arc's: a small panel at the top of the page, with the site, what
+/// it asks to use, and Block and Allow.
+struct PermissionView: View {
+    @ObservedObject var prompt: PermissionPrompt
+
+    var body: some View {
+        if let request = prompt.request {
+            let app = prompt.app
+            VStack(alignment: .leading, spacing: 12) {
+                (Text(request.site).fontWeight(.semibold) + Text(" wants to"))
+                    .font(.system(size: 14))
+                    .lineLimit(2)
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(request.asks, id: \.self) { ask in
+                        HStack(spacing: 9) {
+                            Image(systemName: ask.symbol)
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 20)
+                            Text(ask.text).font(.system(size: 13))
+                        }
+                    }
+                }
+                HStack(spacing: 8) {
+                    PermissionButton(title: "Block", prominent: false) {
+                        app.run("permission/block/\(request.id)")
+                    }
+                    PermissionButton(title: "Allow", prominent: true) {
+                        app.run("permission/allow/\(request.id)")
+                    }
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.onAppear { report(geometry.size.height) }
+                        .onChange(of: geometry.size.height) { _, height in report(height) }
+                })
+            .frame(maxHeight: .infinity, alignment: .top)
+        }
+    }
+
+    /// Tells the app the prompt's height, which it fits it to.
+    private func report(_ height: CGFloat) {
+        prompt.app.run("permission/height/\(Int(height.rounded(.up)))")
+    }
+}
+
+/// One of the permission prompt's answers, half its width.
+struct PermissionButton: View {
+    let title: String
+    let prominent: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(prominent ? Color.white : Color.primary)
+                .frame(maxWidth: .infinity)
+                .frame(height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(prominent ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.primary.opacity(0.08))))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

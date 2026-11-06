@@ -167,6 +167,10 @@ pub enum Command {
     HideThemePicker,
     /// The site controls' panel takes this height: `site/height/<height>`.
     SiteControlsHeight(i32),
+    /// Answers a site's permission prompt, by its id: `permission/<allow or block>/<id>`.
+    AnswerPermission(u64, bool),
+    /// The permission prompt takes this height: `permission/height/<height>`.
+    PermissionPromptHeight(i32),
     /// Opens an extension's popup from the site controls, under their button:
     /// `site/extension/<id>`.
     OpenExtensionPopup(String),
@@ -669,6 +673,20 @@ impl Command {
                 }
                 if let Some(height) = path.strip_prefix("site/height/") {
                     return height.parse().ok().map(Self::SiteControlsHeight);
+                }
+                if let Some(height) = path.strip_prefix("permission/height/") {
+                    return height.parse().ok().map(Self::PermissionPromptHeight);
+                }
+                if let Some((answer, id)) = path
+                    .strip_prefix("permission/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let allow = match answer {
+                        "allow" => true,
+                        "block" => false,
+                        _ => return None,
+                    };
+                    return id.parse().ok().map(|id| Self::AnswerPermission(id, allow));
                 }
                 if let Some(targets) = path.strip_prefix("site/targets/") {
                     let targets = serde_json::from_str(&percent_decode(targets)?).ok()?;
@@ -1310,6 +1328,19 @@ mod tests {
         assert_eq!(
             Command::parse("site/height/240"),
             Some(Command::SiteControlsHeight(240))
+        );
+        assert_eq!(
+            Command::parse("permission/allow/7"),
+            Some(Command::AnswerPermission(7, true))
+        );
+        assert_eq!(
+            Command::parse("permission/block/7"),
+            Some(Command::AnswerPermission(7, false))
+        );
+        assert_eq!(Command::parse("permission/maybe/7"), None);
+        assert_eq!(
+            Command::parse("permission/height/120"),
+            Some(Command::PermissionPromptHeight(120))
         );
         assert_eq!(
             Command::parse("site/extension/abc"),

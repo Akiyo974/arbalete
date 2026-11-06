@@ -545,6 +545,7 @@ final class NativeWindow {
     let findBar: FindBar
     let siteControls: SiteControls
     let themePicker: ThemePickerModel
+    let permissionPrompt: PermissionPrompt
     let importModel: ImportModel
     let splitHandles: SplitHandles
     let pages: PagePlacer
@@ -643,6 +644,11 @@ final class NativeWindow {
         themeSurface.takesKeyboard = true
         themeSurface.resigned = { app.run("theme/hide") }
         surfaces["theme"] = themeSurface
+        let permission = PermissionPrompt(app: app)
+        permissionPrompt = permission
+        let permissionSurface = Surface(in: window, radius: 14) { PermissionView(prompt: permission) }
+        permissionSurface.pops = true
+        surfaces["permission"] = permissionSurface
         let importer = ImportModel(app: app)
         importModel = importer
         let importSurface = Surface(in: window, radius: 16) { ImportView(model: importer) }
@@ -685,6 +691,7 @@ final class NativeWindow {
         case "find": findBar.handle(name, detail)
         case "site": siteControls.handle(name, detail)
         case "theme": themePicker.handle(name, detail)
+        case "permission": permissionPrompt.handle(name, detail)
         case "import": importModel.handle(name, detail)
         default: break
         }

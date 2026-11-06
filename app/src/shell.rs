@@ -10,6 +10,7 @@ use crate::command::{
 use crate::downloads::{self, Download};
 use crate::extensions;
 use crate::menu::{self, Action};
+use crate::permissions;
 use crate::settings::{self, Settings};
 use crate::strings::{chromium, chromium_with};
 use arbalete_core::history::{self, History};
@@ -223,6 +224,9 @@ thread_local! {
     static INSPECTORS: RefCell<HashMap<NodeId, Rc<Inspector>>> = RefCell::default();
     /// The page capture under way, until its picture is copied.
     static CAPTURING: RefCell<Option<Capturing>> = const { RefCell::new(None) };
+    /// The sites' permission requests the user has not answered yet, oldest first.
+    static PERMISSION_REQUESTS: RefCell<Vec<PermissionRequest>> = const { RefCell::new(Vec::new()) };
+    static NEXT_PERMISSION_REQUEST: Cell<u64> = const { Cell::new(0) };
     /// The incognito windows' profiles, with the temporary folder that stands for their
     /// directory, removed with the window: their web data stays in memory.
     static INCOGNITO: RefCell<HashMap<ProfileId, PathBuf>> = RefCell::default();
@@ -372,6 +376,8 @@ struct Win {
     /// panel, and the extension popups opened from it, show under it.
     site_button: RefCell<Option<Rect>>,
     site_height: Cell<i32>,
+    /// How tall the permission prompt's content is (Command::PermissionPromptHeight).
+    permission_height: Cell<i32>,
     /// Where the site controls' panel shows its extensions (Command::SiteTargets).
     site_targets: RefCell<Vec<ExtensionTarget>>,
     /// When the panel last closed: a click on its button closes it, as the panel loses the focus,
@@ -445,6 +451,7 @@ impl Win {
             site: RefCell::new(None),
             site_button: RefCell::new(None),
             site_height: Cell::new(1),
+            permission_height: Cell::new(1),
             site_targets: RefCell::new(Vec::new()),
             site_closed: Cell::new(None),
             extension_popup: RefCell::new(None),
@@ -1566,6 +1573,7 @@ fn sync_native_surfaces() {
             mirror(view, &overlay);
         }
     }
+    sync_permission_prompt();
     if let Some(overlay) = IMPORT.with_borrow(Clone::clone) {
         IMPORT_VIEW.with(|view| mirror(view, &overlay));
     }
@@ -7022,6 +7030,11 @@ fn run_command(command: Command) {
             win().site_height.set(height);
             place_site_controls();
         }
+        (Command::AnswerPermission(id, allow), _) => answer_permission(id, allow),
+        (Command::PermissionPromptHeight(height), _) => {
+            win().permission_height.set(height);
+            surfaces_changed();
+        }
         (Command::OpenExtensionPopup(id), _) => open_extension_popup(&id),
         (Command::ShowStore, _) => show_store(),
         (Command::ShowCertificate, _) => show_certificate(),
@@ -7969,8 +7982,220 @@ wrap_client! {
         fn request_handler(&self) -> Option<RequestHandler> {
             (!self.little).then(ContentRequestHandler::new)
         }
+
+        fn permission_handler(&self) -> Option<PermissionHandler> {
+            Some(ContentPermissions::new())
+        }
     }
 }
+
+/// A site's request for permissions, waiting for the user's answer in the permission prompt.
+struct PermissionRequest {
+    /// What the prompt's answer names it by.
+    id: u64,
+    browser: Browser,
+    /// The window in front as it came, which shows its prompt unless the page is a tab's.
+    window: u32,
+    /// The origin asking, like `https://meet.google.com/`, and its site, `meet.google.com`.
+    origin: String,
+    site: String,
+    asks: Vec<&'static permissions::Capability>,
+    callback: PermissionCallback,
+}
+
+/// What learns the user's answer to a permission request.
+enum PermissionCallback {
+    /// For the camera, the microphone or the screen: the media types asked for.
+    Media(MediaAccessCallback, u32),
+    /// For anything else, Chromium's prompt by its id.
+    Prompt(u64, PermissionPromptCallback),
+}
+
+// Asks the user before a site uses the camera, the microphone, the screen or anything else
+// Chromium guards, like Arc: CEF denies them all otherwise.
+wrap_permission_handler! {
+    struct ContentPermissions {}
+
+    impl PermissionHandler {
+        fn on_request_media_access_permission(
+            &self,
+            browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            requesting_origin: Option<&CefString>,
+            requested_permissions: u32,
+            callback: Option<&mut MediaAccessCallback>,
+        ) -> i32 {
+            let (Some(browser), Some(callback)) = (browser, callback) else { return 0 };
+            let origin = requesting_origin.map(CefString::to_string).unwrap_or_default();
+            let asks = permissions::media(requested_permissions);
+            if asks.is_empty() {
+                return 0;
+            }
+            // Chromium keeps no decision for media requests: the profile's content settings do,
+            // where the page's permission queries read it too.
+            if let Some(allow) = kept_decision(browser, &origin, &asks) {
+                callback.cont(if allow { requested_permissions } else { 0 });
+                return 1;
+            }
+            let callback = PermissionCallback::Media(callback.clone(), requested_permissions);
+            ask_permission(browser, &origin, asks, callback);
+            1
+        }
+
+        fn on_show_permission_prompt(
+            &self,
+            browser: Option<&mut Browser>,
+            prompt_id: u64,
+            requesting_origin: Option<&CefString>,
+            requested_permissions: u32,
+            callback: Option<&mut PermissionPromptCallback>,
+        ) -> i32 {
+            let (Some(browser), Some(callback)) = (browser, callback) else { return 0 };
+            let origin = requesting_origin.map(CefString::to_string).unwrap_or_default();
+            let asks = permissions::prompted(requested_permissions);
+            if asks.is_empty() {
+                return 0;
+            }
+            let callback = PermissionCallback::Prompt(prompt_id, callback.clone());
+            ask_permission(browser, &origin, asks, callback);
+            1
+        }
+
+        /// Chromium took the prompt back, as its page navigated or closed.
+        fn on_dismiss_permission_prompt(&self, _browser: Option<&mut Browser>, prompt_id: u64, _result: PermissionRequestResult) {
+            PERMISSION_REQUESTS.with_borrow_mut(|requests| {
+                requests.retain(|request| {
+                    !matches!(request.callback, PermissionCallback::Prompt(id, _) if id == prompt_id)
+                });
+            });
+            surfaces_changed();
+        }
+    }
+}
+
+/// Keeps a site's request until the user answers it in the permission prompt.
+fn ask_permission(
+    browser: &Browser,
+    origin: &str,
+    asks: Vec<&'static permissions::Capability>,
+    callback: PermissionCallback,
+) {
+    let id = NEXT_PERMISSION_REQUEST.get();
+    NEXT_PERMISSION_REQUEST.set(id + 1);
+    let request = PermissionRequest {
+        id,
+        browser: browser.clone(),
+        window: FOCUSED.get(),
+        origin: origin.to_string(),
+        site: site(origin).to_string(),
+        asks,
+        callback,
+    };
+    PERMISSION_REQUESTS.with_borrow_mut(|requests| requests.push(request));
+    surfaces_changed();
+}
+
+/// Gives the site the user's answer to its request `id`, from the permission prompt.
+fn answer_permission(id: u64, allow: bool) {
+    let request = PERMISSION_REQUESTS.with_borrow_mut(|requests| {
+        let index = requests.iter().position(|request| request.id == id)?;
+        Some(requests.remove(index))
+    });
+    let Some(request) = request else { return };
+    match request.callback {
+        PermissionCallback::Media(callback, requested) => {
+            keep_decision(&request.browser, &request.origin, &request.asks, allow);
+            callback.cont(if allow { requested } else { 0 });
+        }
+        PermissionCallback::Prompt(_, callback) => callback.cont(if allow {
+            PermissionRequestResult::ACCEPT
+        } else {
+            PermissionRequestResult::DENY
+        }),
+    }
+    surfaces_changed();
+}
+
+/// The decision the profile keeps on `origin` using all of `asks`: allowed once each is, blocked
+/// once any is; none while one is undecided, or asked each time, like sharing the screen.
+fn kept_decision(
+    browser: &Browser,
+    origin: &str,
+    asks: &[&permissions::Capability],
+) -> Option<bool> {
+    let context = browser.host()?.request_context()?;
+    let origin = CefString::from(origin);
+    let mut allowed = true;
+    for ask in asks {
+        let value = context.content_setting(Some(&origin), Some(&origin), ask.setting?);
+        if value == ContentSettingValues::BLOCK {
+            return Some(false);
+        }
+        allowed &= value == ContentSettingValues::ALLOW;
+    }
+    allowed.then_some(true)
+}
+
+/// Keeps the user's decision on `origin` using `asks`, where the profile keeps one.
+fn keep_decision(browser: &Browser, origin: &str, asks: &[&permissions::Capability], allow: bool) {
+    let Some(context) = browser.host().and_then(|host| host.request_context()) else {
+        return;
+    };
+    let origin = CefString::from(origin);
+    let value = if allow {
+        ContentSettingValues::ALLOW
+    } else {
+        ContentSettingValues::BLOCK
+    };
+    for setting in asks.iter().filter_map(|ask| ask.setting) {
+        context.set_content_setting(Some(&origin), Some(&origin), setting, value);
+    }
+}
+
+/// Whether the window shows a request's page: its tab's, shown alone or in a split; else, a page
+/// that is no tab's, like Peek's, in the window in front as the request came.
+fn shows_request(request: &PermissionRequest) -> bool {
+    match page_tab(&request.browser) {
+        Some(tab) => win().shown.get() == Some(tab) || win().split.borrow().0.contains(&tab),
+        None => win().id == request.window,
+    }
+}
+
+/// Shows the window the first request of a page it shows in the permission prompt, at the top
+/// left of the card, over the page; or hides it. The requests of closed pages go.
+#[cfg(target_os = "macos")]
+fn sync_permission_prompt() {
+    PERMISSION_REQUESTS.with_borrow_mut(|requests| {
+        requests.retain(|request| request.browser.is_valid() == 1);
+    });
+    let shown = PERMISSION_REQUESTS.with_borrow(|requests| {
+        let request = requests.iter().find(|request| shows_request(request))?;
+        let asks: Vec<_> = request
+            .asks
+            .iter()
+            .map(|ask| json!({ "text": ask.asks, "symbol": ask.symbol }))
+            .collect();
+        Some(json!({ "id": request.id, "site": request.site, "asks": asks }))
+    });
+    let card = card_rect().unwrap_or_default();
+    let frame = Rect {
+        x: card.x + PERMISSION_INSET,
+        y: card.y + PERMISSION_INSET,
+        width: PERMISSION_WIDTH,
+        height: win().permission_height.get(),
+    };
+    let detail = shown.clone().unwrap_or_default();
+    crate::native::event(
+        win().id,
+        "permission",
+        &format!(r#"new CustomEvent("arbalete:permission", {{ detail: {detail} }})"#),
+    );
+    crate::native::surface(win().id, "permission", shown.is_some(), &frame);
+}
+
+/// The permission prompt's width, and how far inside the card's top left corner it shows.
+const PERMISSION_WIDTH: i32 = 300;
+const PERMISSION_INSET: i32 = 10;
 
 // Gives Arbalete the shortcuts it takes before the page, as their priority says (settings::Priority):
 // the others reach the page first, and the menu only when the page leaves them.

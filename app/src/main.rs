@@ -7,6 +7,7 @@ mod menu;
 mod motion;
 #[cfg(target_os = "macos")]
 mod native;
+mod permissions;
 mod scheme;
 mod settings;
 mod shell;
