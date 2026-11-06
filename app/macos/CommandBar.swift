@@ -401,7 +401,7 @@ struct CommandBarView: View {
                 .frame(height: searchRow)
                 if !rows.isEmpty {
                     // A hairline under the field while results show, like Arc's.
-                    Rectangle().fill(Color.ink((0x000000, 0.08), (0xFFFFFF, 0.08)))
+                    Rectangle().fill(Color.ink((0x000000, 0.14), (0xFFFFFF, 0.08)))
                         .frame(height: 0.5)
                         .padding(.horizontal, 12)
                     ScrollViewReader { scroll in
@@ -503,7 +503,7 @@ struct ResultRow: View {
             // Like Arc's, a page's site after its title, periwinkle while it is picked.
             (Text(row.title).foregroundStyle(picked ? Color.white : Color.ink((0x000000, 0.8), (0xFFFFFF, 0.8)))
                 + Text(site.map { " — \($0)" } ?? "")
-                .foregroundStyle(picked ? color("#979bff") : Color.ink((0x000000, 0.31), (0xFFFFFF, 0.31))))
+                .foregroundStyle(picked ? Color.ink((0xFFFFFF, 1), (0x979BFF, 1)) : Color.ink((0x000000, 0.42), (0xFFFFFF, 0.31))))
                 .lineLimit(1)
                 .font(.system(size: 13, weight: .medium))
             Spacer(minLength: 8)
@@ -516,7 +516,7 @@ struct ResultRow: View {
                     .frame(width: 24, height: 24)
                     .background(
                         RoundedRectangle(cornerRadius: 5).fill(
-                            picked ? Color.white.opacity(0.99) : Color.ink((0x000000, 0.04), (0xFFFFFF, 0.04))))
+                            picked ? Color.white.opacity(0.99) : Color.ink((0x000000, 0.08), (0xFFFFFF, 0.04))))
                     .padding(.leading, 1)
             }
         }
@@ -527,7 +527,8 @@ struct ResultRow: View {
         // the pointer, measured.
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(picked ? color("#373dd0") : Color.ink((0x000000, 0.035), (0xFFFFFF, 0.035)).opacity(hovered ? 1 : 0))
+                // Measured on Arc's light theme too: periwinkle while picked, 6% black hovered.
+                .fill(picked ? Color.ink((0x858AFF, 1), (0x373DD0, 1)) : Color.ink((0x000000, 0.06), (0xFFFFFF, 0.035)).opacity(hovered ? 1 : 0))
                 .padding(2))
         .contentShape(Rectangle())
     }

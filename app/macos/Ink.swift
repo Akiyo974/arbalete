@@ -21,10 +21,11 @@ extension Color {
 
 enum Ink {
     /// A row or a pill at rest, like the address's, and a row hovered.
-    static let item = Color.ink((navy, 0.07), (0xFAFBFF, 0.08))
+    static let item = Color.ink((navy, 0.06), (0xFAFBFF, 0.08))
     static let itemHovered = Color.ink((navy, 0.12), (0xFAFBFF, 0.15))
     /// The selected tab's row, and its shadow in light themes.
-    static let selected = Color.ink((0xFFFFFF, 0.85), (0xFAFBFF, 0.17))
+    /// Measured on Arc's light theme: an opaque near-white card, not tinted by the Space.
+    static let selected = Color.ink((0xF3F3F5, 1), (0xFAFBFF, 0.17))
     static let selectedBehind = Color.ink((0xFFFFFF, 0.20), (0xFAFBFF, 0.10))
     /// The sidebar's buttons while another app is in front, under their own 75%.
     static let buttonBehind = Color.ink((navy, 0.37), (0xFFFFFF, 0.32))

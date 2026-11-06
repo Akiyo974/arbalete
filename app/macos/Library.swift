@@ -379,12 +379,14 @@ struct FilterPanel: View {
                                 if on { model.filters.remove(chip) } else { model.filters.insert(chip) }
                             } label: {
                                 Text(name).font(.system(size: 14))
-                                    .foregroundStyle(on ? Color(white: 0.1) : Ink.secondary)
+                                    // Like Arc's: dark grey picked in light themes, light grey
+                                    // in dark ones.
+                                    .foregroundStyle(on ? Color.ink((0xFFFFFF, 1), (0x19191B, 1)) : Ink.secondary)
                                     .padding(.horizontal, 11)
                                     .frame(height: 32)
                                     .background(
                                         RoundedRectangle(cornerRadius: 10)
-                                            .fill(on ? Color(white: 0.6) : Ink.item))
+                                            .fill(on ? Color.ink((0x585760, 1), (0x9A99A2, 1)) : Ink.item))
                             }
                             .buttonStyle(.plain)
                         }
@@ -857,6 +859,11 @@ struct SpaceColumn: View {
                     Tint.colors(space.theme.colors).opacity(0.75)
                 }
                 .clipShape(shape)
+            } else {
+                // Like Arc's, every Space on a card: lighter, with a soft shadow, in light themes,
+                // a little lighter in dark ones.
+                shape.fill(Color.ink((0xFFFFFF, 0.5), (0xFFFFFF, 0.025)))
+                    .shadow(color: Color.ink((0x000000, 0.09), (0x000000, 0)), radius: 10)
             }
         }
         .contentShape(shape)
