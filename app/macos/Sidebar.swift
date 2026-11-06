@@ -1574,9 +1574,7 @@ struct Footer: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            IconButton(symbol: "books.vertical", label: "Library") {
-                model.openLibrary(nil)
-            }
+            LibraryEntry(model: model, recent: model.recent)
             .opacity(drafting ? 0 : 1)
             .disabled(drafting)
             SpaceIcons(model: model)

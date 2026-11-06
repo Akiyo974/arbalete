@@ -31,6 +31,10 @@ pub struct Settings {
     pub developer_sites: BTreeMap<String, bool>,
     /// The shortcuts changed in the settings, by menu action (mac::apply_shortcuts).
     pub shortcuts: BTreeMap<String, ShortcutOverride>,
+    /// Where the recent items over the library's button come from, like Arc's "Show media from:":
+    /// "documents", "desktop", "screenshots", "captures" and "downloads". The folders ask macOS
+    /// for access, so only the app's own are on at first.
+    pub media_sources: Vec<String>,
 }
 
 /// A shortcut changed from its default, like Arc's: other keys, none, or who takes them first.
@@ -81,6 +85,7 @@ impl Default for Settings {
             sidebar_width: 260,
             developer_sites: BTreeMap::new(),
             shortcuts: BTreeMap::new(),
+            media_sources: vec!["captures".into(), "downloads".into()],
         }
     }
 }
@@ -120,6 +125,7 @@ mod tests {
             awake_sites: vec!["mail.google.com".into()],
             sidebar_width: 320,
             developer_sites: BTreeMap::from([("example.com".into(), true)]),
+            media_sources: vec!["desktop".into()],
             shortcuts: BTreeMap::from([(
                 "newTab".into(),
                 ShortcutOverride {

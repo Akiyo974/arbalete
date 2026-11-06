@@ -23,6 +23,8 @@ final class AppModel: ObservableObject {
     /// The Spaces there were when one was asked for, until it shows.
     var awaitingDraft: Set<Int>?
     @Published var downloads: [Download] = []
+    /// The recent items over the library's button (HomeBadging.swift).
+    let recent = RecentItems()
     /// The pointer is over the sidebar: like Arc's, the divider offers to clear today's tabs.
     @Published var sidebarHovered = false
     /// The download the media viewer shows (MediaViewer.swift).
@@ -113,6 +115,7 @@ final class AppModel: ObservableObject {
     init(window: UInt32, send: @escaping Send) {
         self.window = window
         self.send = send
+        recent.start { [weak self] in self?.refreshRecent() }
         flags = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             self?.optionHeld = event.modifierFlags.contains(.option)
             return event
@@ -183,6 +186,7 @@ final class AppModel: ObservableObject {
             editingSpace = try? JSONDecoder().decode(SpaceEdit.self, from: detail)
         case "arbalete:downloads":
             downloads = (try? JSONDecoder().decode([Download].self, from: detail)) ?? downloads
+            refreshRecent()
         case "arbalete:archive":
             archive = (try? JSONDecoder().decode([ArchivedTab].self, from: detail)) ?? archive
         case "arbalete:swipe":
@@ -436,7 +440,13 @@ final class AppModel: ObservableObject {
     }
 
     /// Shows the library, on a section or the one it showed last.
+    /// Gathers the recent items over the library's button again.
+    func refreshRecent() {
+        recent.refresh(downloads: downloads, sources: state?.mediaSources ?? ["captures", "downloads"])
+    }
+
     func openLibrary(_ section: LibrarySection?) {
+        recent.markRead()
         libraryShown = true
         run("library/show")
         pick(section ?? self.section)

@@ -286,6 +286,9 @@ pub enum Command {
     CopyLink,
     /// Puts it there as a Markdown link, its title and url: `link/copy-markdown`.
     CopyMarkdownLink,
+    /// Shows the recent items of a source over the library's button, or hides them:
+    /// `media/source/<id>/<on|off>`.
+    MediaSource(String, bool),
     /// Changes a shortcut: `shortcut/set/<id>/<modifiers>/<key>`, `shortcut/remove/<id>`,
     /// `shortcut/reset/<id>`, `shortcut/priority/<id>/<websites|both|app>`, `shortcuts/reset`.
     Shortcut(ShortcutEdit),
@@ -762,6 +765,26 @@ impl Command {
                         _ => return None,
                     };
                     return percent_decode(site).map(|site| Self::DeveloperMode(site, on));
+                }
+                if let Some((source, on)) = path
+                    .strip_prefix("media/source/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let on = match on {
+                        "on" => true,
+                        "off" => false,
+                        _ => return None,
+                    };
+                    let known = [
+                        "documents",
+                        "desktop",
+                        "screenshots",
+                        "captures",
+                        "downloads",
+                    ];
+                    return known
+                        .contains(&source)
+                        .then(|| Self::MediaSource(source.to_string(), on));
                 }
                 if path == "shortcuts/reset" {
                     return Some(Self::Shortcut(ShortcutEdit::ResetAll));
@@ -1291,6 +1314,11 @@ mod tests {
                 crate::settings::Priority::Websites
             )))
         );
+        assert_eq!(
+            Command::parse("media/source/desktop/on"),
+            Some(Command::MediaSource("desktop".into(), true))
+        );
+        assert_eq!(Command::parse("media/source/elsewhere/on"), None);
         assert_eq!(
             Command::parse("shortcuts/reset"),
             Some(Command::Shortcut(ShortcutEdit::ResetAll))

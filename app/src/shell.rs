@@ -911,6 +911,7 @@ impl UiState {
         json!({
             "page": self.page,
             "toolbar": app_settings().show_toolbar,
+            "mediaSources": app_settings().media_sources,
             "incognito": incognito,
             "space": displayed,
             "spaces": spaces.iter().map(|s| json!({
@@ -6723,6 +6724,16 @@ fn run_command(command: Command) {
             }
         }
         (Command::Shortcut(edit), _) => edit_shortcut(edit),
+        (Command::MediaSource(source, on), _) => {
+            let mut settings = app_settings();
+            settings.media_sources.retain(|kept| *kept != source);
+            if on {
+                settings.media_sources.push(source);
+            }
+            SETTINGS.set(settings);
+            save_settings();
+            send_state();
+        }
         (Command::SaveCaptureToLibrary(file), _) => save_capture_to_library(&file),
         (Command::CopyMarkdownLink, _) => {
             let link = STATE.with_borrow_mut(|state| {
