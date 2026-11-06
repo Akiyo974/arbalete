@@ -80,6 +80,10 @@ run = [
   "version=$(sed -n 's/^version = \"\\(.*\\)\"/\\1/p' app/Cargo.toml) && dmgbuild -s packaging/dmg/settings.py -D app=target/bundle/Arbalete.app Arbalete \"target/dmg/Arbalete-$version-arm64.dmg\" && cd target/dmg && shasum -a 256 \"Arbalete-$version-arm64.dmg\" | tee \"Arbalete-$version-arm64.dmg.sha256\"",
 ]
 
+[tasks.website]
+description = "Build the website into website/dist"
+run = "node website/scripts/build.mjs"
+
 [tasks.run]
 description = "Build and run the app"
 depends = ["app"]
