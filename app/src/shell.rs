@@ -203,6 +203,9 @@ thread_local! {
     /// The sites' permission requests the user has not answered yet, oldest first.
     static PERMISSION_REQUESTS: RefCell<Vec<PermissionRequest>> = const { RefCell::new(Vec::new()) };
     static NEXT_PERMISSION_REQUEST: Cell<u64> = const { Cell::new(0) };
+    /// The sites' and proxies' requests to sign in the user has not answered yet, oldest first.
+    static AUTH_REQUESTS: RefCell<Vec<AuthRequest>> = const { RefCell::new(Vec::new()) };
+    static NEXT_AUTH_REQUEST: Cell<u64> = const { Cell::new(0) };
     /// The shown page whose renderer last ended, by its browser's id, and when.
     static LAST_CRASH: Cell<Option<(i32, i64)>> = const { Cell::new(None) };
     /// The incognito windows' profiles, with the temporary folder that stands for their
@@ -354,6 +357,8 @@ struct Win {
     site_height: Cell<i32>,
     /// How tall the permission prompt's content is (Command::PermissionPromptHeight).
     permission_height: Cell<i32>,
+    /// How tall the sign-in prompt's content is (Command::AuthPromptHeight).
+    auth_height: Cell<i32>,
     /// Where the site controls' panel shows its extensions (Command::SiteTargets).
     site_targets: RefCell<Vec<ExtensionTarget>>,
     /// When the panel last closed: a click on its button closes it, as the panel loses the focus,
@@ -428,6 +433,7 @@ impl Win {
             site_button: RefCell::new(None),
             site_height: Cell::new(1),
             permission_height: Cell::new(1),
+            auth_height: Cell::new(1),
             site_targets: RefCell::new(Vec::new()),
             site_closed: Cell::new(None),
             extension_popup: RefCell::new(None),
@@ -1578,6 +1584,7 @@ fn sync_native_surfaces() {
         }
     }
     sync_permission_prompt();
+    sync_auth_prompt();
     if let Some(overlay) = IMPORT.with_borrow(Clone::clone) {
         IMPORT_VIEW.with(|view| mirror(view, &overlay));
     }
@@ -6937,6 +6944,11 @@ fn run_command(command: Command) {
             win().permission_height.set(height);
             surfaces_changed();
         }
+        (Command::AnswerAuth(id, credentials), _) => answer_auth(id, credentials),
+        (Command::AuthPromptHeight(height), _) => {
+            win().auth_height.set(height);
+            surfaces_changed();
+        }
         (Command::OpenExtensionPopup(id), _) => open_extension_popup(&id),
         (Command::ShowStore, _) => show_store(),
         (Command::ShowCertificate, _) => show_certificate(),
@@ -7090,6 +7102,9 @@ wrap_app! {
             if cfg!(debug_assertions) {
                 command_line.append_switch(Some(&CefString::from("use-mock-keychain")));
             }
+            // Sites asking to sign in reach the sign-in prompt (auth_credentials): Chrome's own
+            // prompt has no tab to show in.
+            command_line.append_switch(Some(&CefString::from("disable-chrome-login-prompt")));
             // The helper extension, in every profile, tells extensions which tab is which.
             if let Some(dir) = extensions::helper_dir() {
                 command_line.append_switch_with_value(
@@ -7733,9 +7748,15 @@ fn keep_decision(browser: &Browser, origin: &str, asks: &[&permissions::Capabili
 /// Whether the window shows a request's page: its tab's, shown alone or in a split; else, a page
 /// that is no tab's, like Peek's, in the window in front as the request came.
 fn shows_request(request: &PermissionRequest) -> bool {
-    match page_tab(&request.browser) {
+    shows_page(&request.browser, request.window)
+}
+
+/// Whether the window shows `browser`'s page: its tab's, shown alone or in a split; else, a page
+/// that is no tab's, like Peek's, in the window `window`.
+fn shows_page(browser: &Browser, window: u32) -> bool {
+    match page_tab(browser) {
         Some(tab) => win().shown.get() == Some(tab) || win().split.borrow().0.contains(&tab),
-        None => win().id == request.window,
+        None => win().id == window,
     }
 }
 
@@ -7830,6 +7851,116 @@ fn page_ended(browser: &Browser) {
     }
 }
 
+/// A site's or a proxy's request to sign in, waiting for the user's answer in the sign-in prompt.
+/// What the user answers goes to Chromium alone, which keeps it for the session.
+struct AuthRequest {
+    /// What the prompt's answer names it by.
+    id: u64,
+    browser: Browser,
+    /// The window in front as it came, which shows its prompt unless the page is a tab's.
+    window: u32,
+    host: String,
+    realm: String,
+    proxy: bool,
+    callback: AuthCallback,
+}
+
+wrap_task! {
+    struct AskAuth {
+        browser: Browser,
+        host: String,
+        realm: String,
+        proxy: bool,
+        callback: AuthCallback,
+    }
+
+    impl Task {
+        /// Keeps the request until the user answers it in the sign-in prompt.
+        fn execute(&self) {
+            let id = NEXT_AUTH_REQUEST.get();
+            NEXT_AUTH_REQUEST.set(id + 1);
+            let request = AuthRequest {
+                id,
+                browser: self.browser.clone(),
+                window: FOCUSED.get(),
+                host: self.host.clone(),
+                realm: self.realm.clone(),
+                proxy: self.proxy,
+                callback: self.callback.clone(),
+            };
+            AUTH_REQUESTS.with_borrow_mut(|requests| requests.push(request));
+            surfaces_changed();
+        }
+    }
+}
+
+/// Gives the request `id` the user name and password the user signed in with, or turns it down.
+fn answer_auth(id: u64, credentials: Option<(String, String)>) {
+    let request = AUTH_REQUESTS.with_borrow_mut(|requests| {
+        let index = requests.iter().position(|request| request.id == id)?;
+        Some(requests.remove(index))
+    });
+    let Some(request) = request else { return };
+    match credentials {
+        Some((user, password)) => request.callback.cont(
+            Some(&CefString::from(user.as_str())),
+            Some(&CefString::from(password.as_str())),
+        ),
+        None => request.callback.cancel(),
+    }
+    surfaces_changed();
+}
+
+/// Turns down the requests to sign in of `browser`'s page.
+fn forget_auth(browser: &Browser) {
+    let id = browser.identifier();
+    let forgotten: Vec<_> = AUTH_REQUESTS.with_borrow_mut(|requests| {
+        requests
+            .extract_if(.., |request| request.browser.identifier() == id)
+            .collect()
+    });
+    if !forgotten.is_empty() {
+        forgotten
+            .iter()
+            .for_each(|request| request.callback.cancel());
+        surfaces_changed();
+    }
+}
+
+/// Shows the window the first request to sign in of a page it shows in the sign-in prompt, at the
+/// top of the card, over the page; or hides it. The requests of closed pages go.
+#[cfg(target_os = "macos")]
+fn sync_auth_prompt() {
+    AUTH_REQUESTS.with_borrow_mut(|requests| {
+        requests.retain(|request| request.browser.is_valid() == 1);
+    });
+    let shown = AUTH_REQUESTS.with_borrow(|requests| {
+        let request = requests
+            .iter()
+            .find(|request| shows_page(&request.browser, request.window))?;
+        Some(json!({
+            "id": request.id,
+            "host": request.host,
+            "realm": request.realm,
+            "proxy": request.proxy,
+        }))
+    });
+    let card = card_rect().unwrap_or_default();
+    let frame = Rect {
+        x: card.x + (card.width - PERMISSION_WIDTH) / 2,
+        y: card.y + PERMISSION_INSET,
+        width: PERMISSION_WIDTH,
+        height: win().auth_height.get(),
+    };
+    let detail = shown.clone().unwrap_or_default();
+    crate::native::event(
+        win().id,
+        "auth",
+        &format!(r#"new CustomEvent("arbalete:auth", {{ detail: {detail} }})"#),
+    );
+    crate::native::surface(win().id, "auth", shown.is_some(), &frame);
+}
+
 /// Who takes a shortcut first: the settings' choice, or its default.
 fn shortcut_priority(id: &str) -> settings::Priority {
     let changed = app_settings()
@@ -7847,6 +7978,10 @@ wrap_request_handler! {
         /// the tab staying on its site.
         fn on_before_browse(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, request: Option<&mut Request>, user_gesture: i32, is_redirect: i32) -> i32 {
             let (Some(browser), Some(frame), Some(request)) = (browser, frame, request) else { return 0 };
+            // A page going elsewhere no longer asks to sign in.
+            if frame.is_main() == 1 {
+                forget_auth(browser);
+            }
             if user_gesture == 0 || is_redirect == 1 || frame.is_main() == 0 {
                 return 0;
             }
@@ -7868,6 +8003,16 @@ wrap_request_handler! {
             if let Some(browser) = browser {
                 post_task(ThreadId::UI, Some(&mut PageEnded::new(browser.clone())));
             }
+        }
+
+        /// Asks the user to sign in to a site, or a proxy, using HTTP authentication, in the
+        /// sign-in prompt; on the IO thread.
+        fn auth_credentials(&self, browser: Option<&mut Browser>, _origin_url: Option<&CefString>, is_proxy: i32, host: Option<&CefString>, _port: i32, realm: Option<&CefString>, _scheme: Option<&CefString>, callback: Option<&mut AuthCallback>) -> i32 {
+            let (Some(browser), Some(callback)) = (browser, callback) else { return 0 };
+            let text = |text: Option<&CefString>| text.map(CefString::to_string).unwrap_or_default();
+            let mut ask = AskAuth::new(browser.clone(), text(host), text(realm), is_proxy == 1, callback.clone());
+            post_task(ThreadId::UI, Some(&mut ask));
+            1
         }
 
         /// A link clicked with ⇧ shows in Peek, and one clicked with ⌘ opens in a tab, like

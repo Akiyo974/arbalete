@@ -1,5 +1,5 @@
 // The small panels above the page: the find bar, the bar at the page's top in toolbar mode, the
-// site controls and the permission prompt.
+// site controls, the permission prompt and the sign-in prompt.
 
 import AppKit
 import SecurityInterface
@@ -931,6 +931,108 @@ struct PermissionButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// A site's or a proxy's request to sign in with HTTP authentication, which the sign-in prompt
+/// asks the user about (sync_auth_prompt in app/src/shell.rs). What the user types goes to the app
+/// alone, which hands it to Chromium.
+@MainActor
+final class AuthPrompt: ObservableObject {
+    struct Request: Decodable, Equatable {
+        var id: UInt64
+        var host: String
+        var realm: String
+        var proxy: Bool
+    }
+
+    @Published var request: Request?
+    @Published var user = ""
+    @Published var password = ""
+    let app: AppModel
+
+    init(app: AppModel) {
+        self.app = app
+    }
+
+    func handle(_ name: String, _ detail: Data) {
+        guard name == "arbalete:auth" else { return }
+        let request = try? JSONDecoder().decode(Request.self, from: detail)
+        // The app sends it again after each command: only a new one empties the fields.
+        if request != self.request {
+            self.request = request
+            (user, password) = ("", "")
+        }
+    }
+
+    /// Signs in with what the user typed, or, `false`, turns the request down.
+    func answer(_ signIn: Bool) {
+        guard let request else { return }
+        if signIn {
+            app.run("auth/sign-in/\(request.id)/\(percentEncoded(user))/\(percentEncoded(password))")
+        } else {
+            app.run("auth/cancel/\(request.id)")
+        }
+        (user, password) = ("", "")
+    }
+}
+
+/// The sign-in prompt, like the permission prompt: a small panel at the top of the page, with the
+/// site, or the proxy, and its realm, a user name and a password, and Cancel and Sign In.
+struct AuthView: View {
+    @ObservedObject var prompt: AuthPrompt
+    @FocusState private var naming: Bool
+
+    var body: some View {
+        if let request = prompt.request {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(request.proxy ? "Sign in to the proxy" : "Sign in to")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    // Cut at the head, a long host keeps its end, the domain it belongs to, in view.
+                    Text(request.host)
+                        .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                    if !request.realm.isEmpty {
+                        Text("“\(request.realm)”")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                VStack(spacing: 8) {
+                    TextField("User name", text: $prompt.user)
+                        .focused($naming)
+                    SecureField("Password", text: $prompt.password)
+                }
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 13))
+                .onSubmit { prompt.answer(true) }
+                HStack(spacing: 8) {
+                    PermissionButton(title: "Cancel", prominent: false) { prompt.answer(false) }
+                        .keyboardShortcut(.cancelAction)
+                    PermissionButton(title: "Sign In", prominent: true) { prompt.answer(true) }
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.onAppear { report(geometry.size.height) }
+                        .onChange(of: geometry.size.height) { _, height in report(height) }
+                })
+            .frame(maxHeight: .infinity, alignment: .top)
+            .onAppear { naming = true }
+            .onChange(of: request.id) { naming = true }
+        }
+    }
+
+    /// Tells the app the prompt's height, which it fits it to.
+    private func report(_ height: CGFloat) {
+        prompt.app.run("auth/height/\(Int(height.rounded(.up)))")
     }
 }
 

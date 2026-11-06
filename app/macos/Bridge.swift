@@ -546,6 +546,7 @@ final class NativeWindow {
     let siteControls: SiteControls
     let themePicker: ThemePickerModel
     let permissionPrompt: PermissionPrompt
+    let authPrompt: AuthPrompt
     let importModel: ImportModel
     let splitHandles: SplitHandles
     let pages: PagePlacer
@@ -649,6 +650,12 @@ final class NativeWindow {
         let permissionSurface = Surface(in: window, radius: 14) { PermissionView(prompt: permission) }
         permissionSurface.pops = true
         surfaces["permission"] = permissionSurface
+        let auth = AuthPrompt(app: app)
+        authPrompt = auth
+        let authSurface = Surface(in: window, radius: 14) { AuthView(prompt: auth) }
+        authSurface.pops = true
+        authSurface.takesKeyboard = true
+        surfaces["auth"] = authSurface
         let importer = ImportModel(app: app)
         importModel = importer
         let importSurface = Surface(in: window, radius: 16) { ImportView(model: importer) }
@@ -692,6 +699,7 @@ final class NativeWindow {
         case "site": siteControls.handle(name, detail)
         case "theme": themePicker.handle(name, detail)
         case "permission": permissionPrompt.handle(name, detail)
+        case "auth": authPrompt.handle(name, detail)
         case "import": importModel.handle(name, detail)
         default: break
         }

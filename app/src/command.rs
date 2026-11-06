@@ -176,6 +176,12 @@ pub enum Command {
     SetSitePermission(u32, bool),
     /// Forgets what the selected tab's site was allowed or blocked: `permission/site/reset`.
     ResetSitePermissions,
+    /// Answers a site's or a proxy's request to sign in, by its id, with a user name and a
+    /// password, percent-encoded: `auth/sign-in/<id>/<user>/<password>`; or turns it down:
+    /// `auth/cancel/<id>`.
+    AnswerAuth(u64, Option<(String, String)>),
+    /// The sign-in prompt takes this height: `auth/height/<height>`.
+    AuthPromptHeight(i32),
     /// Opens an extension's popup from the site controls, under their button:
     /// `site/extension/<id>`.
     OpenExtensionPopup(String),
@@ -679,6 +685,24 @@ impl Command {
                 }
                 if let Some(height) = path.strip_prefix("site/height/") {
                     return height.parse().ok().map(Self::SiteControlsHeight);
+                }
+                if let Some(height) = path.strip_prefix("auth/height/") {
+                    return height.parse().ok().map(Self::AuthPromptHeight);
+                }
+                if let Some(id) = path.strip_prefix("auth/cancel/") {
+                    return id.parse().ok().map(|id| Self::AnswerAuth(id, None));
+                }
+                if let Some(rest) = path.strip_prefix("auth/sign-in/") {
+                    let mut parts = rest.split('/');
+                    let (id, user, password) = (parts.next()?, parts.next()?, parts.next()?);
+                    if parts.next().is_some() {
+                        return None;
+                    }
+                    let credentials = (percent_decode(user)?, percent_decode(password)?);
+                    return id
+                        .parse()
+                        .ok()
+                        .map(|id| Self::AnswerAuth(id, Some(credentials)));
                 }
                 if let Some(height) = path.strip_prefix("permission/height/") {
                     return height.parse().ok().map(Self::PermissionPromptHeight);
@@ -1367,6 +1391,31 @@ mod tests {
         assert_eq!(
             Command::parse("permission/height/120"),
             Some(Command::PermissionPromptHeight(120))
+        );
+    }
+
+    #[test]
+    fn parses_sign_in_answers() {
+        assert_eq!(
+            Command::parse("auth/sign-in/3/me%40home/p%2Fss%20word"),
+            Some(Command::AnswerAuth(
+                3,
+                Some(("me@home".into(), "p/ss word".into()))
+            ))
+        );
+        assert_eq!(
+            Command::parse("auth/sign-in/3//"),
+            Some(Command::AnswerAuth(3, Some((String::new(), String::new()))))
+        );
+        assert_eq!(Command::parse("auth/sign-in/3/me"), None);
+        assert_eq!(Command::parse("auth/sign-in/3/a/b/c"), None);
+        assert_eq!(
+            Command::parse("auth/cancel/3"),
+            Some(Command::AnswerAuth(3, None))
+        );
+        assert_eq!(
+            Command::parse("auth/height/150"),
+            Some(Command::AuthPromptHeight(150))
         );
         assert_eq!(
             Command::parse("site/extension/abc"),
