@@ -318,6 +318,11 @@ define_class!(
             }
         }
 
+        #[unsafe(method(arbaleteAbout:))]
+        fn about(&self, _sender: Option<&AnyObject>) {
+            crate::native::about();
+        }
+
         #[unsafe(method(arbaleteSettings:))]
         fn settings(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::ShowSettings);
@@ -602,6 +607,14 @@ pub fn setup_menu() {
         (
             ns_string!("Arbalete"),
             vec![
+                // Like Arc's About Arc.
+                item(
+                    mtm,
+                    ns_string!("About Arbalete"),
+                    sel!(arbaleteAbout:),
+                    ns_string!(""),
+                ),
+                NSMenuItem::separatorItem(mtm),
                 item(
                     mtm,
                     ns_string!("Settings…"),

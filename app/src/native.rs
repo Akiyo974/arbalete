@@ -22,6 +22,7 @@ unsafe extern "C" {
         height: f64,
     );
     fn arbalete_ui_detach(window: u32);
+    fn arbalete_ui_about(chromium: *const c_char);
     fn arbalete_ui_settings(shown: bool);
     fn arbalete_ui_certificate(
         window: u32,
@@ -221,6 +222,19 @@ pub extern "C" fn arbalete_window_should_close(window: u32) -> bool {
 #[unsafe(no_mangle)]
 pub extern "C" fn arbalete_window_closed(window: u32) {
     crate::shell::window_closed(window);
+}
+
+/// Shows the About window, with the version of Chromium the app embeds.
+pub fn about() {
+    use cef::sys::{
+        CHROME_VERSION_BUILD, CHROME_VERSION_MAJOR, CHROME_VERSION_MINOR, CHROME_VERSION_PATCH,
+    };
+    let chromium = CString::new(format!(
+        "{CHROME_VERSION_MAJOR}.{CHROME_VERSION_MINOR}.{CHROME_VERSION_BUILD}.{CHROME_VERSION_PATCH}"
+    ))
+    .expect("no NUL");
+    // SAFETY: a C string that lives through the call.
+    unsafe { arbalete_ui_about(chromium.as_ptr()) };
 }
 
 /// Takes the native interface out of `window`, which closed.
