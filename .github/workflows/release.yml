@@ -67,13 +67,29 @@ jobs:
           ARBALETE_SIGN_IDENTITY: Arbalete Release
         run: mise run release
 
+      # The disk image's EdDSA signature and length, which the app checks before installing an
+      # update: the website puts them in its appcast (website/scripts/build.mjs).
+      - name: Sign the update
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
+            echo "::error::The SPARKLE_PRIVATE_KEY secret is missing: the app could not install this update."
+            exit 1
+          fi
+          eval "$(mise env -s bash)"
+          dmg="target/dmg/Arbalete-$VERSION-arm64.dmg"
+          echo "$SPARKLE_PRIVATE_KEY" | "$SPARKLE_PATH/bin/sign_update" --ed-key-file - "$dmg" > "$dmg.sig"
+          cat "$dmg.sig"
+
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           packaging/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
           gh release create "$GITHUB_REF_NAME" --title "Arbalete $VERSION" --notes-file "$RUNNER_TEMP/notes.md" \
-            "target/dmg/Arbalete-$VERSION-arm64.dmg" "target/dmg/Arbalete-$VERSION-arm64.dmg.sha256"
+            "target/dmg/Arbalete-$VERSION-arm64.dmg" "target/dmg/Arbalete-$VERSION-arm64.dmg.sha256" \
+            "target/dmg/Arbalete-$VERSION-arm64.dmg.sig"
 
       - name: Update the cask
         env:
