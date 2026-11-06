@@ -8083,6 +8083,9 @@ const COPY_IMAGE_ADDRESS: i32 = OPEN_LINK + 10;
 const SEARCH_IMAGE: i32 = OPEN_LINK + 11;
 const SEARCH_SELECTION: i32 = OPEN_LINK + 12;
 const INSPECT: i32 = OPEN_LINK + 13;
+const COPY_HIGHLIGHT: i32 = OPEN_LINK + 14;
+/// Chromium's Copy, which the menu has on selected text.
+const CHROMIUM_COPY: i32 = 113;
 
 thread_local! {
     /// The addresses Save Link As… or Save Image As… asked to download, which ask where.
@@ -8101,6 +8104,15 @@ fn displayed_search_engine() -> SearchEngine {
             .map(|p| p.search_engine)
             .unwrap_or_default()
     })
+}
+
+/// A link to text in a page, a text fragment that browsers scroll to and highlight: the page's
+/// address, without its own fragment, and the text, its spaces and the fragment's syntax encoded.
+fn highlight_link(page: &str, text: &str) -> String {
+    let base = page.split('#').next().unwrap_or(page);
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let encoded = arbalete_core::search::encode(&text).replace('-', "%2D");
+    format!("{base}#:~:text={encoded}")
 }
 
 /// Selected text as a menu shows it: on one line, cut after 32 characters.
@@ -8158,6 +8170,14 @@ wrap_context_menu_handler! {
                     model.insert_item_at(0, id, Some(&CefString::from(label.as_str())));
                 }
             }
+            // Like Arc's, a link to the selected text after Chromium's Copy.
+            if !selection.trim().is_empty() {
+                let label = CefString::from(chromium("Copy Link to Highlight").as_str());
+                match model.index_of(CHROMIUM_COPY) {
+                    -1 => model.add_item(COPY_HIGHLIGHT, Some(&label)),
+                    copy => model.insert_item_at((copy + 1) as usize, COPY_HIGHLIGHT, Some(&label)),
+                };
+            }
             if model.count() > 0 {
                 model.add_separator();
             }
@@ -8198,6 +8218,11 @@ wrap_context_menu_handler! {
                 SEARCH_IMAGE => {
                     let url = format!("https://lens.google.com/uploadbyurl?url={}", arbalete_core::search::encode(&image));
                     perform(Action::Run(Command::Open(url)));
+                }
+                COPY_HIGHLIGHT => {
+                    let page = CefString::from(&params.page_url()).to_string();
+                    let selection = CefString::from(&params.selection_text()).to_string();
+                    perform(Action::CopyLink(highlight_link(&page, &selection)));
                 }
                 SEARCH_SELECTION => {
                     let selection = CefString::from(&params.selection_text()).to_string();
@@ -9283,6 +9308,14 @@ mod tests {
         assert_eq!(at(180.0), Some(format!("{:?}", targets[1].target)));
         assert_eq!(at(135.0), None);
         assert_eq!(at(181.0), None);
+    }
+
+    #[test]
+    fn links_to_selected_text_with_a_text_fragment() {
+        assert_eq!(
+            super::highlight_link("https://a.test/page#top", "Dia  reads-between,\n& more"),
+            "https://a.test/page#:~:text=Dia%20reads%2Dbetween%2C%20%26%20more"
+        );
     }
 
     #[test]
