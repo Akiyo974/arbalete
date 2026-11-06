@@ -9,6 +9,9 @@ cask "arbalete" do
   desc "Browser inspired by Arc, on Chromium"
   homepage "https://arbalete.co"
 
+  # The app updates itself (Sparkle): brew upgrade leaves it to it.
+  auto_updates true
+
   depends_on arch: :arm64
   depends_on macos: ">= :sonoma"
 
