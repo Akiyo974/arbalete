@@ -16,7 +16,7 @@ jobs:
     runs-on: macos-latest
     steps:
       # The whole history, for the notes since the previous tag.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -29,12 +29,12 @@ jobs:
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
-      - uses: jdx/mise-action@v5
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
 
       # The same CEF as CI's.
       - name: Cache CEF
         id: cef-cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/cef
           key: cef-156.0.7-${{ runner.os }}-${{ runner.arch }}
