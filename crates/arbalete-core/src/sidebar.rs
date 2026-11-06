@@ -1012,6 +1012,7 @@ impl Sidebar {
             let node = self.nodes.remove(&id).expect("children are known nodes");
             pending.extend(node.children);
         }
+        self.deselect_removed();
         Ok(())
     }
 
@@ -1748,6 +1749,12 @@ impl Sidebar {
             self.splits.remove(&id);
             pending.extend(node.children);
         }
+        self.deselect_removed();
+        Ok(())
+    }
+
+    /// Forgets the selections of tabs removed, in every Space.
+    fn deselect_removed(&mut self) {
         for space in &mut self.spaces {
             if space
                 .selected
@@ -1756,7 +1763,6 @@ impl Sidebar {
                 space.selected = None;
             }
         }
-        Ok(())
     }
 
     /// Moves `id` from `from` to `index` among `to`'s children, saving or forgetting the urls of
@@ -3421,8 +3427,11 @@ mod tests {
         let (folder, pinned) = folder_with_tab(&mut sidebar, &work_space, "f");
         let nodes = sidebar.nodes.len();
         sidebar.display(work).unwrap();
+        // Another Space selecting one of its tabs forgets it.
+        sidebar.select(home, tab).unwrap();
         sidebar.delete_space(work).unwrap();
         assert_eq!(sidebar.displayed().id, books);
+        assert_eq!(sidebar.space(home).unwrap().selected, None);
         assert_eq!(sidebar.spaces().len(), 2);
         assert_eq!(sidebar.nodes.len(), nodes - 5);
         for id in [tab, folder, pinned] {
