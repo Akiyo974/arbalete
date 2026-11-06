@@ -6,7 +6,7 @@
       "type": "lldb",
       "request": "launch",
       "preLaunchTask": "app",
-      "program": "${workspaceFolder}/target/bundle/Arbalete.app/Contents/MacOS/arbalete",
+      "program": "${workspaceFolder}/target/bundle/Arbalete Dev.app/Contents/MacOS/arbalete",
       // A session and a home of its own, never the user's, and DevTools on the UI. Not the
       // repository, which may sit in Documents: macOS asks before an app reads it.
       "cwd": "${env:TMPDIR}",

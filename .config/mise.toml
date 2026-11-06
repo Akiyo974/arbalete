@@ -46,6 +46,7 @@ run = [
   # The bundle and its name in the menu bar and the Finder take a capital, unlike the executable.
   "mv target/bundle/arbalete.app target/bundle/Arbalete.app",
   "plutil -replace CFBundleName -string \"${ARBALETE_BUNDLE_NAME:-Arbalete Dev}\" target/bundle/Arbalete.app/Contents/Info.plist",
+  "plutil -replace CFBundleDisplayName -string \"${ARBALETE_BUNDLE_NAME:-Arbalete Dev}\" target/bundle/Arbalete.app/Contents/Info.plist",
   # Its icon too: the release's with a dashed amber edge (assets/icon-dev.svg).
   "cp \"${ARBALETE_ICON:-app/resources/mac/arbalete-dev.icns}\" target/bundle/Arbalete.app/Contents/Resources/arbalete.icns",
   # Like Arc's, what the system writes for the app (times, apps' names, its panels) speaks the
@@ -71,6 +72,9 @@ run = [
   # keeps the helpers' ad hoc signature.
   "for code in target/bundle/Arbalete.app/Contents/Frameworks/*; do codesign --force -s \"${ARBALETE_SIGN_IDENTITY:--}\" \"$code\"; done",
   "codesign --force -s \"${ARBALETE_SIGN_IDENTITY:--}\" target/bundle/Arbalete.app",
+  # The Dock and the app switcher show the bundle's name only when its file bears it: a
+  # development bundle is "Arbalete Dev.app".
+  "name=\"${ARBALETE_BUNDLE_NAME:-Arbalete Dev}\" && [ \"$name\" = Arbalete ] || mv target/bundle/Arbalete.app \"target/bundle/$name.app\"",
 ]
 
 [tasks.release]
@@ -92,4 +96,4 @@ run = "node website/scripts/build.mjs"
 [tasks.run]
 description = "Build and run the app"
 depends = ["app"]
-run = "target/bundle/Arbalete.app/Contents/MacOS/arbalete"
+run = "'target/bundle/Arbalete Dev.app/Contents/MacOS/arbalete'"
