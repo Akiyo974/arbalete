@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Arbalete (development build)">
+  <title>Arbalete (development build)</title>
+  <!-- Release icon with a dashed amber edge, like a site under construction: development builds only.
+       pathLength + a 100-unit period = exactly 24 equal dashes, 6 per side, one centered on each corner. -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#14111F"/>
+  <rect x="150" y="150" width="724" height="724" rx="140" fill="none" stroke="#FFB020" stroke-width="28" pathLength="2400" stroke-dasharray="55 45" stroke-dashoffset="-72.5" stroke-linecap="round"/>
+  <g transform="translate(100 100) scale(8.24) translate(15 15) scale(0.7) translate(0 6)" stroke-linecap="round">
+    <path d="M50 50 L50 19" stroke="#FFFFFF" stroke-width="29"/>
+    <path d="M50 50 L76.8 65.5" stroke="#FFFFFF" stroke-width="29"/>
+    <path d="M50 50 L23.2 65.5" stroke="#FFFFFF" stroke-width="29"/>
+    <path d="M50 50 L50 19" stroke="#FF5A5A" stroke-width="17"/>
+    <path d="M50 50 L76.8 65.5" stroke="#A35BFF" stroke-width="17"/>
+    <path d="M50 50 L23.2 65.5" stroke="#3D7BFF" stroke-width="17"/>
+    <circle cx="50" cy="50" r="5.5" fill="#FFFFFF"/>
+  </g>
+</svg>

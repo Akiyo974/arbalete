@@ -37,7 +37,7 @@ run = [
 description = "Bundle the app"
 # A development bundle, "Arbalete Dev", stands apart from an installed Arbalete: its own
 # identifier, so its own preferences, permissions and default browser registration (its data
-# folder too, app/src/main.rs). mise run release names the release's.
+# folder too, app/src/main.rs), and its own icon. mise run release names the release's.
 run = [
   # Bundling in place over a previous build invalidates its code signature on macOS.
   "rm -rf target/bundle",
@@ -46,6 +46,8 @@ run = [
   # The bundle and its name in the menu bar and the Finder take a capital, unlike the executable.
   "mv target/bundle/arbalete.app target/bundle/Arbalete.app",
   "plutil -replace CFBundleName -string \"${ARBALETE_BUNDLE_NAME:-Arbalete Dev}\" target/bundle/Arbalete.app/Contents/Info.plist",
+  # Its icon too: the release's with a dashed amber edge (assets/icon-dev.svg).
+  "cp \"${ARBALETE_ICON:-app/resources/mac/arbalete-dev.icns}\" target/bundle/Arbalete.app/Contents/Resources/arbalete.icns",
   # Like Arc's, what the system writes for the app (times, apps' names, its panels) speaks the
   # system's language, around Arbalete's own English.
   "plutil -replace CFBundleAllowMixedLocalizations -bool YES target/bundle/Arbalete.app/Contents/Info.plist",
@@ -75,7 +77,7 @@ run = [
 description = "Bundle an optimized app, signed with ARBALETE_SIGN_IDENTITY, in a disk image"
 # bundle-cef-app builds the dev profile only: optimized here, in a folder of its own, so that
 # the development build stays as it is.
-env = { ARBALETE_BUNDLE_ID = "io.github.amenophis.arbalete", ARBALETE_BUNDLE_NAME = "Arbalete", CARGO_TARGET_DIR = "target/release-build", CARGO_PROFILE_DEV_OPT_LEVEL = "3", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_DEV_DEBUG_ASSERTIONS = "false", CARGO_PROFILE_DEV_OVERFLOW_CHECKS = "false", CARGO_PROFILE_DEV_INCREMENTAL = "false" }
+env = { ARBALETE_BUNDLE_ID = "io.github.amenophis.arbalete", ARBALETE_BUNDLE_NAME = "Arbalete", ARBALETE_ICON = "app/resources/mac/arbalete.icns", CARGO_TARGET_DIR = "target/release-build", CARGO_PROFILE_DEV_OPT_LEVEL = "3", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_DEV_DEBUG_ASSERTIONS = "false", CARGO_PROFILE_DEV_OVERFLOW_CHECKS = "false", CARGO_PROFILE_DEV_INCREMENTAL = "false" }
 run = [
   "mise run app",
   # The app beside a link to Applications, to drag it onto (packaging/dmg).

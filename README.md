@@ -83,7 +83,8 @@ The logo is a bolt seen from behind: three vanes, one color each. The app icon i
 [icon-mono.svg](assets/icon-mono.svg) for single-color use. The mark alone is [mark.svg](assets/mark.svg) on dark
 backgrounds and [mark-light.svg](assets/mark-light.svg) on light ones; [favicon.svg](assets/favicon.svg) follows the
 system theme, and [loader.svg](assets/loader.svg) animates it. The macOS icon, `app/resources/mac/arbalete.icns`, is
-rendered from icon.svg (16 to 1024 px) with `iconutil`. The proposals it was chosen from are in
+rendered from icon.svg (16 to 1024 px) with `iconutil`; development builds use
+[icon-dev.svg](assets/icon-dev.svg), the same with a dashed amber edge, rendered into `arbalete-dev.icns`. The proposals it was chosen from are in
 [assets/logo-history](assets/logo-history).
 
 ## Contributing
