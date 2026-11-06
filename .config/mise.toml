@@ -35,13 +35,18 @@ description = "Bundle the app"
 run = [
   # Bundling in place over a previous build invalidates its code signature on macOS.
   "rm -rf target/bundle",
-  "bundle-cef-app arbalete -o target/bundle -i io.github.amenophis.arbalete -d Arbalete",
+  # Versioned like the app's crate.
+  "bundle-cef-app arbalete -o target/bundle -i io.github.amenophis.arbalete -d Arbalete -v \"$(sed -n 's/^version = \"\\(.*\\)\"/\\1/p' app/Cargo.toml)\"",
   # The bundle and its name in the menu bar and the Finder take a capital, unlike the executable.
   "mv target/bundle/arbalete.app target/bundle/Arbalete.app",
   "plutil -replace CFBundleName -string Arbalete target/bundle/Arbalete.app/Contents/Info.plist",
   # Like Arc's, what the system writes for the app (times, apps' names, its panels) speaks the
   # system's language, around Arbalete's own English.
   "plutil -replace CFBundleAllowMixedLocalizations -bool YES target/bundle/Arbalete.app/Contents/Info.plist",
+  # The interface needs macOS 14 (app/build.rs).
+  "plutil -replace LSMinimumSystemVersion -string 14.0 target/bundle/Arbalete.app/Contents/Info.plist",
+  # Arbalete's license, and Chromium's and CEF's, which redistributing them requires.
+  "cp LICENSE \"$CEF_PATH/CREDITS.html\" target/bundle/Arbalete.app/Contents/Resources/",
   # The helper extension, loaded in every profile (app/src/extensions.rs).
   "cp -R app/extension target/bundle/Arbalete.app/Contents/Resources/arbalete-helper",
   # A browser opens web links: macOS offers it as the default browser, which other apps' links
@@ -58,6 +63,20 @@ run = [
   # keeps the helpers' ad hoc signature.
   "for code in target/bundle/Arbalete.app/Contents/Frameworks/*; do codesign --force -s \"${ARBALETE_SIGN_IDENTITY:--}\" \"$code\"; done",
   "codesign --force -s \"${ARBALETE_SIGN_IDENTITY:--}\" target/bundle/Arbalete.app",
+]
+
+[tasks.release]
+description = "Bundle an optimized app, signed with ARBALETE_SIGN_IDENTITY, in a disk image"
+# bundle-cef-app builds the dev profile only: optimized here, in a folder of its own, so that
+# the development build stays as it is.
+env = { CARGO_TARGET_DIR = "target/release-build", CARGO_PROFILE_DEV_OPT_LEVEL = "3", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_DEV_DEBUG_ASSERTIONS = "false", CARGO_PROFILE_DEV_OVERFLOW_CHECKS = "false", CARGO_PROFILE_DEV_INCREMENTAL = "false" }
+run = [
+  "mise run app",
+  # The app beside a link to Applications, to drag it onto.
+  "rm -rf target/dmg && mkdir -p target/dmg/root",
+  "ditto target/bundle/Arbalete.app target/dmg/root/Arbalete.app",
+  "ln -s /Applications target/dmg/root/Applications",
+  "version=$(sed -n 's/^version = \"\\(.*\\)\"/\\1/p' app/Cargo.toml) && hdiutil create -quiet -volname Arbalete -srcfolder target/dmg/root -format UDZO \"target/dmg/Arbalete-$version-arm64.dmg\" && cd target/dmg && shasum -a 256 \"Arbalete-$version-arm64.dmg\" | tee \"Arbalete-$version-arm64.dmg.sha256\"",
 ]
 
 [tasks.run]

@@ -561,9 +561,10 @@ requires notarized apps.
    `brew install --cask amenophis/tap/arbalete` and updates with `brew upgrade`.
 2. **A release build**, `mise run release`: the bundle of `mise run app` built in release mode, its version
    (`CFBundleShortVersionString`, `CFBundleVersion`) taken from `app/Cargo.toml`, signed with the release
-   certificate (`ARBALETE_SIGN_IDENTITY`), the framework and helpers one by one as today. Packed into `Arbalete-<version>-arm64.dmg` with `hdiutil` (no other tool),
-   holding the app, a link to `/Applications`, and CEF's and Chromium's license files, which redistributing
-   them requires.
+   certificate (`ARBALETE_SIGN_IDENTITY`), the framework and helpers one by one as today. Packed into
+   `Arbalete-<version>-arm64.dmg` with `hdiutil` (no other tool), holding the app and a link to
+   `/Applications`; the app carries Arbalete's license and Chromium's and CEF's (`CREDITS.html`), which
+   redistributing them requires.
 3. **A release workflow** on a `v*` tag pushed from `main`:
    1. checks the tag matches the version in `app/Cargo.toml`;
    2. imports the release certificate into a temporary keychain and builds the DMG on `macos-latest` (Apple
