@@ -20,11 +20,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check the tag is the app's version
+      - name: Check the tag is the app's version, on main
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' app/Cargo.toml)
           if [ "v$version" != "$GITHUB_REF_NAME" ]; then
             echo "::error::The tag $GITHUB_REF_NAME is not the app's version, $version."
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::The tag $GITHUB_REF_NAME is not on main."
             exit 1
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
