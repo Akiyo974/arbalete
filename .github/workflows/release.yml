@@ -11,6 +11,9 @@ permissions:
   # To start the website's deployment, which lists the new release.
   actions: write
 
+# One release at a time: two would race on the cask. None is cancelled half-published.
+concurrency: release
+
 jobs:
   release:
     runs-on: macos-latest
