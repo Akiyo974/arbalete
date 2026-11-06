@@ -297,8 +297,9 @@ define_class!(
         fn get_url(&self, event: &NSAppleEventDescriptor, _reply: &NSAppleEventDescriptor) {
             let url: Option<Retained<NSAppleEventDescriptor>> =
                 unsafe { msg_send![event, paramDescriptorForKeyword: DIRECT_OBJECT] };
-            if let Some(url) = url.and_then(|url| url.stringValue()) {
-                crate::shell::open_link(Some(url.to_string()));
+            let url = url.and_then(|url| url.stringValue()).map(|url| url.to_string());
+            if let Some(url) = url.filter(|url| opens_from_another_app(url)) {
+                crate::shell::open_link(Some(url));
             }
         }
 
@@ -312,9 +313,10 @@ define_class!(
                 let url = files
                     .descriptorAtIndex(index)
                     .and_then(|file| file.fileURLValue())
-                    .and_then(|url| url.absoluteString());
-                if let Some(url) = url {
-                    crate::shell::open_link(Some(url.to_string()));
+                    .and_then(|url| url.absoluteString())
+                    .map(|url| url.to_string());
+                if let Some(url) = url.filter(|url| opens_from_another_app(url)) {
+                    crate::shell::open_link(Some(url));
                 }
             }
         }
@@ -1885,6 +1887,33 @@ fn chromium_locale_of(tag: &str) -> String {
         }
         ("zh", _) => "zh-CN".to_string(),
         (language, _) => language.to_string(),
+    }
+}
+
+/// Whether a link another app sends may open: a web page or a file, never an internal page like
+/// `chrome://` that only the user may open.
+fn opens_from_another_app(url: &str) -> bool {
+    let scheme = url
+        .split_once(':')
+        .map(|(scheme, _)| scheme.to_ascii_lowercase());
+    matches!(scheme.as_deref(), Some("http" | "https" | "file"))
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::opens_from_another_app;
+
+    #[test]
+    fn opens_only_web_pages_and_files() {
+        assert!(opens_from_another_app("https://example.com/"));
+        assert!(opens_from_another_app("HTTP://example.com/"));
+        assert!(opens_from_another_app("file:///Users/me/page.html"));
+        assert!(!opens_from_another_app("chrome://settings"));
+        assert!(!opens_from_another_app(
+            "devtools://devtools/bundled/inspector.html"
+        ));
+        assert!(!opens_from_another_app("javascript:alert(1)"));
+        assert!(!opens_from_another_app("example.com"));
     }
 }
 
