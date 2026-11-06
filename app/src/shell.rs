@@ -23,7 +23,6 @@ use arbalete_core::sidebar::{
 };
 use arbalete_core::url_routing::Destination;
 use arbalete_core::{favicon, store};
-use cef::wrapper::stream_resource_handler::StreamResourceHandler;
 use cef::*;
 use serde::Serialize;
 use serde_json::json;
@@ -8611,68 +8610,7 @@ fn browser_closed() {
     }
 }
 
-wrap_request_handler! {
-    struct UiRequestHandler {}
-
-    impl RequestHandler {
-        fn resource_request_handler(
-            &self,
-            _browser: Option<&mut Browser>,
-            _frame: Option<&mut Frame>,
-            request: Option<&mut Request>,
-            _is_navigation: i32,
-            _is_download: i32,
-            _request_initiator: Option<&CefString>,
-            _disable_default_handling: Option<&mut i32>,
-        ) -> Option<ResourceRequestHandler> {
-            let url = CefString::from(&request?.url()).to_string();
-            url.starts_with(UI_ORIGIN).then(UiResourceRequestHandler::new)
-        }
-    }
-}
-
-wrap_resource_request_handler! {
-    struct UiResourceRequestHandler {}
-
-    impl ResourceRequestHandler {
-        fn on_before_resource_load(
-            &self,
-            _browser: Option<&mut Browser>,
-            _frame: Option<&mut Frame>,
-            _request: Option<&mut Request>,
-            _callback: Option<&mut Callback>,
-        ) -> ReturnValue {
-            ReturnValue::CONTINUE
-        }
-
-        fn resource_handler(
-            &self,
-            _browser: Option<&mut Browser>,
-            _frame: Option<&mut Frame>,
-            request: Option<&mut Request>,
-        ) -> Option<ResourceHandler> {
-            let url = CefString::from(&request?.url()).to_string();
-            let path = ui_path(&url);
-            if let Some(file) = favicon_file(path) {
-                let file = CefString::from(file.to_str()?);
-                let stream = stream_reader_create_for_file(Some(&file))?;
-                return Some(StreamResourceHandler::new(200, "OK".to_string(), "image/png".to_string(), None, Some(stream)));
-            }
-            if let Some((file, mime)) = media_file(path).or_else(|| extensions::icon_file(path)) {
-                let file = CefString::from(file.to_str()?);
-                let stream = stream_reader_create_for_file(Some(&file))?;
-                return Some(StreamResourceHandler::new(200, "OK".to_string(), mime.to_string(), None, Some(stream)));
-            }
-            let command = path.strip_prefix("command/").and_then(Command::parse)?;
-            post_task(ThreadId::UI, Some(&mut RunCommand::new(command)));
-            let body = b"{}";
-            let stream = stream_reader_create_for_data(body.as_ptr() as *mut u8, body.len());
-            Some(StreamResourceHandler::new(200, "OK".to_string(), "application/json".to_string(), None, stream))
-        }
-    }
-}
-
-// Requests arrive on the IO thread; browsers are driven from the UI thread.
+// Runs a command posted from a callback on the UI thread (post).
 wrap_task! {
     struct RunCommand {
         command: Command,
@@ -8684,15 +8622,9 @@ wrap_task! {
         }    }
 }
 
-/// The path of a UI url. Request urls keep their fragment, like `index.html#overlay`.
-fn ui_path(url: &str) -> &str {
-    let path = &url[UI_ORIGIN.len()..];
-    path.split('#').next().unwrap_or(path)
-}
-
 /// The file behind a url of the UI: a tab's cached icon, a media file or an extension's icon.
 pub(crate) fn ui_file_path(url: &str) -> Option<PathBuf> {
-    let path = ui_path(url.strip_prefix(UI_ORIGIN).map(|_| url)?);
+    let path = url.strip_prefix(UI_ORIGIN)?;
     favicon_file(path)
         .or_else(|| media_file(path).map(|(file, _)| file))
         .or_else(|| extensions::icon_file(path).map(|(file, _)| file))
@@ -8712,7 +8644,7 @@ mod tests {
         CARD_MARGIN, EDGE_WIDTH, FLOAT_INSET, LIBRARY_WIDTH, MemoryPressure, RECENT_TABS, Rect,
         SIDEBAR_WIDTH, SidebarMode, Size, UiState, favicon_file, lead_part, lerp_rect, origin,
         pane_lengths, popup_allowed, remember, site, slide_duration, step, suspend_delays, toggled,
-        ui_path, win,
+        win,
     };
     use arbalete_core::sidebar::NodeId;
 
@@ -9172,15 +9104,6 @@ mod tests {
         assert_eq!(
             super::highlight_link("https://a.test/page#top", "Dia  reads-between,\n& more"),
             "https://a.test/page#:~:text=Dia%20reads%2Dbetween%2C%20%26%20more"
-        );
-    }
-
-    #[test]
-    fn ignores_the_fragment() {
-        assert_eq!(ui_path("arbalete://ui/index.html#overlay"), "index.html");
-        assert_eq!(
-            ui_path("arbalete://ui/command/open/a%23b"),
-            "command/open/a%23b"
         );
     }
 
