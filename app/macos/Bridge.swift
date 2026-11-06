@@ -638,6 +638,8 @@ final class NativeWindow {
         let themeSurface = Surface(in: window, radius: 20, material: .hudWindow) {
             ThemePickerView(picker: picker)
         }
+        // Like Arc's, a clean panel's edge rather than a translucent line over the colors.
+        themeSurface.panelEdge()
         themeSurface.takesKeyboard = true
         themeSurface.resigned = { app.run("theme/hide") }
         surfaces["theme"] = themeSurface
