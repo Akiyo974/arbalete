@@ -62,7 +62,7 @@ pub const MAX_FAVORITES: usize = 12;
 /// A split shows at most this many tabs side by side, like Arc's Split View.
 pub const MAX_SPLIT_TABS: usize = 4;
 
-/// The colors a profile or a Space can take: a small palette, which the UI draws (ui/src/bridge.ts).
+/// The colors a profile or a Space can take: a small palette, which the UI draws.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Color {
@@ -78,7 +78,7 @@ pub enum Color {
 }
 
 impl Color {
-    /// Its value as `#rrggbb`, which the UI's palette draws too (COLORS in ui/src/bridge.ts).
+    /// Its value as `#rrggbb`, which the UI draws.
     pub fn hex(self) -> &'static str {
         match self {
             Color::Purple => "#6e56cf",

@@ -42,7 +42,7 @@ pub struct Scroll {
 /// What the sidebar receives.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Swipe {
-    /// The fingers follow a gesture: the UI moves the Spaces with them (ui/src/pager.ts).
+    /// The fingers follow a gesture: the UI moves the Spaces with them (app/macos/Bridge.swift).
     Gesture(Gesture),
     /// A mouse wheel moves to the next Space, `true`, or the previous one.
     Step(bool),

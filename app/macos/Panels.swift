@@ -1,5 +1,5 @@
-// The small panels above the page: the find bar (ui/src/Find.tsx), the bar at the page's top in
-// toolbar mode (ui/src/Toolbar.tsx), the site controls (ui/src/Site.tsx) and the permission prompt.
+// The small panels above the page: the find bar, the bar at the page's top in toolbar mode, the
+// site controls and the permission prompt.
 
 import AppKit
 import SecurityInterface

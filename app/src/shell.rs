@@ -44,7 +44,7 @@ static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 const SIDEBAR_WIDTH: i32 = 260;
 
-/// The docked sidebar is wider while it shows the library (LIBRARY_SHIFT in ui/src/pager.ts).
+/// The docked sidebar is wider while it shows the library.
 const LIBRARY_WIDTH: i32 = SIDEBAR_WIDTH + 180;
 
 /// The page is a card inset from the window's edges and from the sidebar, 10 points like Arc's,
@@ -97,7 +97,7 @@ const RECENT_TABS: usize = 10;
 const OVERLAY_TABS: usize = 3;
 const OVERLAY_PAGES: usize = 5;
 
-/// The find bar's size, and its margin from the card's top right corner (ui/src/Find.tsx).
+/// The find bar's size, and its margin from the card's top right corner (app/macos/Panels.swift).
 const FIND_SIZE: Size = Size {
     width: 380,
     height: 32,
@@ -107,7 +107,7 @@ const FIND_MARGIN: i32 = 10;
 /// The height of Peek's bar, over its page (app/macos/Peek.swift).
 const PEEK_BAR: i32 = 32;
 
-/// The import assistant's size, at most (ui/src/Import.tsx).
+/// The import assistant's size, at most (app/macos/Import.swift).
 const IMPORT_SIZE: Size = Size {
     width: 560,
     height: 480,

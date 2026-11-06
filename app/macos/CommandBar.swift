@@ -1,4 +1,4 @@
-// The Command Bar (ui/src/Overlay.tsx), shown above the page by the app (open_overlay in
+// The Command Bar, shown above the page by the app (open_overlay in
 // app/src/shell.rs): empty, it opens a tab; holding the selected tab's address (⌘L), it loads
 // another in that tab. Below what is typed, the address it opens or a search, the app's actions
 // it names, the search engine's suggestions, then the open tabs and the history pages matching

@@ -1,4 +1,4 @@
-// The library (ui/src/Library.tsx), which the sidebar shows instead of a Space's page: a rail of
+// The library, which the sidebar shows instead of a Space's page: a rail of
 // sections, the one picked last kept until the app quits, and the picked section under a field
 // searching it, but for the Spaces, which fill the window.
 

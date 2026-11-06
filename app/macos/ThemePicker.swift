@@ -1,4 +1,4 @@
-// A Space's theme, edited like Arc's (ui/src/ThemePicker.tsx, show_theme_picker in
+// A Space's theme, edited like Arc's (show_theme_picker in
 // app/src/shell.rs): dots on a pad, whose angle is a color's hue and distance its lightness, the
 // first one leading; the system's, a light or a dark appearance; a palette to start from; the
 // colors' intensity on a wavy slider; and their grain on a dial. Every change shows at once in

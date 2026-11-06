@@ -1,4 +1,4 @@
-// A Space's colors over the window (ui/src/theme.ts).
+// A Space's colors over the window.
 
 import AppKit
 import SwiftUI

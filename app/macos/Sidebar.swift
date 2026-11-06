@@ -1,4 +1,4 @@
-// The sidebar (ui/src/App.tsx): the toolbar, the address, the displayed Space's favorites, pinned
+// The sidebar: the toolbar, the address, the displayed Space's favorites, pinned
 // and today's tabs, and the footer that switches Spaces.
 //
 // Views keep their own state in State values spelled out, without the @State macro, which only
