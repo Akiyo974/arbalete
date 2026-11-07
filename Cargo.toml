@@ -6,3 +6,8 @@ members = ["app", "crates/arbalete-core"]
 # cache read it from here, so the bindings, the CEF they download and the bundling tool move together.
 [workspace.dependencies]
 cef = "=156.0.0"
+
+# Which of amenophis/cef-codecs' builds of that CEF to take: its release cef-<CEF>-codecs.<revision>.
+# The revision goes up whenever the build changes for the same CEF, like a patch of cef-builds'.
+[workspace.metadata]
+cef-codecs-revision = 2
