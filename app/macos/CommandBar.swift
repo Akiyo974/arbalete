@@ -17,6 +17,8 @@ private let resultsPadding: CGFloat = 8
 private let resultsInset: CGFloat = 10
 private let resultsTop: CGFloat = 3
 private let resultsBottom: CGFloat = 11.5
+/// The banner telling where suggestions come from, under the results.
+private let bannerRow: CGFloat = 56
 /// How many results show at once, like Arc's: the others scroll.
 private let visibleRows = 5
 /// How many of the search engine's suggestions show.
@@ -167,6 +169,10 @@ final class CommandBar: ObservableObject {
     @Published var hovered: Int?
     @Published var completing = false
     @Published var switching: Switching?
+    /// Whether the banner telling where suggestions come from shows, like Arc's under its ⓘ.
+    @Published var informing = false {
+        didSet { if informing != oldValue { sendHeight() } }
+    }
     /// The field, to focus it once the bar shows.
     weak var field: NSTextField?
     private let app: AppModel
@@ -211,6 +217,7 @@ final class CommandBar: ObservableObject {
             picked = 0
             completing = false
             switching = nil
+            informing = false
             field?.stringValue = text
             // Selected all once it shows, ready to be typed over.
             field?.currentEditor()?.selectAll(nil)
@@ -284,8 +291,9 @@ final class CommandBar: ObservableObject {
                 CGFloat(switching.tabs.count) * resultRow + 2 * resultsInset
             } else if shown > 0 {
                 searchRow + CGFloat(shown) * resultRow + resultsTop + resultsBottom
+                    + (informing ? bannerRow : 0)
             } else {
-                searchRow
+                searchRow + (informing ? bannerRow : 0)
             }
         if height != self.height {
             self.height = height
@@ -357,6 +365,13 @@ final class CommandBar: ObservableObject {
         if little == nil { app.run("hide-overlay") } else { dismiss() }
     }
 
+    /// Opens the settings at the profiles', where each one's search engine is chosen.
+    func showSearchSettings() {
+        hide()
+        settingsModel?.choose("Profiles")
+        app.run("show-settings")
+    }
+
     /// Shows a Little Arbalete window's bar holding `url`, or empty, like the app shows its
     /// window's: with the sites visited most until something is typed.
     func showLittle(url: String?, search engine: SearchEngine) {
@@ -398,6 +413,16 @@ struct CommandBarView: View {
                     }
                     .frame(width: 24, height: 24)
                     CommandField(bar: bar)
+                    // Like Arc's, it tells where suggestions come from as the pointer reaches it.
+                    Button { bar.informing = true } label: {
+                        Image(systemName: "info").font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(Color.ink((0x000000, 0.5), (0xFFFFFF, 0.6)))
+                            .frame(width: 22, height: 22)
+                            .background(Circle().fill(Color.ink((0x000000, 0.06), (0xFFFFFF, 0.1))))
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { if $0 { bar.informing = true } }
                 }
                 .padding(.horizontal, 20)
                 .frame(height: searchRow)
@@ -434,6 +459,7 @@ struct CommandBarView: View {
                         .onChange(of: bar.picked) { _, picked in scroll.scrollTo(picked) }
                     }
                 }
+                if bar.informing { SuggestionsBanner(bar: bar) }
             }
             .frame(maxHeight: .infinity, alignment: .top)
             .background(lightVeil)
@@ -450,6 +476,58 @@ struct CommandBarView: View {
         case .action: "Action"
         default: nil
         }
+    }
+}
+
+/// Where the search engine's suggestions come from, as the bar's last row, like Arc's: what it
+/// says on the left, the search settings and Dismiss on the right.
+struct SuggestionsBanner: View {
+    @ObservedObject var bar: CommandBar
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(Color.ink((0x000000, 0.14), (0xFFFFFF, 0.08)))
+                .frame(height: 0.5)
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Arbalete asks your search engine for suggestions as you type.")
+                        .foregroundStyle(Color.ink((0x000000, 0.8), (0xFFFFFF, 0.8)))
+                    Text("You can turn them off in each profile's search settings.")
+                        .foregroundStyle(Color.ink((0x000000, 0.42), (0xFFFFFF, 0.4)))
+                }
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+                Spacer(minLength: 8)
+                BannerButton(title: "Search Settings…", prominent: true) { bar.showSearchSettings() }
+                BannerButton(title: "Dismiss", prominent: false) { bar.informing = false }
+            }
+            .padding(.horizontal, 20)
+            .frame(maxHeight: .infinity)
+        }
+        .frame(height: bannerRow)
+        .background(Color.ink((0x000000, 0.03), (0x000000, 0.2)))
+    }
+}
+
+/// One of the banner's buttons, small and rounded, the prominent one filled with the accent color.
+private struct BannerButton: View {
+    let title: String
+    let prominent: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(prominent ? Color.white : Color.primary)
+                .padding(.horizontal, 10)
+                .frame(height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(prominent ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.primary.opacity(0.1))))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
