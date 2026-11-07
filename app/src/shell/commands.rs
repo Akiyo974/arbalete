@@ -155,6 +155,7 @@ fn run_command(command: Command) {
                 .with_borrow_mut(|state| active_tab(&mut state.sidebar).map(|tab| tab.url.clone()));
             if let Some(url) = url {
                 crate::mac::copy(&shown_url(&url));
+                toast(json!({ "text": "Copied Current URL", "icon": "link" }));
             }
         }
         (Command::Shortcut(edit), _) => edit_shortcut(edit),
@@ -175,6 +176,7 @@ fn run_command(command: Command) {
             });
             if let Some(link) = link {
                 crate::mac::copy(&link);
+                toast(json!({ "text": "Copied Current URL", "icon": "link" }));
             }
         }
         (Command::MoveToSpace(id, space), _) => move_to_space(id, space),
