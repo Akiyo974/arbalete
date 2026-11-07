@@ -304,16 +304,22 @@ pub(super) fn move_to_space(id: NodeId, space: SpaceId) {
     }
 }
 
-/// Pins or unpins a tab, or the selected one.
+/// Pins or unpins a tab, or the selected one, which a toast tells, like Arc's.
 pub(super) fn toggle_pin(tab: Option<NodeId>) {
-    update_sidebar(|sidebar| {
+    let told = update_sidebar(|sidebar| {
         let space = sidebar.displayed();
-        let (space, tab) = (space.id, tab.or(space.selected));
-        if let Some(tab) = tab {
-            // Like a selection, an unknown tab from the UI is ignored.
-            let _ = sidebar.toggle_pin(space, tab);
-        }
+        let (space, title, tab) = (space.id, space.title.clone(), tab.or(space.selected)?);
+        // Like a selection, an unknown tab from the UI is ignored.
+        sidebar.toggle_pin(space, tab).ok()?;
+        Some(if sidebar.is_pinned(tab) {
+            json!({ "text": format!("Pinned Tab to {title}"), "icon": "pin" })
+        } else {
+            json!({ "text": format!("Un-Pinned Tab from {title}"), "icon": "pin.slash" })
+        })
     });
+    if let Some(told) = told {
+        toast(told);
+    }
 }
 
 /// Creates a folder at the end of `parent`, or of the pinned tabs, and asks the sidebar to rename
