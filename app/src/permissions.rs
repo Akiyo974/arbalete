@@ -1,5 +1,5 @@
 //! What websites ask to use, like the camera or the location: in words, for the prompt that asks
-//! the user (shell::PermissionPrompt); and where Chromium keeps each site's decision, in the
+//! the user (shell::permission_prompt); and where Chromium keeps each site's decision, in the
 //! profile's content settings.
 
 use cef::{

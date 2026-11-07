@@ -823,7 +823,7 @@ struct SiteSetting: View {
 }
 
 /// A site's permission request, which the prompt asks the user about (sync_permission_prompt in
-/// app/src/shell.rs).
+/// app/src/shell/permission_prompt.rs).
 @MainActor
 final class PermissionPrompt: ObservableObject {
     struct Request: Decodable, Equatable {
