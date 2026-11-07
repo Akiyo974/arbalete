@@ -5,14 +5,17 @@ use super::*;
 /// How often the "Today" tabs left unshown are archived.
 const ARCHIVE_CHECK_MS: i64 = 60_000;
 
-/// Archives the "Today" tabs left unshown longer than their profile allows, suspends the pages
-/// hidden for long and takes a picture of the shown one, then again every minute.
+/// Archives the "Today" tabs left unshown longer than their profile allows, which a toast tells,
+/// like Arc's; suspends the pages hidden for long and takes a picture of the shown one, then
+/// again every minute.
 pub(super) fn check_archive() {
     let now = now().try_into().unwrap_or_default();
     let archived = STATE.with_borrow_mut(|state| state.sidebar.archive_due(now));
     if archived > 0 {
         update_sidebar(|_| ());
         send_archive();
+        let tabs = if archived == 1 { "tab" } else { "tabs" };
+        toast(json!({ "text": format!("Auto archived {archived} {tabs}"), "icon": "archivebox" }));
     }
     suspend_hidden_pages();
     snapshot_shown();
@@ -61,16 +64,20 @@ pub(super) fn send_archive() {
     dispatch(&win().reveal_view, "arbalete:archive", &json);
 }
 
-/// Opens an archived tab again, by its rank, in its Space, and shows it.
+/// Opens an archived tab again, by its rank, in its Space, and shows it, which a toast tells,
+/// like Arc's.
 pub(super) fn restore_archived(rank: usize) {
     let now = now().try_into().unwrap_or_default();
     let restored = update_sidebar(|sidebar| {
         let (space, tab) = sidebar.restore(rank, now)?;
         sidebar.select(space, tab)?;
-        Ok::<_, Error>(space)
+        let title = sidebar.spaces().iter().find(|found| found.id == space);
+        Ok::<_, Error>((space, title.map(|space| space.title.clone())))
     });
-    if let Ok(space) = restored {
+    if let Ok((space, title)) = restored {
         show_space(space);
+        let title = title.unwrap_or_default();
+        toast(json!({ "text": format!("Tab restored to {title}."), "icon": "tray.and.arrow.up" }));
     }
     send_archive();
 }
