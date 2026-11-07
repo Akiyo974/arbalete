@@ -69,7 +69,7 @@ use auth_prompt::*;
 use capture::*;
 pub use chrome_pages::*;
 pub use commands::*;
-use content::*;
+pub use content::*;
 use downloads_ui::*;
 use find::*;
 use history_ui::*;
@@ -231,6 +231,9 @@ thread_local! {
     static NEXT_AUTH_REQUEST: Cell<u64> = const { Cell::new(0) };
     /// The shown page whose renderer last ended, by its browser's id, and when.
     static LAST_CRASH: Cell<Option<(i32, i64)>> = const { Cell::new(None) };
+    /// The menu item's title of the shortcut the page has first, pressed once, until the page
+    /// leaves it (page_offered_shortcut).
+    static OFFERED_SHORTCUT: RefCell<Option<String>> = const { RefCell::new(None) };
     /// The incognito windows' profiles, with the temporary folder that stands for their
     /// directory, removed with the window: their web data stays in memory.
     static INCOGNITO: RefCell<HashMap<ProfileId, PathBuf>> = RefCell::default();

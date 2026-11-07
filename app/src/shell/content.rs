@@ -70,6 +70,57 @@ wrap_keyboard_handler! {
             #[cfg(target_os = "macos")]
             return crate::mac::take_shortcut(os_event.cast(), shortcut_priority).into();
         }
+
+        /// The page left the key: a shortcut it was offered goes to the menu.
+        fn on_key_event(&self, _browser: Option<&mut Browser>, event: Option<&KeyEvent>, _os_event: *mut u8) -> i32 {
+            if event.is_some_and(|event| event.type_ == KeyEventType::RAWKEYDOWN) {
+                OFFERED_SHORTCUT.take();
+            }
+            0
+        }
+    }
+}
+
+/// How long the page has to leave a shortcut offered first before a toast says it kept it, in
+/// milliseconds: it answers within a few frames.
+const PAGE_KEY_ANSWER_MS: i64 = 150;
+
+/// Like Arc's, a shortcut both the page and Arbalete take, which the page kept on a first press,
+/// is told in a toast: "Press Again to Find…". `action` is its menu item's title, or none on the
+/// second press, which Arbalete took.
+pub fn page_offered_shortcut(action: Option<String>) {
+    let offered = action.is_some();
+    OFFERED_SHORTCUT.set(action);
+    if offered {
+        post_delayed_task(
+            ThreadId::UI,
+            Some(&mut PressAgain::new()),
+            PAGE_KEY_ANSWER_MS,
+        );
+    }
+}
+
+fn press_again() {
+    let Some(action) = OFFERED_SHORTCUT.take() else {
+        return;
+    };
+    // As long as the toast shows (app/macos/Toast.swift).
+    #[cfg(target_os = "macos")]
+    crate::mac::wait_second_press(5.0);
+    toast(json!({
+        "key": "press-again",
+        "text": format!("Press Again to {}", action.trim_end_matches('…')),
+        "icon": "command",
+    }));
+}
+
+wrap_task! {
+    struct PressAgain {}
+
+    impl Task {
+        fn execute(&self) {
+            press_again();
+        }
     }
 }
 

@@ -1004,8 +1004,8 @@ pub fn apply_shortcuts(overrides: &BTreeMap<String, ShortcutOverride>) {
 }
 
 thread_local! {
-    /// The shortcut pressed last that a page took first, and when: pressed again soon after, a
-    /// shortcut whose priority is both goes to Arbalete.
+    /// The shortcut pressed last that a page took first, and until when, in event time: pressed
+    /// again before, a shortcut whose priority is both goes to Arbalete.
     static LAST_SHORTCUT: RefCell<Option<(String, f64)>> = const { RefCell::new(None) };
 }
 
@@ -1020,27 +1020,41 @@ pub fn take_shortcut(event: *mut NSEvent, priority: impl Fn(&str) -> Priority) -
     let Some(menu) = NSApp(mtm).mainMenu() else {
         return false;
     };
-    let Some(id) = shortcut_of(&menu, event) else {
+    let Some((id, title)) = shortcut_of(&menu, event) else {
         return false;
     };
     let take = match priority(&id) {
         Priority::App => true,
         Priority::Websites => false,
         // Like Arc's: the page's on a first press, Arbalete's on a second within half a second.
-        Priority::Both => LAST_SHORTCUT.with_borrow_mut(|last| {
-            let now = event.timestamp();
-            let again = last
-                .as_ref()
-                .is_some_and(|(pressed, at)| *pressed == id && now - at < 0.5);
-            *last = (!again).then(|| (id.clone(), now));
+        Priority::Both => {
+            let again = LAST_SHORTCUT.with_borrow_mut(|last| {
+                let now = event.timestamp();
+                let again = last
+                    .as_ref()
+                    .is_some_and(|(pressed, until)| *pressed == id && now < *until);
+                *last = (!again).then(|| (id.clone(), now + 0.5));
+                again
+            });
+            crate::shell::page_offered_shortcut((!again).then_some(title));
             again
-        }),
+        }
     };
     take && menu.performKeyEquivalent(event)
 }
 
-/// The changeable menu shortcut a key event is, by name.
-fn shortcut_of(menu: &NSMenu, event: &NSEvent) -> Option<String> {
+/// Gives the second press of the shortcut a page took first as long as a toast says to press
+/// again, `seconds` more.
+pub fn wait_second_press(seconds: f64) {
+    LAST_SHORTCUT.with_borrow_mut(|last| {
+        if let Some((_, until)) = last {
+            *until += seconds;
+        }
+    });
+}
+
+/// The changeable menu shortcut a key event is, by name, and its item's title.
+fn shortcut_of(menu: &NSMenu, event: &NSEvent) -> Option<(String, String)> {
     // A modifier pressed alone comes as another kind of event, which has no characters.
     if event.r#type() != NSEventType::KeyDown {
         return None;
@@ -1071,7 +1085,7 @@ fn shortcut_of(menu: &NSMenu, event: &NSEvent) -> Option<String> {
         if (mask & wanted) == (flags & wanted)
             && shift == flags.contains(NSEventModifierFlags::Shift)
         {
-            return Some(id.to_string());
+            return Some((id.to_string(), item.title().to_string()));
         }
     }
     None
