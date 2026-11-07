@@ -979,7 +979,10 @@ final class AuthPrompt: ObservableObject {
 /// site, or the proxy, and its realm, a user name and a password, and Cancel and Sign In.
 struct AuthView: View {
     @ObservedObject var prompt: AuthPrompt
-    @FocusState private var naming: Bool
+    private enum Field { case user, password }
+    @FocusState private var field: Field?
+    /// Moves between the two fields with Tab, which the window, Chromium's, keeps for the page.
+    private let tabs = State<Any?>(initialValue: nil)
 
     var body: some View {
         if let request = prompt.request {
@@ -1002,8 +1005,9 @@ struct AuthView: View {
                 }
                 VStack(spacing: 8) {
                     TextField("User name", text: $prompt.user)
-                        .focused($naming)
+                        .focused($field, equals: .user)
                     SecureField("Password", text: $prompt.password)
+                        .focused($field, equals: .password)
                 }
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 13))
@@ -1023,8 +1027,20 @@ struct AuthView: View {
                         .onChange(of: geometry.size.height) { _, height in report(height) }
                 })
             .frame(maxHeight: .infinity, alignment: .top)
-            .onAppear { naming = true }
-            .onChange(of: request.id) { naming = true }
+            .onAppear {
+                field = .user
+                tabs.wrappedValue = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                    let flags = event.modifierFlags.intersection([.command, .control, .option])
+                    guard event.keyCode == 48, flags.isEmpty, field != nil else { return event }
+                    field = field == .user ? .password : .user
+                    return nil
+                }
+            }
+            .onDisappear {
+                if let monitor = tabs.wrappedValue { NSEvent.removeMonitor(monitor) }
+                tabs.wrappedValue = nil
+            }
+            .onChange(of: request.id) { field = .user }
         }
     }
 
