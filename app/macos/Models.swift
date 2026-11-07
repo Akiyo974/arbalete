@@ -91,6 +91,8 @@ struct Tab: Decodable, Identifiable {
     var muted: Bool?
     /// Its page is frozen or unloaded to save memory.
     var asleep: Bool?
+    /// Its page was shown since it opened, even if unloaded since.
+    var open: Bool?
     /// Its site is in developer mode.
     var developer: Bool?
 

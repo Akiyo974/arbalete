@@ -383,6 +383,8 @@ pub(super) fn prune_pages() {
 /// (BrowserLifeSpan's do_close).
 pub(super) fn close_page(tab: NodeId) {
     close_inspector(tab);
+    // A page unloaded to save memory falls asleep again (fall_asleep).
+    ASLEEP.with_borrow_mut(|asleep| asleep.remove(&tab));
     let Some(live) = PAGES.with_borrow_mut(|pages| pages.remove(&tab)) else {
         return;
     };

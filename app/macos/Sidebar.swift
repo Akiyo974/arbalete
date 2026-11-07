@@ -1212,8 +1212,8 @@ func drop(_ ids: [String], _ move: (Int) -> Void) -> Bool {
     return true
 }
 
-/// A tab's row: a click selects it, its × closes it; on the selected row, closing may only
-/// deselect a pinned tab. Its menu's Rename Tab edits its name in place.
+/// A tab's row: a click selects it, its × closes it; an open pinned tab's − only closes its page.
+/// Its menu's Rename Tab edits its name in place.
 struct TabRow: View {
     @ObservedObject var model: AppModel
     let tab: Tab
@@ -1249,10 +1249,11 @@ struct TabRow: View {
                 }
                 Spacer(minLength: 0)
                 if hovered || active {
-                    // Like Arc's: a minus for an open pinned tab, which closes it and stays,
-                    // an x for the others, which removes a closed pinned tab.
+                    // Like Arc's: a minus for an open pinned tab, selected or not, which closes
+                    // it and stays, an x for the others, which removes a closed pinned tab.
                     CloseButton(
-                        symbol: pinned && active ? "minus" : "xmark", help: "Close \(tab.label)"
+                        symbol: pinned && (active || tab.open == true) ? "minus" : "xmark",
+                        help: "Close \(tab.label)"
                     ) {
                         model.run("close", tab.id)
                     }

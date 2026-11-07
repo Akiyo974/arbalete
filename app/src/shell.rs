@@ -803,8 +803,16 @@ fn tab_json(id: NodeId, tab: &Tab, profile: ProfileId) -> serde_json::Value {
         "favicon": favicon_url(profile, tab),
         "muted": tab.muted,
         "asleep": ASLEEP.with_borrow(|asleep| asleep.contains(&id)),
+        "open": has_page(id),
         "developer": developer_mode(&tab.url),
     })
+}
+
+/// Whether a tab's page was shown since it opened, even when it was unloaded since to save
+/// memory: closing an open pinned tab takes it back to its saved url instead of removing it.
+fn has_page(tab: NodeId) -> bool {
+    PAGES.with_borrow(|pages| pages.contains_key(&tab))
+        || ASLEEP.with_borrow(|asleep| asleep.contains(&tab))
 }
 
 /// Where the UI loads a tab's icon from: the app serves the profile's cached icons (favicon_file),
@@ -1322,7 +1330,7 @@ mod tests {
             { "id": home, "title": "Home", "emoji": null, "theme": theme("#6e56cf"), "profile": profile, "pinned": [] },
             { "id": work, "title": "Work", "emoji": "💼", "theme": theme("#3e7bfa"), "profile": profile, "pinned": [
                 { "id": folder, "title": "Docs", "folder": true },
-                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false, "asleep": false, "developer": false },
+                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false, "asleep": false, "open": false, "developer": false },
             ] },
         ]);
         assert_eq!(json["spaces"], spaces);

@@ -77,9 +77,9 @@ pub(super) fn show_found_space(find: impl FnOnce(&Sidebar) -> Option<SpaceId>) {
 }
 
 /// Closes a tab; closing the selected one shows the next tab, or the overlay when none is left.
-/// Favorites and open pinned tabs stay where they are: closing one deselects it and takes it back
-/// to its saved url, and it cannot be reopened since it was never removed. A pinned tab already
-/// closed, which its Space does not show, is removed, and may be reopened.
+/// Favorites and open pinned tabs, selected or not, stay where they are: closing one deselects it
+/// and takes it back to its saved url, and it cannot be reopened since it was never removed. A
+/// pinned tab already closed, with no page, is removed, and may be reopened.
 pub(super) fn close_tab(tab: Option<NodeId>) {
     close_keeping(tab, false);
 }
@@ -96,8 +96,7 @@ fn close_keeping(tab: Option<NodeId>, keep_pinned: bool) {
     let Some(tab) = tab else { return };
     let stays = STATE.with_borrow(|state| {
         let sidebar = &state.sidebar;
-        // A pinned tab is open only while it is its Space's selected one.
-        let open = sidebar.spaces().iter().any(|s| s.selected == Some(tab));
+        let open = has_page(tab) || sidebar.spaces().iter().any(|s| s.selected == Some(tab));
         sidebar.is_favorite(tab) || (sidebar.is_pinned(tab) && (open || keep_pinned))
     });
     let next = if stays {
