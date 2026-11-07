@@ -25,8 +25,54 @@
     alwaysOnTop: false,
   };
   let tabs = self.__arbaleteInitial?.tabs ?? [];
+  // Chrome's tab and window events never fire for Arbalete's pages either: the shim dispatches
+  // them as the active tab changes, to the listeners the worker added before it was shimmed too.
+  // Were Chromium to fire one itself, the shim would leave that event to it.
+  const events = {};
+  const dispatcher = (api, name) => {
+    const event = chrome[api][name];
+    let dispatching = false;
+    let native = false;
+    event.addListener(() => {
+      native ||= !dispatching;
+    });
+    events[name] = (...args) => {
+      if (native) return;
+      dispatching = true;
+      try {
+        event.dispatch(...args);
+      } finally {
+        dispatching = false;
+      }
+    };
+  };
+  // What changed since the previous state: the window focused, none (-1) while the profile is not
+  // in front, and the active tab, compared with the last one known, as a new page's tab id is
+  // known only after it shows. As in Chrome, a tab made active is not updated, and what a tab
+  // lost, like its icon, is no change. A worker's first state, as it starts, announces nothing.
+  let focused;
+  let known;
+  const announce = (state) => {
+    const windowId = state.focused ? window_.id : -1;
+    if (focused !== undefined && windowId !== focused) events.onFocusChanged?.(windowId);
+    focused = windowId;
+    const [tab] = state.tabs;
+    if (!tab) return;
+    const was = known;
+    known = tab;
+    if (!was) return;
+    if (tab.id !== was.id) {
+      events.onActivated?.({ tabId: tab.id, windowId: tab.windowId });
+      return;
+    }
+    const changes = ["status", "url", "title", "favIconUrl"]
+      .filter((key) => tab[key] != null && tab[key] !== was[key])
+      .map((key) => [key, tab[key]]);
+    if (changes.length) events.onUpdated?.(tab.id, Object.fromEntries(changes), tab);
+  };
   self.__arbaleteSync = (state) => {
     tabs = state.tabs;
+    announce(state);
   };
   // Chrome's APIs take a callback last, or return a promise without one.
   const reply = (args, value) => {
@@ -91,6 +137,8 @@
         return reply(args.slice(typeof args[0] === "number" ? 2 : 1), tabs[0]);
       },
     });
+    dispatcher("tabs", "onActivated");
+    dispatcher("tabs", "onUpdated");
   });
   patch("windows", () => {
     Object.assign(chrome.windows, {
@@ -99,6 +147,7 @@
       getLastFocused: (...args) => reply(args, withTabs(args[0])),
       getAll: (...args) => reply(args, [withTabs(args[0])]),
     });
+    dispatcher("windows", "onFocusChanged");
   });
   const run = (tries) => {
     for (const [api, apply] of patches) {

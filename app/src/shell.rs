@@ -891,34 +891,39 @@ fn send_state() {
         dispatch(&win().sidebar, "arbalete:state", &json);
         dispatch(&win().reveal_view, "arbalete:state", &json);
     });
-    // Extensions see the displayed Space's selected tab as their profile's active tab.
+    // Extensions see the displayed Space's profile in front, with its selected tab as its active
+    // tab.
     let active = STATE.with_borrow(|state| {
         let sidebar = &state.sidebar;
         let space = sidebar.displayed();
-        let NodeKind::Tab(tab) = &sidebar.node(space.selected?)?.kind else {
-            return None;
-        };
-        let page =
-            PAGES.with_borrow(|pages| Some(pages.get(&space.selected?)?.browser.identifier()));
-        let tab = extensions::ActiveTab {
-            page,
-            url: tab.url.clone(),
-            title: tab.label().to_string(),
-            favicon: tab.favicon.clone(),
-        };
-        Some((space.profile, tab))
+        let tab = space.selected.and_then(|selected| {
+            let NodeKind::Tab(tab) = &sidebar.node(selected)?.kind else {
+                return None;
+            };
+            let browser = PAGES.with_borrow(|pages| Some(pages.get(&selected)?.browser.clone()));
+            Some(extensions::ActiveTab {
+                page: browser.as_ref().map(Browser::identifier),
+                url: tab.url.clone(),
+                title: tab.label().to_string(),
+                favicon: tab.favicon.clone(),
+                loading: browser.is_some_and(|browser| browser.is_loading() == 1),
+            })
+        });
+        (space.profile, tab)
     });
-    let mut active: HashMap<_, _> = active.into_iter().collect();
+    let mut active = HashMap::from([active]);
     // The Little Arbalete window in front last shows its profile's active tab.
     let little = LITTLE.with_borrow(|littles| {
         let little = littles.iter().find(|l| Some(l.id) == ACTIVE_LITTLE.get())?;
+        let browser = little.browser();
         let tab = extensions::ActiveTab {
-            page: little.browser().map(|browser| browser.identifier()),
+            page: browser.as_ref().map(Browser::identifier),
             url: little.url.clone(),
             title: little.title.clone(),
             favicon: None,
+            loading: browser.is_some_and(|browser| browser.is_loading() == 1),
         };
-        Some((little.profile, tab))
+        Some((little.profile, Some(tab)))
     });
     active.extend(little);
     extensions::sync(active);

@@ -250,6 +250,7 @@ pub struct ActiveTab {
     pub url: String,
     pub title: String,
     pub favicon: Option<String>,
+    pub loading: bool,
 }
 
 /// A tab's page: its DevTools target, its browser context and, once the helper has told it, its
@@ -294,7 +295,8 @@ struct Bridge {
     contents: HashMap<i32, Content>,
     /// Each page's own DevTools observer, which asks for its target.
     page_registrations: HashMap<i32, Registration>,
-    tabs: HashMap<ProfileId, ActiveTab>,
+    /// The profiles in front, with their active tab if they have one.
+    tabs: HashMap<ProfileId, Option<ActiveTab>>,
 }
 
 impl Bridge {
@@ -306,7 +308,7 @@ impl Bridge {
 
     /// The tab id of a profile's active tab, once the helper has told it.
     fn active_tab_id(&self, profile: ProfileId) -> Option<i64> {
-        let page = self.tabs.get(&profile)?.page?;
+        let page = self.tabs.get(&profile)?.as_ref()?.page?;
         self.contents.get(&page)?.tab_id
     }
 
@@ -314,7 +316,7 @@ impl Bridge {
     /// its address, title and icon only if the extension may see them (exposes_tab_details). A
     /// popup the user opened holds `activeTab` for it, as in Chrome.
     fn state(&self, profile: ProfileId, extension: &str, popup: bool) -> Value {
-        let tab = self.tabs.get(&profile);
+        let tab = self.tabs.get(&profile).and_then(Option::as_ref);
         let details = tab.is_some_and(|tab| {
             let installed = list(profile).into_iter().find(|e| e.id == extension);
             installed.is_some_and(|installed| {
@@ -323,7 +325,8 @@ impl Bridge {
                     || exposes_tab_details(details, &tab.url)
             })
         });
-        state_json(tab, self.active_tab_id(profile), details)
+        let focused = self.tabs.contains_key(&profile);
+        state_json(focused, tab, self.active_tab_id(profile), details)
     }
 }
 
@@ -651,8 +654,9 @@ pub const TOP_COLOR: i32 = 4;
 /// bridge's, which start above it.
 const CONTENT_INFO: i32 = 1;
 
-/// Tells the extensions each profile's active tab, after the sidebar's state changes.
-pub fn sync(tabs: HashMap<ProfileId, ActiveTab>) {
+/// Tells the extensions which profiles are in front, with their active tab, after the sidebar's
+/// state changes.
+pub fn sync(tabs: HashMap<ProfileId, Option<ActiveTab>>) {
     let changed = BRIDGE.with_borrow_mut(|bridge| {
         let changed: Vec<_> = bridge
             .contexts
@@ -718,9 +722,10 @@ fn push_state(context: &str) {
     }
 }
 
-/// The state the shim answers with: the active tab, if any and its tab id is known, with its
-/// address, title and icon only with `details`, as Chrome leaves them out.
-fn state_json(tab: Option<&ActiveTab>, tab_id: Option<i64>, details: bool) -> Value {
+/// The state the shim answers with: whether the profile is in front, its window then being the
+/// focused one, and its active tab, if any and its tab id is known, with its address, title and
+/// icon only with `details`, as Chrome leaves them out.
+fn state_json(focused: bool, tab: Option<&ActiveTab>, tab_id: Option<i64>, details: bool) -> Value {
     let tabs: Vec<Value> = match (tab, tab_id) {
         (Some(tab), Some(id)) => {
             let mut tab_json = json!({
@@ -731,7 +736,7 @@ fn state_json(tab: Option<&ActiveTab>, tab_id: Option<i64>, details: bool) -> Va
                 "highlighted": true,
                 "pinned": false,
                 "incognito": false,
-                "status": "complete",
+                "status": if tab.loading { "loading" } else { "complete" },
                 "url": tab.url,
                 "title": tab.title,
                 "favIconUrl": tab.favicon,
@@ -748,7 +753,7 @@ fn state_json(tab: Option<&ActiveTab>, tab_id: Option<i64>, details: bool) -> Va
         }
         _ => Vec::new(),
     };
-    json!({ "tabs": tabs })
+    json!({ "tabs": tabs, "focused": focused })
 }
 
 /// Whether an extension may see the address, title and icon of a tab at `url`, as in Chrome: it
@@ -1483,10 +1488,17 @@ mod tests {
             url: "https://example.com/".into(),
             title: "Example".into(),
             favicon: None,
+            loading: true,
         };
-        assert_eq!(state_json(Some(&tab), None, true), json!({ "tabs": [] }));
-        assert_eq!(state_json(None, Some(7), true), json!({ "tabs": [] }));
-        let state = state_json(Some(&tab), Some(7), true);
+        assert_eq!(
+            state_json(true, Some(&tab), None, true),
+            json!({ "tabs": [], "focused": true })
+        );
+        assert_eq!(
+            state_json(false, None, Some(7), true),
+            json!({ "tabs": [], "focused": false })
+        );
+        let state = state_json(true, Some(&tab), Some(7), true);
         let shown = &state["tabs"][0];
         assert_eq!(
             (
@@ -1503,7 +1515,8 @@ mod tests {
             )
         );
         assert_eq!(shown["title"], "Example");
-        let state = state_json(Some(&tab), Some(7), false);
+        assert_eq!(shown["status"], "loading");
+        let state = state_json(true, Some(&tab), Some(7), false);
         let hidden = state["tabs"][0].as_object().expect("a tab");
         assert_eq!(hidden["id"], 7);
         for field in ["url", "title", "favIconUrl"] {
