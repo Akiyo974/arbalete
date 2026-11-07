@@ -169,16 +169,19 @@ final class StatusPill: NSView {
         return false
     }
 
-    /// Opens the link in Split View on a click with ⌥ alone, which Chromium would download, like
-    /// Arc's: the page never gets the click.
+    /// Opens the link in Split View on a click with ⌥ alone, which Chromium would download, or
+    /// in a Little Arbalete window with ⌘⌥, which it would open in the page, like Arc's: the page
+    /// never gets the click.
     private func opens(_ click: NSEvent) -> Bool {
-        guard hovering, explanation() == "in Split View", let page = superview,
+        let commands = ["in Split View": "open-in-split", "in Little Arbalete": "open-in-little"]
+        guard hovering, let command = explanation().flatMap({ commands[$0] }),
+            let page = superview,
             click.window === window,
             window?.contentView?.superview?.hitTest(click.locationInWindow)?
                 .isDescendant(of: page) == true,
             let model = nativeWindows.values.first(where: { $0.window === window })?.model
         else { return false }
-        model.run("open-in-split", address)
+        model.run(command, address)
         return true
     }
 
@@ -201,6 +204,7 @@ final class StatusPill: NSView {
         switch NSEvent.modifierFlags.intersection([.command, .shift, .option, .control]) {
         case [.command]: return "in a new tab"
         case [.command, .shift], [.command, .shift, .option]: return "in a new tab and focus it"
+        case [.command, .option]: return "in Little Arbalete"
         case [.shift], [.shift, .option]: return "in Peek"
         case [.option]: return "in Split View"
         default: return nil

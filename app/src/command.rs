@@ -275,6 +275,8 @@ pub enum Command {
     OpenInBackground(String),
     /// Opens a tab on an address beside the selected one, in a split.
     OpenInSplit(String),
+    /// Opens a Little Arbalete window on an address.
+    OpenInLittle(String),
     /// Closes a tab, or the selected one.
     Close(Option<NodeId>),
     /// Closes a tab's page's developer tools, like their window's close button.
