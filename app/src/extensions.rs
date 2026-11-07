@@ -882,8 +882,8 @@ fn attached(session: &str, context: String, extension: String, helper: bool) {
             .insert(session.to_string(), (context, extension))
     });
     // A worker that stops and starts again keeps its session, with no new target: the binding
-    // stays only while the Runtime domain is enabled, which also reports the running execution
-    // context and each new start's (context_created).
+    // stays only while the Runtime domain is enabled. The session reports the running script,
+    // and each new start's, once loaded (script_loaded).
     send_in(
         session,
         "Runtime.addBinding",
@@ -893,15 +893,20 @@ fn attached(session: &str, context: String, extension: String, helper: bool) {
     send_in(session, "Runtime.enable", json!({}), None);
 }
 
-/// Shims a worker's new execution context, then gives it its profile's active tab.
-fn context_created(session: &str, id: &Value) {
+/// Shims a worker once its script has loaded, then gives it its profile's active tab: as its
+/// execution context is created, a worker starting has no `chrome` nor `setTimeout` yet.
+fn script_loaded(session: &str) {
     let Some(context) =
         BRIDGE.with_borrow(|bridge| bridge.workers.get(session).map(|(c, _)| c.clone()))
     else {
         return;
     };
-    let params = json!({ "expression": SHIM, "contextId": id });
-    send_in(session, "Runtime.evaluate", params, None);
+    send_in(
+        session,
+        "Runtime.evaluate",
+        json!({ "expression": SHIM }),
+        None,
+    );
     push_state(&context);
 }
 
@@ -1194,9 +1199,9 @@ fn message_received(message: &Value) {
                 });
             }
         }
-        Some("Runtime.executionContextCreated") => {
+        Some("Inspector.workerScriptLoaded") => {
             if let Some(session) = message["sessionId"].as_str() {
-                context_created(session, &message["params"]["context"]["id"]);
+                script_loaded(session);
             }
         }
         Some("Runtime.bindingCalled") if message["params"]["name"] == "__arbalete" => {
