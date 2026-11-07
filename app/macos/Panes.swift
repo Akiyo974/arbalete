@@ -456,7 +456,6 @@ final class PagePlacer {
         hide(except: pages.map(\.tab))
         if let pane = toolbarPane {
             toolbar.rootView = PaneBar(model: model, pane: pane)
-            toolbar.layer?.backgroundColor = NSColor(color(pane.color ?? model.cardColor)).cgColor
             toolbar.layer?.maskedCorners =
                 toolbar.isFlipped
                 ? [.layerMinXMinYCorner, .layerMaxXMinYCorner]
@@ -513,11 +512,15 @@ struct PaneBar: View {
 
     var body: some View {
         if let pane, pane.toolbar {
+            // The page's color at its top, or the card's; like Arc's, none without a page, which
+            // leaves the empty card's, the window's theme.
+            let tint = model.cardEmpty ? nil : pane.color ?? model.cardColor
             PageToolbar(model: model)
-                // Its ink reads on its color: the page's at its top, or the card's.
+                .background(tint.map { color($0) } ?? .clear)
+                // Its ink reads on its color.
                 .environment(
                     \.colorScheme,
-                    luminance(pane.color ?? model.cardColor) < 0.179 ? .dark : .light)
+                    tint.map { luminance($0) < 0.179 } ?? isDark(model.space?.theme) ? .dark : .light)
         } else if let pane, pane.developer {
             DeveloperBar(
                 model: model, url: pane.url,
