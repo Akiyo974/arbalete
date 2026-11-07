@@ -25,7 +25,8 @@ public func about(_ chromium: UnsafePointer<CChar>) {
 }
 
 /// The copyright, then "Arbalete is made possible by…", centred at the version's size, its links
-/// to Chromium, Chromium's licenses (the CREDITS.html the app carries) and Arbalete's source.
+/// to Chromium, the licenses of Chromium's software and of the Rust crates (the CREDITS.html and
+/// Rust-CREDITS.html the app carries) and Arbalete's source.
 @MainActor private func credits() -> NSAttributedString {
     let paragraph = NSMutableParagraphStyle()
     paragraph.alignment = .center
@@ -40,11 +41,14 @@ public func about(_ chromium: UnsafePointer<CChar>) {
         text.append(NSAttributedString(string: string, attributes: attributes))
     }
     let licenses = Bundle.main.url(forResource: "CREDITS", withExtension: "html")
+    let crates = Bundle.main.url(forResource: "Rust-CREDITS", withExtension: "html")
     add("Copyright © 2026 The Arbalete contributors. Licensed under MPL-2.0.\n\n")
     add("Arbalete is made possible by the ")
     add("Chromium", link: URL(string: "https://www.chromium.org"))
     add(" open source project, Chromium’s ")
     add("open source software", link: licenses)
+    add(", Arbalete’s ")
+    add("Rust crates", link: crates)
     add(", as well as other ")
     add("open source software", link: URL(string: "https://github.com/amenophis/arbalete"))
     add(".")
