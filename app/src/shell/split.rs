@@ -17,6 +17,13 @@ pub(super) fn open_in_pane(url: &str) {
     show_selected();
 }
 
+/// Tells that a split already has as many pages as it can, like Arc's.
+pub(super) fn tell_split_full() {
+    toast(
+        json!({ "text": "Cannot Add New Pane", "icon": "exclamationmark.triangle", "error": true }),
+    );
+}
+
 /// Whether the window shows a split, and then whether one page above the other.
 pub fn split_shown() -> Option<bool> {
     win().split.borrow().1.as_ref().map(|layout| layout.stacked)

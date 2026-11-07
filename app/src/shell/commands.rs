@@ -86,7 +86,9 @@ fn run_command(command: Command) {
             if let Some(tab) = tab {
                 select_tab(tab);
             }
-            if selected().is_some() {
+            if win().split.borrow().0.len() >= arbalete_core::sidebar::MAX_SPLIT_TABS {
+                tell_split_full();
+            } else if selected().is_some() {
                 show_overlay(true);
                 win().adding_pane.set(true);
             }
@@ -223,16 +225,20 @@ fn run_command(command: Command) {
             }
         }
         (Command::Split(tab, target, before), _) => {
-            if update_sidebar(|sidebar| sidebar.split_beside(tab, target, before)).is_ok() {
-                show_selected();
+            match update_sidebar(|sidebar| sidebar.split_beside(tab, target, before)) {
+                Ok(_) => show_selected(),
+                Err(Error::SplitFull) => tell_split_full(),
+                Err(_) => {}
             }
         }
         (Command::Duplicate(tab, parent, index), _) => {
             let _ = update_sidebar(|sidebar| sidebar.duplicate(tab, parent, index));
         }
         (Command::SplitDuplicate(tab, target, before), _) => {
-            if update_sidebar(|sidebar| sidebar.split_duplicate(tab, target, before)).is_ok() {
-                show_selected();
+            match update_sidebar(|sidebar| sidebar.split_duplicate(tab, target, before)) {
+                Ok(_) => show_selected(),
+                Err(Error::SplitFull) => tell_split_full(),
+                Err(_) => {}
             }
         }
         (Command::Separate(tab), _) => {
