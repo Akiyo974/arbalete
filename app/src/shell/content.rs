@@ -585,6 +585,13 @@ wrap_display_handler! {
                 update_page(|page| page.progress = progress);
             }
         }
+
+        /// Like Arc's, a page going full screen, like a video, tells how to leave it.
+        fn on_fullscreen_mode_change(&self, browser: Option<&mut Browser>, fullscreen: i32) {
+            if fullscreen == 1 && is_shown(browser) {
+                toast(json!({ "key": "fullscreen", "text": "To exit full screen, press", "keys": "⎋" }));
+            }
+        }
     }
 }
 
