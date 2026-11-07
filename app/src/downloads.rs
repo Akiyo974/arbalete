@@ -99,9 +99,7 @@ pub fn save(downloads: &[Download], path: &Path) -> io::Result<()> {
         downloads: downloads.to_vec(),
     };
     let json = serde_json::to_vec_pretty(&saved).map_err(io::Error::other)?;
-    let temporary = path.with_extension("tmp");
-    fs::write(&temporary, json)?;
-    fs::rename(temporary, path)
+    arbalete_core::store::write_atomically(path, &json)
 }
 
 /// The downloads kept across sessions: not those of a profile `incognito` says is one, whose

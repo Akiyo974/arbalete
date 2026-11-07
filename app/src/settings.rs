@@ -93,9 +93,7 @@ impl Default for Settings {
 /// Writes the settings atomically: a crash while saving leaves the previous file intact.
 pub fn save(settings: &Settings, path: &Path) -> io::Result<()> {
     let json = serde_json::to_vec_pretty(settings).map_err(io::Error::other)?;
-    let temporary = path.with_extension("tmp");
-    fs::write(&temporary, json)?;
-    fs::rename(temporary, path)
+    arbalete_core::store::write_atomically(path, &json)
 }
 
 /// Loads the settings, the default ones when there are none or they cannot be read, in which case

@@ -5,7 +5,8 @@
 use crate::sidebar::{Sidebar, View};
 use serde::{Deserialize, Serialize};
 use std::{
-    fs, io,
+    fs,
+    io::{self, Write},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -45,8 +46,20 @@ pub fn save(sidebar: &Sidebar, windows: &[View], path: &Path) -> io::Result<()> 
         windows: windows.to_vec(),
     };
     let json = serde_json::to_vec_pretty(&saved).map_err(io::Error::other)?;
+    write_atomically(path, &json)
+}
+
+/// Replaces the file at `path` with `bytes`: a crash or a power loss while saving leaves either
+/// the previous file or the new one, never a truncated one.
+///
+/// The data reaches the disk before the rename (on macOS `sync_all` is `F_FULLFSYNC`), since the
+/// file system may otherwise persist the rename first. The directory is not synced: a power loss
+/// right after the rename can at worst bring back the previous file, which saves rewrite anyway.
+pub fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let temporary = path.with_extension("tmp");
-    fs::write(&temporary, json)?;
+    let mut file = fs::File::create(&temporary)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
     fs::rename(temporary, path)
 }
 
@@ -107,6 +120,16 @@ mod tests {
         let windows = vec![sidebar.new_window_view()];
         save(&sidebar, &windows, &path).unwrap();
         assert_eq!(load(&path).unwrap(), Some((sidebar, windows)));
+        assert!(!path.with_extension("tmp").exists());
+    }
+
+    #[test]
+    fn replaces_the_previous_file() {
+        let dir = TestDir::new("store-replace");
+        let path = dir.0.join("file.json");
+        write_atomically(&path, b"old").unwrap();
+        write_atomically(&path, b"new").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"new");
         assert!(!path.with_extension("tmp").exists());
     }
 
