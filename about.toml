@@ -1,0 +1,17 @@
+# The licenses of the crates the app is built from, which the bundle carries (mise run app):
+# the licenses deny.toml allows.
+accepted = [
+  "Apache-2.0",
+  "BSD-3-Clause",
+  "ISC",
+  "MIT",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Zlib",
+  "bzip2-1.0.6",
+  "CDLA-Permissive-2.0",
+]
+# Only what ships in the app, on the one platform it is built for.
+targets = ["aarch64-apple-darwin"]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true

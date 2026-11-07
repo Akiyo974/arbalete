@@ -4,6 +4,8 @@ rust = { version = "1.99.1", components = "rustfmt,clippy" }
 cmake = "4.4.4"
 ninja = "1.13.2"
 cargo-deny = "0.20.2"
+# Lists the licenses of the crates the app is built from (mise run app).
+"github:EmbarkStudios/cargo-about" = "0.9.3"
 # Lays out the disk image's window (mise run release).
 uv = "0.13.6"
 "pipx:dmgbuild" = "1.6.7"
@@ -100,6 +102,8 @@ run = [
   "plutil -replace NSLocationWhenInUseUsageDescription -string 'Websites you allow can know your location.' target/bundle/Arbalete.app/Contents/Info.plist",
   # Arbalete's license, and Chromium's and CEF's, which redistributing them requires.
   "cp LICENSE \"$CEF_PATH/CREDITS.html\" target/bundle/Arbalete.app/Contents/Resources/",
+  # The Rust crates' licenses, which redistributing them requires too (about.toml, about.hbs).
+  "cargo about generate --locked -o target/bundle/Arbalete.app/Contents/Resources/Rust-CREDITS.html about.hbs",
   # The updater (app/macos/Updates.swift), and its license, which redistributing it requires.
   "ditto \"$SPARKLE_PATH/Sparkle.framework\" target/bundle/Arbalete.app/Contents/Frameworks/Sparkle.framework",
   "cp \"$SPARKLE_PATH/LICENSE\" target/bundle/Arbalete.app/Contents/Resources/Sparkle-LICENSE",

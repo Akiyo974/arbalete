@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<meta name="color-scheme" content="light dark">
+<title>Rust Crates</title>
+<!-- Like Chromium's credits page (CREDITS.html, beside it): a row per crate, its license folded. -->
+<style>
+  :root { --row: #f1f3f4; --text: #202124; --link: #1a73e8; }
+  @media (prefers-color-scheme: dark) {
+    :root { --row: #3c4043; --text: #e8eaed; --link: #8ab4f8; }
+    body { background: #202124; }
+  }
+  body { color: var(--text); font: 15px system-ui, sans-serif; margin: 8px; }
+  a { color: var(--link); }
+  h1 { font-size: 1.6em; margin: 0 0 8px; }
+  details { background: var(--row); border-radius: 6px; margin: 0 0 12px; }
+  summary { cursor: pointer; display: flex; gap: 6px; list-style: none; padding: 10px 8px; }
+  summary::-webkit-details-marker { display: none; }
+  .title { flex: 1; font-weight: bold; }
+  .show::after { color: var(--link); content: "show license"; text-decoration: underline; }
+  details[open] .show::after { content: "hide license"; }
+  pre { font-size: 13px; margin: 0; overflow: auto; padding: 8px 24px 24px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Rust Crates</h1>
+<p>Arbalete is built with the following Rust crates.</p>
+{{#each licenses}}
+{{#each used_by}}
+<details>
+<summary><span class="title">{{crate.name}} {{crate.version}}</span><span class="show"></span> - <a href="{{#if crate.repository}}{{crate.repository}}{{else}}https://crates.io/crates/{{crate.name}}{{/if}}">homepage</a></summary>
+<pre>{{../text}}</pre>
+</details>
+{{/each}}
+{{/each}}
+</body>
+</html>

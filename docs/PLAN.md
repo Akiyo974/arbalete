@@ -563,7 +563,7 @@ requires notarized apps.
    (`CFBundleShortVersionString`, `CFBundleVersion`) taken from `app/Cargo.toml`, signed with the release
    certificate (`ARBALETE_SIGN_IDENTITY`), the framework and helpers one by one as today. Packed into
    `Arbalete-<version>-arm64.dmg` by dmgbuild, holding the app and a link to `/Applications` laid out over a
-   background of our own (`packaging/dmg`); the app carries Arbalete's license and Chromium's and CEF's (`CREDITS.html`), which
+   background of our own (`packaging/dmg`); the app carries Arbalete's license, Chromium's and CEF's (`CREDITS.html`) and its Rust crates' (`Rust-CREDITS.html`), which
    redistributing them requires.
 3. **A release workflow** on a `v*` tag pushed from `main`:
    1. checks the tag matches the version in `app/Cargo.toml`;
