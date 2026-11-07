@@ -74,7 +74,8 @@ struct SpaceDraft: View {
                 field {
                     Image(systemName: "face.smiling").frame(width: 24)
                         .foregroundStyle(Ink.secondary)
-                    Text("Profile")
+                    // On one line, however narrow the sidebar: the profile's name gives way.
+                    Text("Profile").fixedSize()
                     // A button's menu like the app's others: as a pop-up button, it showed the
                     // profile picked alone on macOS 27.
                     Menu {
@@ -87,7 +88,7 @@ struct SpaceDraft: View {
                         Button("New Profile…") { model.newProfile(for: space.id) }
                     } label: {
                         HStack(spacing: 3) {
-                            Text(profileName)
+                            Text(profileName).lineLimit(1)
                             Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
                         }
                         .font(.system(size: 13, weight: .semibold))
@@ -99,7 +100,7 @@ struct SpaceDraft: View {
                     .menuStyle(.button)
                     .buttonStyle(.plain)
                     .menuIndicator(.hidden)
-                    .fixedSize()
+                    .layoutPriority(1)
                     Spacer(minLength: 0)
                     Image(systemName: "info.circle")
                         .foregroundStyle(Ink.secondary)
