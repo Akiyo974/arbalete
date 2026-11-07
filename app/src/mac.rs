@@ -10,7 +10,7 @@ use objc2::{
     AnyThread, ClassType, DefinedClass, Encoding, MainThreadMarker, MainThreadOnly, RefEncode,
     define_class, extern_methods, msg_send,
     rc::Retained,
-    runtime::{AnyClass, AnyObject, Bool, NSObjectProtocol, Sel},
+    runtime::{AnyClass, AnyObject, Bool, NSObjectProtocol, ProtocolObject, Sel},
     sel,
 };
 use objc2_app_kit::NSUserInterfaceItemIdentification;
@@ -24,7 +24,9 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{
     NSAppleEventDescriptor, NSAppleEventManager, NSArray, NSData, NSDataBase64DecodingOptions,
-    NSNumber, NSProcessInfo, NSRect, NSRectEdge, NSSize, NSString, NSURL, ns_string,
+    NSNotificationCenter, NSNumber, NSOperationQueue, NSProcessInfo,
+    NSProcessInfoPowerStateDidChangeNotification, NSRect, NSRectEdge, NSSize, NSString, NSURL,
+    ns_string,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
@@ -63,6 +65,9 @@ thread_local! {
     static TOOLBAR_ITEM: RefCell<Option<Retained<NSMenuItem>>> = const { RefCell::new(None) };
     /// Watches the clicks that open sidebar menus and the tab switcher's keys (watch_events).
     static EVENT_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
+    /// Watches Low Power Mode (watch_low_power).
+    static POWER_OBSERVER: RefCell<Option<Retained<ProtocolObject<dyn NSObjectProtocol>>>> =
+        const { RefCell::new(None) };
     /// The actions of the menu last shown, which its items' tags index.
     static MENU_ACTIONS: RefCell<Vec<Action>> = const { RefCell::new(Vec::new()) };
 }
@@ -333,7 +338,7 @@ define_class!(
 
         #[unsafe(method(arbaleteSettings:))]
         fn settings(&self, _sender: Option<&AnyObject>) {
-            crate::shell::run(Command::ShowSettings);
+            crate::shell::run(Command::ShowSettings(None));
         }
 
         // Like Arc, Set as Default Browser is checked and disabled once Arbalete is the default.
@@ -1853,6 +1858,21 @@ pub fn memory_pressure() -> crate::shell::MemoryPressure {
 /// Whether Low Power Mode is on, saving the battery.
 pub fn low_power() -> bool {
     NSProcessInfo::processInfo().isLowPowerModeEnabled()
+}
+
+/// Tells the app each time Low Power Mode is turned on or off, on the main thread.
+pub fn watch_low_power() {
+    let changed = RcBlock::new(|_| crate::shell::low_power_changed(low_power()));
+    // SAFETY: the main queue runs the block on the main thread, CEF's UI thread.
+    let observer = unsafe {
+        NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+            Some(NSProcessInfoPowerStateDidChangeNotification),
+            None,
+            Some(&NSOperationQueue::mainQueue()),
+            &changed,
+        )
+    };
+    POWER_OBSERVER.set(Some(observer));
 }
 
 /// The system's first preferred language as Chromium names its locales: the language alone, like

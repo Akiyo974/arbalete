@@ -415,8 +415,9 @@ pub enum Command {
     SetSearchEngine(ProfileId, SearchEngine),
     /// Lets a profile's Command Bar suggest searches, or not.
     SetSearchSuggestions(ProfileId, bool),
-    /// Shows the settings window, from the menu.
-    ShowSettings,
+    /// Shows the settings window, from the menu, on a pane by its title, like `"Advanced"`, from
+    /// a toast's "Edit this setting".
+    ShowSettings(Option<String>),
     HideSettings,
     /// The settings window is listening: send it the settings.
     SettingsReady,
@@ -558,6 +559,10 @@ mod tests {
     #[test]
     fn parses_commands_without_arguments() {
         assert_eq!(parse(r#"{"name":"back"}"#), Some(Command::Back));
+        assert_eq!(
+            parse(r#"{"name":"show-settings"}"#),
+            Some(Command::ShowSettings(None))
+        );
         assert_eq!(
             parse(r#"{"name":"force-reload"}"#),
             Some(Command::ForceReload)

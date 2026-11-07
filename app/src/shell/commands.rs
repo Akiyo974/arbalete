@@ -289,7 +289,7 @@ fn run_command(command: Command) {
                 send_settings();
             }
         }
-        (Command::ShowSettings, _) => show_settings(),
+        (Command::ShowSettings(pane), _) => show_settings(pane.as_deref()),
         (Command::ToggleToolbar, _) => toggle_toolbar(),
         // Like Arc's, the menu opens a Command Bar of its own, which opens the window.
         #[cfg(target_os = "macos")]

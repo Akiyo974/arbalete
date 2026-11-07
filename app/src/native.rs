@@ -31,7 +31,7 @@ unsafe extern "C" {
         toast: *const c_char,
     );
     fn arbalete_ui_about(chromium: *const c_char);
-    fn arbalete_ui_settings(shown: bool);
+    fn arbalete_ui_settings(shown: bool, pane: *const c_char);
     fn arbalete_ui_certificate(
         window: u32,
         certificates: *const *const u8,
@@ -361,10 +361,12 @@ pub extern "C" fn arbalete_little_should_close(id: u32) -> bool {
     crate::shell::little_can_close(id)
 }
 
-/// Opens the settings window, or closes it.
-pub fn settings(shown: bool) {
-    // SAFETY: a plain value.
-    unsafe { arbalete_ui_settings(shown) };
+/// Opens the settings window, on the pane titled `pane` if any, or closes it.
+pub fn settings(shown: bool, pane: Option<&str>) {
+    let pane = pane.and_then(|pane| CString::new(pane).ok());
+    let pane = pane.as_ref().map_or(std::ptr::null(), |pane| pane.as_ptr());
+    // SAFETY: the pane's title, or null, lives during the call.
+    unsafe { arbalete_ui_settings(shown, pane) };
 }
 
 /// Shows a certificate sheet on the window: `chain`, DER encoded, the site's certificate first,

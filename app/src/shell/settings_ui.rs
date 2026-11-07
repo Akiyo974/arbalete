@@ -39,12 +39,13 @@ pub(super) fn set_developer_mode(site: String, on: bool) {
     }
 }
 
-/// Shows the settings in a window of their own, like Arc's, brought to the front when it is
-/// already open. Its page asks for the settings once it listens (Command::SettingsReady).
-pub(super) fn show_settings() {
+/// Shows the settings in a window of their own, like Arc's, on `pane` if any, brought to the
+/// front when it is already open. Its page asks for the settings once it listens
+/// (Command::SettingsReady).
+pub(super) fn show_settings(pane: Option<&str>) {
     #[cfg(target_os = "macos")]
     {
-        crate::native::settings(true);
+        crate::native::settings(true, pane);
         send_settings();
     }
 }
@@ -52,7 +53,7 @@ pub(super) fn show_settings() {
 /// Closes the settings window, if it is open.
 pub(super) fn close_settings() {
     #[cfg(target_os = "macos")]
-    crate::native::settings(false);
+    crate::native::settings(false, None);
 }
 
 /// The settings window has the keyboard: ⌘W closes it rather than a tab.

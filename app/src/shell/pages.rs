@@ -30,6 +30,27 @@ fn current_suspend_delays() -> (i64, i64) {
     return suspend_delays(crate::mac::memory_pressure(), crate::mac::low_power());
 }
 
+/// Like Arc's, a toast tells that battery saving starts or stops, while it pauses hidden pages
+/// sooner: the setting it offers to edit is the one that suspends them.
+pub fn low_power_changed(low_power: bool) {
+    if !app_settings().suspend_tabs {
+        return;
+    }
+    let text = if low_power {
+        "Battery Saver Mode Activated"
+    } else {
+        "Battery Saver Mode Deactivated"
+    };
+    let settings = json!({ "name": "show-settings", "args": "Advanced" });
+    toast(json!({
+        "key": "battery-saver",
+        "text": text,
+        "icon": "leaf",
+        "button": "Edit this setting",
+        "commands": [settings.to_string()],
+    }));
+}
+
 /// Asks each page hidden long enough, but not frozen yet or due to unload, whether it plays media
 /// (page_playing): a page playing goes on. A frozen page, which plays nothing and answers nothing,
 /// unloads once due. A page capturing, or of a site kept awake, is never suspended, nor is any

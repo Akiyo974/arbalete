@@ -965,8 +965,10 @@ private struct DataRow: View {
 @MainActor var settingsModel: SettingsModel?
 
 @_cdecl("arbalete_ui_settings")
-public func showSettings(_ shown: Bool) {
+public func showSettings(_ shown: Bool, _ pane: UnsafePointer<CChar>?) {
+    let pane = pane.map { String(cString: $0) }
     MainActor.assumeIsolated {
+        if let pane { settingsModel?.choose(pane) }
         settingsModel?.show(shown)
     }
 }
