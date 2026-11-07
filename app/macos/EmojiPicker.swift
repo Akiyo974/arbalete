@@ -98,10 +98,18 @@ struct EmojiPicker: View {
     @ObservedObject var model: AppModel
     let space: Int
     private let _query = State<String>(initialValue: "")
-    private let _symbolic = State<Bool>(initialValue: false)
+    private let _symbolic: State<Bool>
     @FocusState private var searching: Bool
     /// Closes the popover it shows in: a Space's in the footer, or the new Space's in its form.
     @Environment(\.dismiss) private var dismiss
+
+    init(model: AppModel, space: Int) {
+        _model = ObservedObject(wrappedValue: model)
+        self.space = space
+        // It opens on the kind of icon the Space has.
+        let icon = model.state?.spaces.first { $0.id == space }?.emoji ?? ""
+        _symbolic = State(initialValue: symbolName(icon) != nil)
+    }
 
     private var current: String? {
         model.state?.spaces.first { $0.id == space }?.emoji
