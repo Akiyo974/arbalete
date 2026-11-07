@@ -1161,10 +1161,9 @@ fn send_state() {
     }
     // Each window's sidebar shows its own Space and tab.
     in_each_window(|| {
-        let json = STATE.with_borrow(UiState::to_json);
-        let event = format!(r#"new CustomEvent("arbalete:state", {{ detail: {json} }})"#);
-        dispatch(&win().sidebar, &event);
-        dispatch(&win().reveal_view, &event);
+        let json = STATE.with_borrow(UiState::to_json).to_string();
+        dispatch(&win().sidebar, "arbalete:state", &json);
+        dispatch(&win().reveal_view, "arbalete:state", &json);
     });
     // Extensions see the displayed Space's selected tab as their profile's active tab.
     let active = STATE.with_borrow(|state| {
@@ -1280,9 +1279,8 @@ fn save_downloads() {
 fn send_downloads() {
     update_media_files();
     let json = DOWNLOADS.with_borrow(|downloads| serde_json::to_string(downloads).expect("JSON"));
-    let event = format!(r#"new CustomEvent("arbalete:downloads", {{ detail: {json} }})"#);
-    in_each_window(|| dispatch(&win().sidebar, &event));
-    dispatch(&win().reveal_view, &event);
+    in_each_window(|| dispatch(&win().sidebar, "arbalete:downloads", &json));
+    dispatch(&win().reveal_view, "arbalete:downloads", &json);
 }
 
 /// The images and videos downloaded and still there, which the library's Media section shows:
@@ -1318,7 +1316,7 @@ fn show_downloads() {
     }
     let current = win();
     let view = &current.sidebar;
-    dispatch(view, r#"new Event("arbalete:show-downloads")"#);
+    dispatch(view, "arbalete:show-downloads", "null");
 }
 
 /// Opens the library on the section it showed last, showing the sidebar first if it is hidden.
@@ -1326,7 +1324,7 @@ fn show_library_page() {
     if win().sidebar_mode.get() == SidebarMode::Hidden {
         set_sidebar(SidebarMode::Shown);
     }
-    dispatch(&win().sidebar, r#"new Event("arbalete:open-library")"#);
+    dispatch(&win().sidebar, "arbalete:open-library", "null");
 }
 
 /// Puts a tab first among the tabs selected last, which the tab switcher lists.
@@ -1375,10 +1373,7 @@ fn switch_tab(forward: bool) {
             .collect()
     });
     let detail = json!({ "tabs": rows, "picked": index });
-    dispatch(
-        &win().overlay_view,
-        &format!(r#"new CustomEvent("arbalete:switch", {{ detail: {detail} }})"#),
-    );
+    dispatch(&win().overlay_view, "arbalete:switch", &detail.to_string());
     if let Some(overlay) = win().overlay.with_borrow(Clone::clone)
         && overlay.is_visible() == 0
     {
@@ -1434,18 +1429,18 @@ fn download_command(action: DownloadAction, id: u32) {
 }
 
 /// Gives one of the native interface's surfaces in the window, by name, like the Command Bar's,
-/// "overlay", an event, given as the JavaScript a web page would dispatch.
-fn send_surface(surface: &str, event: &str) {
+/// "overlay", an event: its name and its JSON detail.
+fn send_surface(surface: &str, name: &str, detail: &str) {
     #[cfg(target_os = "macos")]
-    crate::native::event(win().id, surface, event);
+    crate::native::event(win().id, surface, name, detail);
 }
 
 /// Gives the native interface's surface standing for one of the window's places, like the
-/// sidebar's, an event, given as the JavaScript a web page would dispatch.
-fn dispatch<T>(view: &RefCell<Option<T>>, event: &str) {
+/// sidebar's, an event: its name and its JSON detail.
+fn dispatch<T>(view: &RefCell<Option<T>>, name: &str, detail: &str) {
     #[cfg(target_os = "macos")]
     if let Some(surface) = native_surface(std::ptr::from_ref(view).cast()) {
-        crate::native::event(win().id, surface, event);
+        crate::native::event(win().id, surface, name, detail);
     }
 }
 
@@ -1517,10 +1512,7 @@ fn open_overlay(visible: bool, tab: Option<(String, Option<String>)>) {
         let search = json!({ "name": engine.name(), "url": engine.url() });
         let empty = url.is_none();
         let detail = json!({ "url": url, "favicon": favicon.flatten(), "search": search });
-        dispatch(
-            &win().overlay_view,
-            &format!(r#"new CustomEvent("arbalete:show", {{ detail: {detail} }})"#),
-        );
+        dispatch(&win().overlay_view, "arbalete:show", &detail.to_string());
         // Like Arc's, an empty bar offers the sites visited most.
         if empty {
             search_overlay("", "overlay");
@@ -1704,10 +1696,7 @@ fn search_overlay(text: &str, surface: &'static str) {
         })
         .collect();
     let detail = json!({ "text": text, "tabs": tabs, "pages": pages });
-    send_surface(
-        surface,
-        &format!(r#"new CustomEvent("arbalete:results", {{ detail: {detail} }})"#),
-    );
+    send_surface(surface, "arbalete:results", &detail.to_string());
     suggest(profile, text, surface);
 }
 
@@ -1756,10 +1745,7 @@ wrap_urlrequest_client! {
         fn on_request_complete(&self, _request: Option<&mut Urlrequest>) {
             let body = String::from_utf8_lossy(&self.body.borrow()).into_owned();
             let detail = json!({ "text": self.text, "suggestions": arbalete_core::search::suggestions(&body) });
-            send_surface(
-                self.surface,
-                &format!(r#"new CustomEvent("arbalete:suggestions", {{ detail: {detail} }})"#),
-            );
+            send_surface(self.surface, "arbalete:suggestions", &detail.to_string());
         }
     }
 }
@@ -1815,10 +1801,7 @@ fn set_sidebar(mode: SidebarMode) {
     if docked != (before == SidebarMode::Shown) {
         let slide = duration > 0 && matches!(before, SidebarMode::Shown | SidebarMode::Hidden);
         let detail = json!({ "docked": docked, "slide": slide });
-        dispatch(
-            &win().sidebar,
-            &format!(r#"new CustomEvent("arbalete:docked", {{ detail: {detail} }})"#),
-        );
+        dispatch(&win().sidebar, "arbalete:docked", &detail.to_string());
     }
     let floating = |mode| matches!(mode, SidebarMode::Revealed | SidebarMode::Floating);
     if floating(mode) && !floating(before) {
@@ -3170,9 +3153,13 @@ fn send_little(id: u32) {
         Some(detail)
     });
     if let Some(detail) = found {
-        let event = format!(r#"new CustomEvent("arbalete:little", {{ detail: {detail} }})"#);
         #[cfg(target_os = "macos")]
-        crate::native::event(win().id, &format!("little/{id}"), &event);
+        crate::native::event(
+            win().id,
+            &format!("little/{id}"),
+            "arbalete:little",
+            &detail.to_string(),
+        );
     }
 }
 
@@ -3338,9 +3325,9 @@ fn send_archive() {
             .collect();
         serde_json::Value::from(items)
     });
-    let event = format!(r#"new CustomEvent("arbalete:archive", {{ detail: {json} }})"#);
-    in_each_window(|| dispatch(&win().sidebar, &event));
-    dispatch(&win().reveal_view, &event);
+    let json = json.to_string();
+    in_each_window(|| dispatch(&win().sidebar, "arbalete:archive", &json));
+    dispatch(&win().reveal_view, "arbalete:archive", &json);
 }
 
 /// Opens an archived tab again, by its rank, in its Space, and shows it.
@@ -3696,8 +3683,7 @@ fn send_settings() {
         .map(|id| (id.clone(), settings::default_priority(id)))
         .collect();
     let detail = json!({ "settings": settings, "littleHotkeyTaken": taken, "shortcutDefaults": defaults, "shortcutPriorities": priorities, "engines": engines, "delays": delays, "profiles": profiles, "spaces": spaces, "urlRouting": routing });
-    let event = format!(r#"new CustomEvent("arbalete:settings", {{ detail: {detail} }})"#);
-    SETTINGS_VIEW.with(|view| dispatch(view, &event));
+    SETTINGS_VIEW.with(|view| dispatch(view, "arbalete:settings", &detail.to_string()));
 }
 
 /// Keeps a capture in the library's Media, like Arc's Save to Library: moved into the data
@@ -3835,10 +3821,7 @@ fn show_find() {
     let text = win()
         .find_text
         .with_borrow(|text| serde_json::to_string(text).expect("a string"));
-    dispatch(
-        &win().find_view,
-        &format!(r#"new CustomEvent("arbalete:show", {{ detail: {text} }})"#),
-    );
+    dispatch(&win().find_view, "arbalete:show", &text.to_string());
 }
 
 /// Makes the find bar's place, once.
@@ -4021,10 +4004,7 @@ fn show_theme_picker(id: SpaceId, beside: Option<(i32, i32)>) {
         return;
     };
     let detail = json!({ "space": id, "theme": theme });
-    dispatch(
-        &win().theme_view,
-        &format!(r#"new CustomEvent("arbalete:theme", {{ detail: {detail} }})"#),
-    );
+    dispatch(&win().theme_view, "arbalete:theme", &detail.to_string());
     #[cfg(target_os = "macos")]
     win().theme_at.set(crate::mac::pointer_y());
     win().theme_beside.set(beside);
@@ -4118,10 +4098,7 @@ fn send_site_controls(url: &str) {
     let settings = app_settings();
     let awake = settings.awake_sites.iter().any(|awake| awake == site(url));
     let detail = json!({ "url": url, "site": site(url), "awake": awake, "developer": developer_mode(url), "suspends": settings.suspend_tabs, "extensions": extensions, "permissions": site_permissions(url) });
-    dispatch(
-        &win().site_view,
-        &format!(r#"new CustomEvent("arbalete:show", {{ detail: {detail} }})"#),
-    );
+    dispatch(&win().site_view, "arbalete:show", &detail.to_string());
 }
 
 /// What the shown page's site, at `url`, was allowed or blocked, unlike Chromium's default, for
@@ -4197,10 +4174,7 @@ fn place_site_controls() {
     let mut bounds = under(&button, &size, &window);
     bounds.y += BEAK_GAP - PANEL_GAP;
     let beak = button.x + button.width / 2 - bounds.x;
-    dispatch(
-        &win().site_view,
-        &format!(r#"new CustomEvent("arbalete:beak", {{ detail: {beak} }})"#),
-    );
+    dispatch(&win().site_view, "arbalete:beak", &beak.to_string());
     controller.set_bounds(Some(&bounds));
 }
 
@@ -4380,8 +4354,7 @@ fn send_sources() {
         browsers.collect::<Vec<_>>()
     });
     let detail = json!({ "browsers": browsers, "profiles": profiles });
-    let event = format!(r#"new CustomEvent("arbalete:sources", {{ detail: {detail} }})"#);
-    IMPORT_VIEW.with(|view| dispatch(view, &event));
+    IMPORT_VIEW.with(|view| dispatch(view, "arbalete:sources", &detail.to_string()));
 }
 
 /// Makes the import assistant's place, once.
@@ -4915,9 +4888,9 @@ pub fn perform(action: Action) {
 /// Dispatches an event in the sidebars, which takes the keyboard focus, even from the page.
 fn ask(event: &str, detail: &serde_json::Value) {
     focus_sidebar();
-    let event = format!(r#"new CustomEvent("{event}", {{ detail: {detail} }})"#);
-    dispatch(&win().sidebar, &event);
-    dispatch(&win().reveal_view, &event);
+    let detail = detail.to_string();
+    dispatch(&win().sidebar, event, &detail);
+    dispatch(&win().reveal_view, event, &detail);
 }
 
 /// Pins or unpins a tab, or the selected one.
@@ -6420,12 +6393,9 @@ fn send_window_width() {
     else {
         return;
     };
-    let event = format!(
-        r#"new CustomEvent("arbalete:window-width", {{ detail: {} }})"#,
-        size.width
-    );
-    dispatch(&win().sidebar, &event);
-    dispatch(&win().reveal_view, &event);
+    let width = size.width.to_string();
+    dispatch(&win().sidebar, "arbalete:window-width", &width);
+    dispatch(&win().reveal_view, "arbalete:window-width", &width);
 }
 
 /// Opens a profile's web data in its own directory, `Profile <id>`: Chromium only accepts profile
@@ -7028,10 +6998,7 @@ pub fn scroll(scroll: crate::swipe::Scroll) {
             let current = win();
             let view = &current.sidebar;
             let detail = serde_json::to_string(&gesture).expect("a gesture");
-            dispatch(
-                view,
-                &format!(r#"new CustomEvent("arbalete:swipe", {{ detail: {detail} }})"#),
-            );
+            dispatch(view, "arbalete:swipe", &detail.to_string());
         }
         Some(Swipe::Step(next)) => show_found_space(|s| s.next_space(next)),
         None => {}
@@ -7787,7 +7754,8 @@ fn sync_permission_prompt() {
     crate::native::event(
         win().id,
         "permission",
-        &format!(r#"new CustomEvent("arbalete:permission", {{ detail: {detail} }})"#),
+        "arbalete:permission",
+        &detail.to_string(),
     );
     crate::native::surface(win().id, "permission", shown.is_some(), &frame);
 }
@@ -7953,11 +7921,7 @@ fn sync_auth_prompt() {
         height: win().auth_height.get(),
     };
     let detail = shown.clone().unwrap_or_default();
-    crate::native::event(
-        win().id,
-        "auth",
-        &format!(r#"new CustomEvent("arbalete:auth", {{ detail: {detail} }})"#),
-    );
+    crate::native::event(win().id, "auth", "arbalete:auth", &detail.to_string());
     crate::native::surface(win().id, "auth", shown.is_some(), &frame);
 }
 
@@ -8319,7 +8283,8 @@ wrap_find_handler! {
             if final_update == 1 && searched {
                 dispatch(
                     &win().find_view,
-                    &format!(r#"new CustomEvent("arbalete:found", {{ detail: {{ "count": {count}, "active": {active_match_ordinal} }} }})"#),
+                    "arbalete:found",
+                    &json!({ "count": count, "active": active_match_ordinal }).to_string(),
                 );
             }
         }

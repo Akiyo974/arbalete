@@ -1,5 +1,5 @@
-//! The native macOS interface (app/macos, in Swift). It gets the events the web UI gets, as their
-//! name and JSON detail, and sends the same commands (app/src/command.rs).
+//! The native macOS interface (app/macos, in Swift). It gets events, as their name and JSON
+//! detail, and sends commands (app/src/command.rs).
 
 use crate::command::Command;
 use cef::{Rect, Size};
@@ -246,12 +246,9 @@ pub fn detach(window: u32) {
     unsafe { arbalete_ui_detach(window) };
 }
 
-/// Gives a surface of the native interface of `window`, like "sidebar", an event dispatched to
-/// its web counterpart: `new CustomEvent("name", { detail: … })` or `new Event("name")`.
-pub fn event(window: u32, surface: &str, event: &str) {
-    let Some((name, detail)) = parse_event(event) else {
-        return;
-    };
+/// Gives a surface of the native interface of `window`, like "sidebar", an event: its name and
+/// its JSON detail, `null` without one.
+pub fn event(window: u32, surface: &str, name: &str, detail: &str) {
     let (Ok(surface), Ok(name), Ok(detail)) = (
         CString::new(surface),
         CString::new(name),
@@ -261,18 +258,6 @@ pub fn event(window: u32, surface: &str, event: &str) {
     };
     // SAFETY: the strings outlive the call, which copies what it needs.
     unsafe { arbalete_ui_event(window, surface.as_ptr(), name.as_ptr(), detail.as_ptr()) };
-}
-
-/// An event's name and its detail, `null` without one.
-fn parse_event(event: &str) -> Option<(&str, &str)> {
-    if let Some(rest) = event.strip_prefix(r#"new Event(""#) {
-        return Some((rest.split_once('"')?.0, "null"));
-    }
-    let (name, rest) = event
-        .strip_prefix(r#"new CustomEvent(""#)?
-        .split_once('"')?;
-    let detail = rest.strip_prefix(", { detail: ")?.strip_suffix(" })")?;
-    Some((name, detail))
 }
 
 /// Shows the sidebar of `window` at `frame`, in its points from its top left corner, floating
@@ -637,23 +622,5 @@ pub extern "C" fn arbalete_free_string(string: *mut c_char) {
     if !string.is_null() {
         // SAFETY: made by CString::into_raw in arbalete_ui_file.
         drop(unsafe { CString::from_raw(string) });
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::parse_event;
-
-    #[test]
-    fn parses_the_events_dispatched_to_the_web_ui() {
-        assert_eq!(
-            parse_event(r#"new CustomEvent("arbalete:state", { detail: {"space":1} })"#),
-            Some(("arbalete:state", r#"{"space":1}"#))
-        );
-        assert_eq!(
-            parse_event(r#"new Event("arbalete:show-history")"#),
-            Some(("arbalete:show-history", "null"))
-        );
-        assert_eq!(parse_event("dispatchEvent()"), None);
     }
 }
