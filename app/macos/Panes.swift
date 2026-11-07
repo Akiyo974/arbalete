@@ -252,6 +252,20 @@ extension NSView {
     }
 }
 
+/// Where an event moves a page in its history, if it does: the mouse's back and forward buttons,
+/// or a swipe, from three fingers on a trackpad when System Settings swipes between pages so, or
+/// from a mouse whose software turns its buttons into swipes, like Logi Options+. As in Chrome,
+/// a swipe whose deltaX is positive goes back.
+private func historyCommand(_ event: NSEvent) -> String? {
+    switch event.type {
+    case .otherMouseDown where event.buttonNumber == 3: "back"
+    case .otherMouseDown where event.buttonNumber == 4: "forward"
+    case .swipe where event.deltaX > 0: "back"
+    case .swipe where event.deltaX < 0: "forward"
+    default: nil
+    }
+}
+
 /// A view counting down from its top, which lets the clicks outside its subviews through to
 /// what is under it, like the window's margins, which move it.
 private final class Layer: NSView {
@@ -311,17 +325,18 @@ final class PagePlacer {
         card.addSubview(stage)
         overlays[ObjectIdentifier(window)] = { [weak self] in self?.overlay() }
         letPagesTakeClicks
-        // Like Chrome's, the mouse's back and forward buttons move the page under the pointer.
-        mouseButtons = NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown) {
+        // Like Chrome's, the mouse's back and forward buttons and swipes move the page under the
+        // pointer (historyCommand).
+        history = NSEvent.addLocalMonitorForEvents(matching: [.otherMouseDown, .swipe]) {
             [weak self] event in
-            guard [3, 4].contains(event.buttonNumber), let window = self?.window,
+            guard let command = historyCommand(event), let window = self?.window,
                 event.window === window,
                 let container = window.contentView?.superview?.hitTest(event.locationInWindow)?
                     .enclosing(PageContainer.self),
                 let tab = pageContainers.first(where: { $0.value === container })?.key
             else { return event }
             model.run("select", tab)
-            model.run(event.buttonNumber == 3 ? "back" : "forward")
+            model.run(command)
             return nil
         }
     }
@@ -329,7 +344,7 @@ final class PagePlacer {
     /// The pages last laid out, and the card's frame.
     private var last: (panes: [Pane], frame: NSRect?)?
     /// Moves the page under the pointer back or forward (init).
-    private var mouseButtons: Any?
+    private var history: Any?
 
     /// Fades the card back, like Arc's behind Peek, or brings it forward again.
     func fade(_ back: Bool) {
@@ -463,7 +478,7 @@ final class PagePlacer {
     }
 
     func close() {
-        if let mouseButtons { NSEvent.removeMonitor(mouseButtons) }
+        if let history { NSEvent.removeMonitor(history) }
         if let window { overlays[ObjectIdentifier(window)] = nil }
         toolbar.removeFromSuperview()
         outline.removeFromSuperview()
