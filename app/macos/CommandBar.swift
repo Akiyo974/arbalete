@@ -385,11 +385,12 @@ struct CommandBarView: View {
             let rows = bar.rows
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
-                    // Like Arc's, the picked row's icon.
+                    // Like Arc's, the picked row's icon once something is typed; a magnifier
+                    // before.
                     Group {
                         if bar.editing, rows.isEmpty, let favicon = bar.favicon {
                             Favicon(url: favicon, size: 16)
-                        } else if bar.picked < rows.count {
+                        } else if !bar.text.isEmpty, bar.picked < rows.count {
                             RowIcon(row: rows[bar.picked], picked: false, field: true)
                         } else {
                             Image(systemName: "magnifyingglass").font(.system(size: 12, weight: .medium))
