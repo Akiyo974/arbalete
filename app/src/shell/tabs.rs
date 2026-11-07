@@ -284,7 +284,8 @@ pub(super) fn remove_favorite(tab: NodeId) {
     }
 }
 
-/// Moves a tab to another Space; the selected tab takes the Space along, so it stays in view.
+/// Moves a tab, or a folder, to another Space; the selected tab takes the Space along, so it
+/// stays in view. A toast tells where it went, like Arc's, and goes there on a click.
 pub(super) fn move_to_space(id: NodeId, space: SpaceId) {
     // The selected tab, if it moves: the tab itself, or one in the folder.
     let selected = STATE.with_borrow(|state| {
@@ -297,11 +298,35 @@ pub(super) fn move_to_space(id: NodeId, space: SpaceId) {
         moves.then_some(selected)
     });
     // Like a selection, an unknown tab, folder or Space from a menu is ignored.
-    if update_sidebar(|sidebar| sidebar.move_to_space(id, space)).is_ok()
-        && let Some(selected) = selected
-    {
+    if update_sidebar(|sidebar| sidebar.move_to_space(id, space)).is_err() {
+        return;
+    }
+    if let Some(selected) = selected {
         select_tab(selected);
     }
+    let (title, tab) = STATE.with_borrow(|state| {
+        let sidebar = &state.sidebar;
+        let title = sidebar
+            .spaces()
+            .iter()
+            .find(|found| found.id == space)
+            .map(|space| space.title.clone());
+        let tab = sidebar
+            .node(id)
+            .is_some_and(|node| matches!(node.kind, NodeKind::Tab(_)));
+        (title.unwrap_or_default(), tab)
+    });
+    let go = if tab {
+        json!({ "name": "select", "args": id })
+    } else {
+        json!({ "name": "show-space", "args": space })
+    };
+    toast(json!({
+        "text": format!("Moved to {title}."),
+        "trailing": "Click to go there.",
+        "icon": "arrow.up.right",
+        "commands": [go.to_string()],
+    }));
 }
 
 /// Pins or unpins a tab, or the selected one, which a toast tells, like Arc's.
