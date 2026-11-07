@@ -37,7 +37,10 @@ final class StatusPill: NSView {
     private var given = 0
     /// The text around the address, and the address alone, in the theme's light shade.
     private var quietColor = NSColor(white: 1, alpha: 0.7)
-    /// Tells it the keys held change, and where the pointer moves, while it has an address.
+    /// Whether the pointer is over the link.
+    private var hovering = false
+    /// Tells it the keys held change and where the pointer moves, and takes the clicks it opens
+    /// itself, while it has an address.
     private var monitor: Any?
 
     init() {
@@ -78,6 +81,7 @@ final class StatusPill: NSView {
     func show(_ text: String, instant: Bool) {
         settle?.cancel()
         given += 1
+        hovering = !text.isEmpty
         if instant { return hideNow() }
         if !text.isEmpty, text != address {
             address = text
@@ -127,6 +131,7 @@ final class StatusPill: NSView {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         shown = false
+        hovering = false
         expanded = false
         address = ""
         alphaValue = 0
@@ -143,15 +148,17 @@ final class StatusPill: NSView {
     /// keeps, like Arc's.
     private func watch() {
         guard monitor == nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .mouseMoved]) {
-            [weak self] event in
+        let events: NSEvent.EventTypeMask = [.flagsChanged, .mouseMoved, .leftMouseDown]
+        monitor = NSEvent.addLocalMonitorForEvents(matching: events) { [weak self] event in
             let taken = MainActor.assumeIsolated { self?.take(event) ?? false }
             return taken ? nil : event
         }
     }
 
-    /// Shows what a click does with the keys held now, or moves out of the pointer's way.
+    /// Shows what a click does with the keys held now, moves out of the pointer's way, or opens
+    /// the link on a click Chromium would not open as it says.
     private func take(_ event: NSEvent) -> Bool {
+        if event.type == .leftMouseDown { return opens(event) }
         if event.type == .flagsChanged {
             render()
         } else if let window {
@@ -160,6 +167,19 @@ final class StatusPill: NSView {
             avoid(window.convertPoint(fromScreen: screen ?? event.locationInWindow))
         }
         return false
+    }
+
+    /// Opens the link in Split View on a click with ⌥ alone, which Chromium would download, like
+    /// Arc's: the page never gets the click.
+    private func opens(_ click: NSEvent) -> Bool {
+        guard hovering, explanation() == "in Split View", let page = superview,
+            click.window === window,
+            window?.contentView?.superview?.hitTest(click.locationInWindow)?
+                .isDescendant(of: page) == true,
+            let model = nativeWindows.values.first(where: { $0.window === window })?.model
+        else { return false }
+        model.run("open-in-split", address)
+        return true
     }
 
     /// The window's theme's color, like Arc's: a very dark shade under the text, a mid one
@@ -174,13 +194,15 @@ final class StatusPill: NSView {
     }
 
     /// What a click on the link would do with the keys held, as the page's handler does
-    /// (on_open_urlfrom_tab in app/src/shell/content.rs): a Little Arbalete window's page has none.
+    /// (on_open_urlfrom_tab in app/src/shell/content.rs), or `opens`: a Little Arbalete window's
+    /// page has none.
     private func explanation() -> String? {
         guard !littles.values.contains(where: { $0.window === window }) else { return nil }
         switch NSEvent.modifierFlags.intersection([.command, .shift, .option, .control]) {
         case [.command]: return "in a new tab"
         case [.command, .shift], [.command, .shift, .option]: return "in a new tab and focus it"
         case [.shift], [.shift, .option]: return "in Peek"
+        case [.option]: return "in Split View"
         default: return nil
         }
     }
