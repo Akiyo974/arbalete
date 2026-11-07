@@ -40,7 +40,6 @@ struct SpaceDraft: View {
     @ObservedObject var model: AppModel
     let space: Space
     private let _name = State<String>(initialValue: "")
-    private let _emoji = State<String?>(initialValue: nil)
     private let _picking = State<Bool>(initialValue: false)
     @FocusState private var naming: Bool
 
@@ -142,36 +141,31 @@ struct SpaceDraft: View {
         .onAppear { naming = true }
     }
 
-    /// The icon: a dashed square until an emoji is picked; a click opens the character palette.
-    @ViewBuilder private var icon: some View {
-        if _picking.wrappedValue {
-            EmojiCatcher { picked in
-                if let picked { _emoji.wrappedValue = picked }
-                _picking.wrappedValue = false
-            }
-            .frame(width: 24)
-        } else {
-            Button {
-                _picking.wrappedValue = true
-            } label: {
-                Group {
-                    if let emoji = _emoji.wrappedValue {
-                        Text(emoji).font(.system(size: 16))
-                    } else {
-                        Image(systemName: "plus")
-                            .font(.system(size: 10, weight: .semibold))
-                            .frame(width: 18, height: 18)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 4)
-                                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [2, 2])))
-                            .foregroundStyle(.secondary)
-                    }
+    /// The icon: a dashed square until one is picked; a click opens the picker of a Space's icon.
+    private var icon: some View {
+        Button {
+            _picking.wrappedValue = true
+        } label: {
+            Group {
+                if let emoji = space.emoji {
+                    SpaceGlyph(icon: emoji, size: 16)
+                } else {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(width: 18, height: 18)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [2, 2])))
+                        .foregroundStyle(.secondary)
                 }
-                .frame(width: 24, height: 24)
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .help("Choose an Icon")
+            .frame(width: 24, height: 24)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Choose an Icon")
+        .popover(isPresented: _picking.projectedValue, arrowEdge: .bottom) {
+            EmojiPicker(model: model, space: space.id)
         }
     }
 
@@ -194,39 +188,10 @@ struct SpaceDraft: View {
         guard !name.isEmpty else { return }
         model.draftSpace = nil
         model.run("rename-space", space.id, name)
-        if let emoji = _emoji.wrappedValue {
-            model.run("set-space-emoji", space.id, emoji)
-        }
     }
 
     private func cancel() {
         model.draftSpace = nil
         model.run("delete-space", space.id)
-    }
-}
-
-/// Takes the first emoji picked in the character palette, which it opens, or typed; nil once
-/// left without one.
-private struct EmojiCatcher: View {
-    let picked: (String?) -> Void
-    private let _text = State<String>(initialValue: "")
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        TextField("", text: _text.projectedValue)
-            .textFieldStyle(.plain)
-            .font(.system(size: 16))
-            .focused($focused)
-            .onAppear {
-                focused = true
-                DispatchQueue.main.async { NSApp.orderFrontCharacterPalette(nil) }
-            }
-            .onChange(of: _text.wrappedValue) { _, now in
-                if let first = now.first { picked(String(first)) }
-            }
-            .onExitCommand { picked(nil) }
-            .onChange(of: focused) { _, now in
-                if !now { picked(nil) }
-            }
     }
 }

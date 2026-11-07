@@ -100,6 +100,8 @@ struct EmojiPicker: View {
     private let _query = State<String>(initialValue: "")
     private let _symbolic = State<Bool>(initialValue: false)
     @FocusState private var searching: Bool
+    /// Closes the popover it shows in: a Space's in the footer, or the new Space's in its form.
+    @Environment(\.dismiss) private var dismiss
 
     private var current: String? {
         model.state?.spaces.first { $0.id == space }?.emoji
@@ -124,7 +126,7 @@ struct EmojiPicker: View {
         }
         .padding(12)
         .frame(width: 272)
-        .onExitCommand { model.editingSpace = nil }
+        .onExitCommand { dismiss() }
     }
 
     private func kind(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -229,7 +231,7 @@ struct EmojiPicker: View {
 
     /// Gives the Space this icon, or none for an empty one, and closes the picker.
     private func pick(_ text: String) {
-        model.editingSpace = nil
+        dismiss()
         model.run("set-space-emoji", space, text)
     }
 }
