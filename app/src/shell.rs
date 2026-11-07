@@ -623,13 +623,16 @@ struct Slide {
 
 /// How many closed tabs the UI lists, the last closed first: the state weighs on every update.
 const RECENTLY_CLOSED: usize = 10;
+/// How many closed tabs may be reopened, the oldest dropped beyond: Chromium's cap, which Arc's
+/// keeps.
+const MAX_CLOSED: usize = 25;
 
 /// What the UI shows.
 #[derive(Default)]
 struct UiState {
     page: Page,
     sidebar: Sidebar,
-    /// Closed tabs, the last one at the end, until the app quits.
+    /// Closed tabs, the last one at the end, the [`MAX_CLOSED`] last ones until the app quits.
     closed: Vec<Closed>,
 }
 
@@ -645,6 +648,13 @@ struct Closed {
 }
 
 impl UiState {
+    /// Keeps tabs just closed, which may be reopened, dropping the oldest beyond [`MAX_CLOSED`].
+    fn keep_closed(&mut self, tabs: impl IntoIterator<Item = Closed>) {
+        self.closed.extend(tabs);
+        let over = self.closed.len().saturating_sub(MAX_CLOSED);
+        self.closed.drain(..over);
+    }
+
     /// Sent whole to the UI on every change: the displayed Space, and its page and its
     /// neighbors', which the UI lays out side by side to swipe between them. The other pages are
     /// left out, as they would weigh on every update.
@@ -1317,6 +1327,36 @@ mod tests {
             serde_json::json!(profile)
         );
         assert_eq!(closed["favicon"], favicon);
+    }
+
+    #[test]
+    fn keeps_the_last_closed_tabs_dropping_the_oldest() {
+        let mut state = UiState::default();
+        let profile = state.sidebar.profiles()[0].id;
+        let closed = |i: usize| super::Closed {
+            id: None,
+            tab: arbalete_core::sidebar::Tab {
+                url: format!("https://example.com/{i}"),
+                title: String::new(),
+                favicon: None,
+                opener: None,
+                saved_url: None,
+                name: None,
+                muted: false,
+                last_shown: None,
+            },
+            profile,
+            at: std::time::UNIX_EPOCH,
+            beside: None,
+        };
+        state.keep_closed((0..20).map(closed));
+        state.keep_closed((20..30).map(closed));
+        assert_eq!(state.closed.len(), super::MAX_CLOSED);
+        assert_eq!(state.closed[0].tab.url, "https://example.com/5");
+        assert_eq!(
+            state.closed.last().unwrap().tab.url,
+            "https://example.com/29"
+        );
     }
 
     #[test]

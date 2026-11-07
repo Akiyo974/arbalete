@@ -136,7 +136,7 @@ fn remove_tab(tab: NodeId) -> Option<NodeId> {
                     .sidebar
                     .archive_closed(closed.tab.clone(), space, now() as u64);
             }
-            state.closed.push(closed);
+            state.keep_closed([closed]);
         }
         (state.sidebar.next_after_close(tab), kept)
     });
@@ -250,7 +250,7 @@ pub(super) fn close_rows(
     }
     tell_closed(what, removed.len());
     STATE.with_borrow_mut(|state| {
-        state.closed.extend(removed.into_iter().map(|tab| Closed {
+        state.keep_closed(removed.into_iter().map(|tab| Closed {
             id: None,
             tab,
             profile,
