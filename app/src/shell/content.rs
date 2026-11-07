@@ -488,6 +488,7 @@ wrap_display_handler! {
             }
             let url = url.map(CefString::to_string).unwrap_or_default();
             let Some(browser) = browser else { return };
+            status(browser, "", true);
             if is_peek(browser) {
                 return send_peek();
             }
@@ -551,11 +552,24 @@ wrap_display_handler! {
             });
         }
 
+        /// The hovered link's address, or none.
+        fn on_status_message(&self, browser: Option<&mut Browser>, value: Option<&CefString>) {
+            let Some(browser) = browser else { return };
+            status(browser, &value.map(CefString::to_string).unwrap_or_default(), false);
+        }
+
         fn on_loading_progress_change(&self, browser: Option<&mut Browser>, progress: f64) {
             if is_shown(browser) {
                 update_page(|page| page.progress = progress);
             }
         }
+    }
+}
+
+/// Shows `text` at the bottom of `browser`'s page, or hides it without text (native::page_status).
+fn status(browser: &Browser, text: &str, instant: bool) {
+    if let Some(host) = browser.host() {
+        crate::native::page_status(host.window_handle(), text, instant);
     }
 }
 

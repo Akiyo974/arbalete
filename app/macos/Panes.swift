@@ -63,10 +63,30 @@ private final class Outline: NSView {
 
 /// The view CEF draws a page in: it adds its own view in it, which it keeps the size of.
 final class PageHost: NSView {
+    /// The hovered link's address over the page, once a link has been.
+    private var pill: StatusPill?
+
     override func didAddSubview(_ subview: NSView) {
         super.didAddSubview(subview)
+        if subview === pill { return }
         subview.frame = bounds
         subview.autoresizingMask = [.width, .height]
+    }
+
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        pill?.place()
+    }
+
+    /// Shows `text` over the page, or hides it without text (StatusPill.show).
+    func status(_ text: String, instant: Bool) {
+        if pill == nil {
+            guard !text.isEmpty else { return }
+            let made = StatusPill()
+            pill = made
+            addSubview(made)
+        }
+        pill?.show(text, instant: instant)
     }
 }
 

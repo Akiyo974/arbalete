@@ -48,6 +48,7 @@ unsafe extern "C" {
     fn arbalete_ui_page_closed(view: *mut std::ffi::c_void);
     fn arbalete_ui_hand_pages_over(from: u32, to: u32);
     fn arbalete_ui_focus_page(tab: i64);
+    fn arbalete_ui_page_status(view: *mut c_void, text: *const c_char, instant: bool);
     fn arbalete_ui_tools_view(tab: i64) -> *mut std::ffi::c_void;
     fn arbalete_ui_tools_room(tab: i64, x: f64, y: f64, width: f64, height: f64);
     fn arbalete_ui_tools_docked(tab: i64, docked: bool);
@@ -441,6 +442,14 @@ pub fn tools_closed(view: *mut std::ffi::c_void) {
 pub fn focus_page(tab: i64) {
     // SAFETY: a plain value.
     unsafe { arbalete_ui_focus_page(tab) };
+}
+
+/// Shows `text`, a hovered link's address, at the bottom of the page CEF draws at `view`, or hides
+/// it without text: at once when `instant`, as the page goes, or after a moment otherwise.
+pub fn page_status(view: *mut c_void, text: &str, instant: bool) {
+    let text = CString::new(text).unwrap_or_default();
+    // SAFETY: CEF's view of a live browser, and a C string, which the call reads before returning.
+    unsafe { arbalete_ui_page_status(view, text.as_ptr(), instant) };
 }
 
 /// Shows Peek's scrim and controls around its card at `frame`, in the window's points from its
