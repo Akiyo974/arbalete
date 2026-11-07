@@ -444,6 +444,8 @@ pub enum Command {
     RenameSpace(SpaceId, String),
     /// Sets a Space's emoji, or removes it when empty.
     SetSpaceEmoji(SpaceId, String),
+    /// Gives a Space the icon of the site at an address, typed or a tab's (set_space_site).
+    SetSpaceSite(SpaceId, String),
     /// Changes a Space's theme.
     SetSpaceTheme(SpaceId, Theme),
     /// Replaces the URL Routing rules and default.
@@ -611,6 +613,10 @@ mod tests {
             Some(Command::Split(_, _, true))
         ));
         assert_eq!(parse(r#"{"name":"rename","args":[12]}"#), None);
+        assert!(matches!(
+            parse(r#"{"name":"set-space-site","args":[3,"example.com"]}"#),
+            Some(Command::SetSpaceSite(_, address)) if address == "example.com"
+        ));
         assert_eq!(
             parse(r#"{"name":"answer-auth","args":[3,["me@home","p/ss word"]]}"#),
             Some(Command::AnswerAuth(

@@ -172,8 +172,8 @@ pub fn tabs_menu(sidebar: &Sidebar, ids: &[NodeId]) -> Vec<Entry> {
             Entry::Item(Item {
                 id: format!("move/{}", serde_json::to_string(&space.id).expect("an id")),
                 title: match &space.emoji {
-                    // A symbol shows only in the sidebar.
-                    Some(emoji) if !emoji.starts_with("symbol:") => {
+                    // A symbol or a site's icon shows only in the sidebar.
+                    Some(emoji) if !emoji.starts_with("symbol:") && !emoji.starts_with("site:") => {
                         format!("{emoji}  {}", space.title)
                     }
                     _ => space.title.clone(),
@@ -384,8 +384,8 @@ fn move_to(sidebar: &Sidebar, id: NodeId) -> Entry {
             Entry::Item(Item {
                 id: format!("move/{space_id}"),
                 title: match &space.emoji {
-                    // A symbol shows only in the sidebar.
-                    Some(emoji) if !emoji.starts_with("symbol:") => {
+                    // A symbol or a site's icon shows only in the sidebar.
+                    Some(emoji) if !emoji.starts_with("symbol:") && !emoji.starts_with("site:") => {
                         format!("{emoji}  {}", space.title)
                     }
                     _ => space.title.clone(),

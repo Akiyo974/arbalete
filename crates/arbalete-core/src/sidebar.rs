@@ -187,6 +187,14 @@ pub struct Space {
     pub collapsed: bool,
 }
 
+impl Space {
+    /// The source of the site's icon the Space shows, stored as "site:<source>" in its emoji, like
+    /// a symbol as "symbol:<name>": a tab's favicon, cached in its profile (favicon::path).
+    pub fn site_icon(&self) -> Option<&str> {
+        self.emoji.as_deref()?.strip_prefix("site:")
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Node {
     pub id: NodeId,
@@ -2845,6 +2853,21 @@ mod tests {
             "selected": null }"#;
         let space: Space = serde_json::from_str(json).unwrap();
         assert_eq!((space.emoji, space.theme), (None, Color::Purple.into()));
+    }
+
+    #[test]
+    fn keeps_a_site_icon_across_a_save() {
+        let mut sidebar = Sidebar::default();
+        let id = home(&sidebar).id;
+        assert_eq!(home(&sidebar).site_icon(), None);
+        sidebar.set_space_emoji(id, "symbol:star.fill").unwrap();
+        assert_eq!(home(&sidebar).site_icon(), None);
+        sidebar
+            .set_space_emoji(id, "site:https://a.example/favicon.ico")
+            .unwrap();
+        let saved: Space =
+            serde_json::from_value(serde_json::to_value(home(&sidebar)).unwrap()).unwrap();
+        assert_eq!(saved.site_icon(), Some("https://a.example/favicon.ico"));
     }
 
     #[test]

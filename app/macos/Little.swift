@@ -314,7 +314,7 @@ struct LittleBarView: View {
                     Rectangle().fill(.primary.opacity(0.15)).frame(width: 1, height: 16)
                     Menu {
                         ForEach(page.spaces ?? []) { space in
-                            Button((space.emoji.map { "\($0) " } ?? "") + space.title) {
+                            Button((emojiText(space.emoji).map { "\($0) " } ?? "") + space.title) {
                                 bar.app.run("little", bar.id, ["open-in-space": space.id])
                             }
                         }

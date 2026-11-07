@@ -1,10 +1,12 @@
 // A Space's icon picker, like Arc's: above the Space's icon in the footer, an emoji or a symbol,
-// with a search field and categories for the emoji, and a button that removes the icon.
+// with a search field and categories for the emoji, and a button that removes the icon; or, our
+// own, a site's icon.
 
 import AppKit
 import SwiftUI
 
-/// A Space's icon as a view: an emoji, or a symbol stored as "symbol:<name>".
+/// A Space's icon as a view: an emoji, a symbol stored as "symbol:<name>", or a site's icon the
+/// app sends as "site:<url>", a globe while its file is missing.
 struct SpaceGlyph: View {
     let icon: String
     let size: CGFloat
@@ -12,6 +14,13 @@ struct SpaceGlyph: View {
     var body: some View {
         if let name = symbolName(icon) {
             Image(systemName: name).font(.system(size: size * 0.85, weight: .semibold))
+        } else if let url = siteIcon(icon) {
+            if let image = uiImage(url) {
+                Image(nsImage: image).resizable().interpolation(.high)
+                    .frame(width: size, height: size)
+            } else {
+                Image(systemName: "globe").font(.system(size: size * 0.85, weight: .semibold))
+            }
         } else {
             Text(icon).font(.system(size: size))
         }
@@ -21,6 +30,29 @@ struct SpaceGlyph: View {
 /// The symbol's name a Space's icon stores, if it is one.
 func symbolName(_ icon: String) -> String? {
     icon.hasPrefix("symbol:") ? String(icon.dropFirst("symbol:".count)) : nil
+}
+
+/// Where the site's icon a Space shows loads from, if it shows one.
+func siteIcon(_ icon: String) -> String? {
+    icon.hasPrefix("site:") ? String(icon.dropFirst("site:".count)) : nil
+}
+
+/// A Space's icon as text, for a menu: only an emoji; a symbol or a site's icon shows only in the
+/// sidebar.
+func emojiText(_ icon: String?) -> String? {
+    guard let icon, symbolName(icon) == nil, siteIcon(icon) == nil else { return nil }
+    return icon
+}
+
+/// The kinds of icon the picker offers, by their tab's title.
+private enum IconKind: String, CaseIterable {
+    case emoji = "Emoji"
+    case symbol = "Icon"
+    case site = "Site"
+
+    init(_ icon: String) {
+        self = symbolName(icon) != nil ? .symbol : siteIcon(icon) != nil ? .site : .emoji
+    }
 }
 
 /// A category of the emoji, with the symbol of its button.
@@ -98,7 +130,8 @@ struct EmojiPicker: View {
     @ObservedObject var model: AppModel
     let space: Int
     private let _query = State<String>(initialValue: "")
-    private let _symbolic: State<Bool>
+    private let _kind: State<IconKind>
+    private let _address = State<String>(initialValue: "")
     @FocusState private var searching: Bool
     /// Closes the popover it shows in: a Space's in the footer, or the new Space's in its form.
     @Environment(\.dismiss) private var dismiss
@@ -108,7 +141,7 @@ struct EmojiPicker: View {
         self.space = space
         // It opens on the kind of icon the Space has.
         let icon = model.state?.spaces.first { $0.id == space }?.emoji ?? ""
-        _symbolic = State(initialValue: symbolName(icon) != nil)
+        _kind = State(initialValue: IconKind(icon))
     }
 
     private var current: String? {
@@ -116,13 +149,16 @@ struct EmojiPicker: View {
     }
 
     var body: some View {
-        let symbolic = _symbolic.wrappedValue
+        let shown = _kind.wrappedValue
         VStack(spacing: 10) {
-            // Like Arc's: the two kinds side by side in the middle, the trash beside them.
+            // Like Arc's: the kinds side by side in the middle, the trash beside them.
             HStack(spacing: 10) {
                 HStack(spacing: 0) {
-                    kind("Emoji", selected: !symbolic) { _symbolic.wrappedValue = false }
-                    kind("Icon", selected: symbolic) { _symbolic.wrappedValue = true }
+                    ForEach(IconKind.allCases, id: \.self) { kind in
+                        self.kind(kind.rawValue, selected: kind == shown) {
+                            _kind.wrappedValue = kind
+                        }
+                    }
                 }
                 .padding(2)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.1)))
@@ -130,7 +166,11 @@ struct EmojiPicker: View {
                     pick("")
                 }
             }
-            if symbolic { symbolGrid } else { emojiGrid }
+            switch shown {
+            case .emoji: emojiGrid
+            case .symbol: symbolGrid
+            case .site: siteGrid
+            }
         }
         .padding(12)
         .frame(width: 272)
@@ -234,6 +274,58 @@ struct EmojiPicker: View {
                 }
                 .buttonStyle(.plain)
             }
+        }
+    }
+
+    /// The icons of the Space's tabs, one per icon, and a field for a site's address.
+    private var siteGrid: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "globe").foregroundStyle(.secondary)
+                TextField("Site address", text: _address.projectedValue)
+                    .textFieldStyle(.plain)
+                    .focused($searching)
+                    .background(TakesKeyboard())
+                    .onSubmit {
+                        dismiss()
+                        model.run("set-space-site", space, _address.wrappedValue)
+                    }
+            }
+            .font(.system(size: 14))
+            .padding(.horizontal, 9)
+            .frame(height: 28)
+            .background(RoundedRectangle(cornerRadius: 9).fill(Color.black.opacity(0.3)))
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 8), spacing: 4) {
+                ForEach(siteTabs) { tab in
+                    let picked = current == "site:\(tab.favicon ?? "")"
+                    Button {
+                        dismiss()
+                        model.run("set-space-site", space, tab.url)
+                    } label: {
+                        Favicon(url: tab.favicon, size: 18)
+                            .frame(width: 30, height: 30)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color.white.opacity(picked ? 0.15 : 0)))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(tab.label)
+                }
+            }
+        }
+        .onAppear { DispatchQueue.main.async { searching = true } }
+    }
+
+    /// The Space's tabs with an icon, one per icon, as the app sends them: for the displayed Space
+    /// and its neighbors only.
+    private var siteTabs: [Tab] {
+        guard let page = model.state?.pages.first(where: { $0.space == space }) else { return [] }
+        var seen = Set<String>()
+        let items: [Item] = page.favorites + page.pinned + page.today
+        return items.flatMap(\.tabs).filter { tab in
+            guard let favicon = tab.favicon else { return false }
+            return seen.insert(favicon).inserted
         }
     }
 

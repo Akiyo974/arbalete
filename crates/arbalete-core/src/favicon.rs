@@ -79,7 +79,7 @@ pub fn of_page(profile_dir: &Path, chromium: &Connection, page_url: &str) -> Opt
 }
 
 /// Forgets the icons of tabs whose file is missing, as an older session's icon urls, and deletes
-/// the files no tab of their profile shows any more. Errors are left for the next launch.
+/// the files no tab or Space of their profile shows any more. Errors are left for the next launch.
 pub fn sweep(sidebar: &mut Sidebar, profile_dir: impl Fn(ProfileId) -> PathBuf) {
     let profiles: Vec<_> = sidebar.profiles().iter().map(|p| p.id).collect();
     for profile in profiles {
@@ -94,7 +94,12 @@ pub fn sweep(sidebar: &mut Sidebar, profile_dir: impl Fn(ProfileId) -> PathBuf) 
             .filter(|&(id, _)| sidebar.profile_of(id) == Some(profile))
             .filter_map(|(id, tab)| Some((id, file_name(tab.favicon.as_deref()?))))
             .collect();
-        let mut shown = HashSet::new();
+        let mut shown: HashSet<String> = sidebar
+            .spaces()
+            .iter()
+            .filter(|space| space.profile == profile)
+            .filter_map(|space| Some(file_name(space.site_icon()?)))
+            .collect();
         for (id, name) in tabs {
             if files.contains(&name) {
                 shown.insert(name);
@@ -127,7 +132,7 @@ mod tests {
     }
 
     #[test]
-    fn keeps_the_files_tabs_show_and_forgets_the_icons_without_one() {
+    fn keeps_the_files_tabs_and_spaces_show_and_forgets_the_icons_without_one() {
         let dir = TestDir::new("favicon-sweep");
         let mut sidebar = Sidebar::default();
         let profile = sidebar.profiles()[0].id;
@@ -140,6 +145,11 @@ mod tests {
         let profile_dir = dir.0.join("profile");
         write(&profile_dir, "https://a.example/favicon.ico", b"png").unwrap();
         write(&profile_dir, "https://gone.example/favicon.ico", b"png").unwrap();
+        // A Space showing a site's icon keeps it once its tabs are gone.
+        let space = sidebar.spaces()[0].id;
+        let site = "site:https://space.example/favicon.ico";
+        sidebar.set_space_emoji(space, site).unwrap();
+        write(&profile_dir, "https://space.example/favicon.ico", b"png").unwrap();
         sweep(&mut sidebar, |p| {
             assert_eq!(p, profile);
             profile_dir.clone()
@@ -152,6 +162,7 @@ mod tests {
         assert_eq!(favicon(&mut sidebar, missing), None);
         assert!(path(&profile_dir, "https://a.example/favicon.ico").exists());
         assert!(!path(&profile_dir, "https://gone.example/favicon.ico").exists());
+        assert!(path(&profile_dir, "https://space.example/favicon.ico").exists());
     }
 
     #[test]

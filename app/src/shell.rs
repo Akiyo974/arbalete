@@ -670,7 +670,7 @@ impl UiState {
             "spaces": spaces.iter().map(|s| json!({
                 "id": s.id,
                 "title": s.title,
-                "emoji": s.emoji,
+                "emoji": space_icon(s),
                 "theme": s.theme,
                 "profile": s.profile,
                 "pinned": self.overview(s.pinned, s.profile),
@@ -819,6 +819,14 @@ fn has_page(tab: NodeId) -> bool {
 /// from the UI's own origin so that the UI may read their pixels.
 fn favicon_url(profile: ProfileId, tab: &Tab) -> Option<String> {
     Some(icon_url(profile, tab.favicon.as_deref()?))
+}
+
+/// A Space's icon for the UI: a site's as "site:" and where the UI loads it from (icon_url).
+fn space_icon(space: &Space) -> Option<String> {
+    match space.site_icon() {
+        Some(source) => Some(format!("site:{}", icon_url(space.profile, source))),
+        None => space.emoji.clone(),
+    }
 }
 
 /// Where the UI loads the cached icon `source` of `profile` from (favicon_url).
@@ -1094,7 +1102,7 @@ fn favicon_file(path: &str) -> Option<PathBuf> {
 mod tests {
     use super::{
         CARD_MARGIN, EDGE_WIDTH, FLOAT_INSET, LIBRARY_WIDTH, Rect, SIDEBAR_WIDTH, SidebarMode,
-        Size, UiState, favicon_file, site, win,
+        Size, UiState, favicon_file, site, space_icon, win,
     };
 
     #[test]
@@ -1106,6 +1114,26 @@ mod tests {
         assert_eq!(site("http://localhost:3000?q=1"), "localhost:3000");
         assert_eq!(site("https://example.com#top"), "example.com");
         assert_eq!(site("about:blank"), "about:blank");
+    }
+
+    #[test]
+    fn sends_a_space_site_icon_where_the_ui_loads_it_from() {
+        let mut sidebar = arbalete_core::sidebar::Sidebar::default();
+        let space = sidebar.spaces()[0].id;
+        sidebar.set_space_emoji(space, "💼").unwrap();
+        assert_eq!(space_icon(&sidebar.spaces()[0]).as_deref(), Some("💼"));
+        let source = "https://a.example/favicon.ico";
+        sidebar
+            .set_space_emoji(space, &format!("site:{source}"))
+            .unwrap();
+        let profile = serde_json::to_string(&sidebar.spaces()[0].profile).unwrap();
+        assert_eq!(
+            space_icon(&sidebar.spaces()[0]),
+            Some(format!(
+                "site:arbalete://ui/favicon/{profile}/{}",
+                arbalete_core::favicon::file_name(source)
+            ))
+        );
     }
 
     fn rect(rect: &Rect) -> (i32, i32, i32, i32) {

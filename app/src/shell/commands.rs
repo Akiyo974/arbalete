@@ -324,6 +324,7 @@ fn run_command(command: Command) {
         (Command::SetSpaceEmoji(id, emoji), _) => {
             let _ = update_sidebar(|sidebar| sidebar.set_space_emoji(id, &emoji));
         }
+        (Command::SetSpaceSite(id, address), _) => set_space_site(id, &address),
         (Command::SetUrlRouting(routing), _) => {
             update_sidebar(|sidebar| sidebar.set_url_routing(routing));
             send_settings();

@@ -103,6 +103,38 @@ pub(super) fn create_space(title: &str, emoji: &str, color: Color, tab: Option<N
     }
 }
 
+/// Gives a Space the icon of the site at `address`: the icon of a tab of its profile at that
+/// address, else the one Chromium found for the page or its site, cached. An address without an
+/// icon leaves the Space's as it is.
+pub(super) fn set_space_site(space: SpaceId, address: &str) {
+    let address = address.trim();
+    if address.is_empty() {
+        return;
+    }
+    let url = if address.contains("://") {
+        address.to_string()
+    } else {
+        format!("https://{address}")
+    };
+    let Some((profile, tab_icon)) = STATE.with_borrow(|state| {
+        let sidebar = &state.sidebar;
+        let profile = sidebar.profile_of_space(space)?;
+        let tab_icon = sidebar
+            .tabs()
+            .find(|&(id, tab)| tab.url == url && sidebar.profile_of(id) == Some(profile))
+            .and_then(|(_, tab)| tab.favicon.clone());
+        Some((profile, tab_icon))
+    }) else {
+        return;
+    };
+    let dir = profile_dir(profile);
+    let Some(source) = tab_icon.or_else(|| favicon::of_page(&dir, &favicon::chromium(&dir)?, &url))
+    else {
+        return;
+    };
+    let _ = update_sidebar(|sidebar| sidebar.set_space_emoji(space, &format!("site:{source}")));
+}
+
 /// Changes the Spaces, then shows the displayed Space's selected tab if the change displays
 /// another Space or `space` itself, whose page may change. Like a selection, an unknown Space or
 /// profile from the UI or a menu is ignored.
