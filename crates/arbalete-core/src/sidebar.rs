@@ -393,6 +393,10 @@ pub struct Sidebar {
     /// parts.
     #[serde(default)]
     splits: HashMap<NodeId, Layout>,
+    /// The Space whose form is open (`create_draft_space`), which only naming it keeps: never
+    /// saved, it does not outlive a quit or a crash.
+    #[serde(skip)]
+    draft: Option<SpaceId>,
 }
 
 /// How a split lays its tabs out: along one axis, each taking its factor of the room.
@@ -438,6 +442,7 @@ impl Sidebar {
             archive: Vec::new(),
             url_routing: UrlRouting::default(),
             splits: HashMap::new(),
+            draft: None,
         }
     }
 
@@ -566,9 +571,13 @@ impl Sidebar {
         Ok(())
     }
 
-    /// The sidebar to save: without the incognito windows' profiles, Spaces and tabs.
+    /// The sidebar to save: without the incognito windows' profiles, Spaces and tabs, nor a
+    /// Space not named yet.
     pub fn saved(&self) -> Sidebar {
         let mut saved = self.clone();
+        if let Some(draft) = saved.draft.take() {
+            let _ = saved.delete_space(draft);
+        }
         let incognito: Vec<_> = saved.spaces[saved.listed_spaces()..]
             .iter()
             .map(|s| s.id)
@@ -941,11 +950,25 @@ impl Sidebar {
         Ok(space)
     }
 
+    /// Creates a Space like `create_space`, which stays only once named (`rename_space`).
+    pub fn create_draft_space(
+        &mut self,
+        title: &str,
+        profile: ProfileId,
+    ) -> Result<SpaceId, Error> {
+        let space = self.create_space(title, profile)?;
+        self.draft = Some(space);
+        Ok(space)
+    }
+
     pub fn rename_space(&mut self, id: SpaceId, title: &str) -> Result<(), Error> {
         if title.trim().is_empty() {
             return Err(Error::EmptyTitle);
         }
         self.space_mut(id)?.title = title.to_string();
+        if self.draft == Some(id) {
+            self.draft = None;
+        }
         Ok(())
     }
 
@@ -2790,6 +2813,19 @@ mod tests {
         );
         assert_eq!(sidebar.spaces().len(), 2);
         assert_eq!(sidebar.displayed().id, space);
+    }
+
+    #[test]
+    fn saves_a_draft_space_only_once_named() {
+        let mut sidebar = Sidebar::default();
+        let home = sidebar.spaces()[0].clone();
+        let draft = sidebar.create_draft_space("Space 2", home.profile).unwrap();
+        let saved = sidebar.saved();
+        assert_eq!(saved.spaces().len(), 1);
+        assert_eq!(saved.displayed().id, home.id);
+        assert_eq!(sidebar.spaces().len(), 2);
+        sidebar.rename_space(draft, "Work").unwrap();
+        assert_eq!(sidebar.saved().space(draft).unwrap().title, "Work");
     }
 
     #[test]

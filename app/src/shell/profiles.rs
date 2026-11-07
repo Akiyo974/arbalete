@@ -83,7 +83,7 @@ pub(super) fn create_space(title: &str, emoji: &str, color: Color, tab: Option<N
     let created = update_sidebar(|sidebar| {
         let displayed = sidebar.displayed();
         let (profile, current) = (displayed.profile, displayed.id);
-        let space = sidebar.create_space(title, profile)?;
+        let space = sidebar.create_draft_space(title, profile)?;
         // Like Arc's, right after the Space it was created from.
         if let Some(index) = sidebar.spaces().iter().position(|s| s.id == current) {
             sidebar.move_space(space, index + 1)?;

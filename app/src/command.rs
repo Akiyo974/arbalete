@@ -433,8 +433,8 @@ pub enum Command {
     /// Shows the Space after the displayed one, or before it.
     NextSpace,
     PreviousSpace,
-    /// Creates a Space in the displayed Space's profile and displays it, an empty emoji for none,
-    /// moving a tab into it if given.
+    /// Creates a Space to fill in, in the displayed Space's profile, and displays it, an empty
+    /// emoji for none, moving a tab into it if given: only renaming it keeps it past a quit.
     CreateSpace {
         title: String,
         emoji: String,
