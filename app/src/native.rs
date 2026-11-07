@@ -22,6 +22,14 @@ unsafe extern "C" {
         height: f64,
     );
     fn arbalete_ui_detach(window: u32);
+    fn arbalete_ui_toast(
+        window: u32,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        toast: *const c_char,
+    );
     fn arbalete_ui_about(chromium: *const c_char);
     fn arbalete_ui_settings(shown: bool);
     fn arbalete_ui_certificate(
@@ -544,6 +552,23 @@ pub fn captured(window: u32, base64: &str, mode: u32, frame: &Rect, blocks: &str
             frame.width.into(),
             frame.height.into(),
             blocks.as_ptr(),
+        )
+    };
+}
+
+/// Shows a toast, as JSON (app/src/shell/toasts.rs), at the top right of the page at `page`, in
+/// the window's points from its top left corner.
+pub fn toast(window: u32, page: &Rect, toast: &str) {
+    let toast = CString::new(toast).unwrap_or_default();
+    // SAFETY: a C string, which the call reads before returning, and plain values.
+    unsafe {
+        arbalete_ui_toast(
+            window,
+            page.x.into(),
+            page.y.into(),
+            page.width.into(),
+            page.height.into(),
+            toast.as_ptr(),
         )
     };
 }

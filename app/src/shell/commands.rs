@@ -388,6 +388,8 @@ fn run_command(command: Command) {
                     Zoom::Out => ZoomCommand::OUT,
                     Zoom::Reset => ZoomCommand::RESET,
                 });
+                let percent = zoom_percent(host.zoom_level());
+                toast(json!({ "key": "zoom", "text": format!("{percent}%") }));
             }
         }
         (Command::ShowFind, _) => show_find(),

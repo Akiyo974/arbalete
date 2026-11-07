@@ -60,6 +60,7 @@ mod site_controls;
 mod split;
 mod tabs;
 mod theme_picker;
+mod toasts;
 mod views;
 mod windows;
 
@@ -88,6 +89,7 @@ pub use site_controls::*;
 pub use split::*;
 use tabs::*;
 use theme_picker::*;
+use toasts::*;
 use views::*;
 pub use windows::*;
 

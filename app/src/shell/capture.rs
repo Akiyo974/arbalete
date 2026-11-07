@@ -34,7 +34,7 @@ const BLOCKS_SCRIPT: &str = r#"(() => {
 })()"#;
 
 /// Where the shown page lies in the window, in points from its top left corner.
-fn page_frame() -> Option<Rect> {
+pub(super) fn page_frame() -> Option<Rect> {
     let shown = win().shown.get()?;
     let tabs = win().split.borrow().0.clone();
     if tabs.is_empty() {

@@ -1,6 +1,7 @@
 // Toasts, like Arc's: short notes at the page's top right, like "Copied Current URL", which drop
 // in from above and go after 5 seconds, but stay while the pointer is over them; a few show at
-// once, one under the other.
+// once, one under the other. The app sends them (toast in app/src/shell/toasts.rs), the
+// interface shows its own too, like the captures'.
 
 import AppKit
 import SwiftUI
@@ -21,6 +22,20 @@ struct Toast {
     var error = false
     /// What a click does, on its button or, without one, on the whole toast.
     var action: (() -> Void)?
+}
+
+/// A toast as the app sends it, its action the commands it runs.
+private struct SentToast: Decodable {
+    var key: String?
+    var text: String
+    var icon: String?
+    var keys: String?
+    var trailing: String?
+    var sublabel: String?
+    var button: String?
+    var buttonIcon: String?
+    var error: Bool?
+    var commands: [String]?
 }
 
 @MainActor
@@ -83,6 +98,19 @@ final class Toasts {
         if shown.count > Self.most { remove(shown[0].id) }
         hide(entering.id, after: Self.duration)
         arrange(entering: entering)
+    }
+
+    /// Shows a toast the app sent, as JSON, at the top right of the page at `page`.
+    func show(json: Data, over page: NSRect) {
+        guard let sent = try? JSONDecoder().decode(SentToast.self, from: json) else { return }
+        let model = model
+        let action = sent.commands.map { commands in { commands.forEach { model.run(command: $0) } } }
+        show(
+            Toast(
+                key: sent.key, text: sent.text, icon: sent.icon, keys: sent.keys,
+                trailing: sent.trailing, sublabel: sent.sublabel, button: sent.button,
+                buttonIcon: sent.buttonIcon, error: sent.error ?? false, action: action),
+            over: page)
     }
 
     private func view(_ toast: Toast, _ id: Int) -> ToastView {
@@ -152,12 +180,12 @@ final class Toasts {
     }
 }
 
-/// A toast's color: its Space's leading color made dark, like a theme's titles, which white text
-/// reads well on over light and dark pages alike; Arc's dark purple without one; red for an
-/// error.
+/// A toast's color: its Space's leading color made dark, like a theme's titles over a light
+/// background, which white text reads well on over light and dark pages alike; Arc's dark purple
+/// without one; red for an error.
 @MainActor private func toastFill(_ theme: Theme?, error: Bool) -> Color {
     if error { return color("#6b1d1d") }
-    return color(theme?.colors.first.map { ThemePalette($0).shadedDark } ?? "#220f41")
+    return color(theme?.colors.first.map { ThemePalette($0).titles.light } ?? "#220f41")
 }
 
 struct ToastView: View {
@@ -222,5 +250,19 @@ private struct Keycap: View {
             .frame(minWidth: 22, minHeight: 22)
             .background(RoundedRectangle(cornerRadius: 5).fill(.white.opacity(0.16)))
             .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(.white.opacity(0.25)))
+    }
+}
+
+/// Shows a toast the app sent, as JSON (SentToast), at the top right of the page at a frame in
+/// the window `id`'s points from its top left corner.
+@_cdecl("arbalete_ui_toast")
+public func toast(
+    _ id: UInt32, _ x: Double, _ y: Double, _ width: Double, _ height: Double,
+    _ json: UnsafePointer<CChar>
+) {
+    let json = Data(String(cString: json).utf8)
+    MainActor.assumeIsolated {
+        nativeWindows[id]?.toasts.show(
+            json: json, over: NSRect(x: x, y: y, width: width, height: height))
     }
 }
