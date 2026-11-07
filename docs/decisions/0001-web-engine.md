@@ -1,6 +1,6 @@
 # 0001 — Web engine: CEF in Alloy style, with an extension compatibility layer
 
-- Status: accepted, pending the validations listed under "Open questions"
+- Status: accepted; its open questions are answered, and later findings are under "Since the decision"
 - Date: 2026-10-23
 
 ## Context
@@ -92,14 +92,14 @@ Chrome-style views per window.
 - The window model stays simple: several pages, Split View and overlays in one window, native focus behavior.
 - The compatibility layer is our code to maintain, and some extensions may still fail; each one in the acceptance
   list is tested before release.
-- All engine code stays in the `engine` module.
+- CEF stays out of `arbalete-core`: only the app drives it ([0005](0005-repository-layout.md)).
 - Two traps of the `cef` crate, found during the spike: unimplemented callbacks return 0, which means
   "cancel" in `on_before_resource_load` and "no" in window options (`can_resize`, `can_minimize`…), and
   a preferred size with a zero dimension is ignored. Every callback Arbalete relies on is implemented explicitly.
 
 ## Open questions
 
-To answer before the compatibility layer is built (phase 4), in this order:
+To answer before the compatibility layer is built, in this order:
 
 1. **Browser-level DevTools access from the app**, needed to attach to extension service workers as they start.
    The spike did it from an external DevTools client. **Answered (2026-10-28)**: a DevTools session the app
@@ -188,3 +188,21 @@ To answer before the compatibility layer is built (phase 4), in this order:
      `chrome.privacy.services.passwordSavingEnabled` says. No switch hides that bubble alone, and a script
      holding the requests back in every page was judged too intrusive: Arbalete keeps Chromium's behavior,
      Chrome's and Arc's too.
+
+## Since the decision
+
+- **The interface went native on macOS** ([0003](0003-rust-logic-native-interface.md)), and the pages moved
+  from CEF views into native containers ([0002](0002-native-page-containers.md)). Alloy style and the
+  extension compatibility layer stay.
+- **Proprietary codecs (2026-11-07).** The official CEF builds leave out H.264 and AAC, which sites like Twitch
+  stream. [amenophis/cef-codecs](https://github.com/amenophis/cef-codecs) builds the same CEF from source with
+  Chromium's proprietary codecs; FFmpeg decodes them under the LGPL 2.1, and macOS decodes HEVC. `mise run cef`
+  downloads the build named by the `cef` version and `cef-codecs-revision` in the workspace's `Cargo.toml`,
+  checked against its SHA-256, for development, CI and releases alike. Widevine is not in it: it needs an
+  agreement with Google.
+- **Chromium's own pages in Alloy style (2026-11-07).** Build 2 of that CEF carries a patch letting Alloy-style
+  browsers show Chromium's WebUI pages. Its settings, extensions, history, downloads, password manager, flags and
+  internals open in ordinary tabs, shown as `arbalete://` addresses (`app/src/shell/chrome_pages.rs`). The pages
+  that still crash in a tab, like `chrome://bookmarks`, open in Chromium's window.
+- With a CEF build of its own, the fallback above, a patched CEF, is now within reach should Alloy style fall
+  short; it has not been needed.
