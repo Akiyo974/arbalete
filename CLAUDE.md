@@ -1,7 +1,7 @@
 # Arbalete
 
 Browser inspired by Arc: Rust on Chromium (CEF), with a native SwiftUI interface (`app/macos`), macOS only for
-now. Plan: [docs/PLAN.md](docs/PLAN.md).
+now. Technical choices: [docs/decisions](docs/decisions); open work: GitHub issues.
 
 ## Mandatory rules
 

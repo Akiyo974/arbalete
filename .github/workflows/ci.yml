@@ -34,7 +34,7 @@ jobs:
             -e '^\.github/workflows/(website|release)\.yml$' || true)
           echo "app=$([ -n "$others" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
-  # macOS only for now: Linux and Windows are added when the app targets them (plan, phase 10).
+  # macOS only for now: Linux and Windows are added when the app targets them.
   # Skipped for those changes alone, which a required check counts as passed.
   check:
     needs: changes

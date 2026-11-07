@@ -16,7 +16,7 @@ Built with Rust on Chromium, with a native SwiftUI interface on macOS.
 - Import from Arc and from the browsers installed on your system.
 - macOS first, then Linux and Windows.
 
-See [docs/PLAN.md](docs/PLAN.md) for the full plan.
+The technical choices behind it are recorded in [docs/decisions](docs/decisions).
 
 ## Install
 
