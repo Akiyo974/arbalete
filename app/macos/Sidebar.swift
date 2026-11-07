@@ -338,12 +338,20 @@ struct AddressRow: View {
             Button {
                 model.run("edit-url")
             } label: {
-                Text(tab.map { domain($0.url) } ?? "")
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 14)
-                    .frame(height: Measure.rowFill)
-                    .contentShape(Rectangle())
+                Group {
+                    if let tab {
+                        Text(domain(tab.url))
+                    } else {
+                        // Like Arc's, without a tab it offers the Command Bar, which a click opens.
+                        Label("Search or Enter URL…", systemImage: "magnifyingglass")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 14)
+                .frame(height: Measure.rowFill)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(tab?.url ?? "")
