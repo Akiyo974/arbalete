@@ -129,6 +129,8 @@ final class ThemePickerModel: ObservableObject {
     /// as a color's #rrggbb, rounded, would not: a grayish one barely keeps its hue.
     @Published var points: [CGPoint] = []
     @Published var page = 0
+    /// The pad's lightness in automatic appearance, which a light or a dark one sets aside.
+    private var autoRange = (0.01, 0.97)
     let app: AppModel
     /// The theme to send next, at most one every frame's time while a dot or a knob moves.
     private var pending: Theme?
@@ -147,18 +149,16 @@ final class ThemePickerModel: ObservableObject {
         space = shown.space
         theme = shown.theme
         wheel = wheelFor(shown.theme.colors)
+        autoRange = wheel.range
         points = shown.theme.colors.map { pointOf(wheel, $0) }
     }
 
     /// Like Arc's, a light or a dark appearance keeps the pad to its half of the lightness, the
-    /// dots staying where they are and their colors following; the automatic one centers it on
-    /// the leading color again.
+    /// dots staying where they are and their colors following; the automatic one gives the pad
+    /// back the lightness it had, so that going back to an appearance gives its colors back.
     func setMode(_ mode: String) {
-        guard mode != "auto" else {
-            change({ $0.mode = mode }, rewheel: true)
-            return
-        }
-        wheel.range = forcedRange(dark: mode == "dark")
+        guard mode != theme.mode else { return }
+        wheel.range = mode == "auto" ? autoRange : forcedRange(dark: mode == "dark")
         let (wheel, points) = (wheel, points)
         change(
             {
@@ -168,12 +168,18 @@ final class ThemePickerModel: ObservableObject {
     }
 
     /// Changes the theme; dots `at` points give its colors, other new colors place their dots.
+    /// `rewheel` centers the pad on the new leading color, in a light or a dark appearance only
+    /// once the automatic one comes back.
     func change(
         _ update: (inout Theme) -> Void, rewheel: Bool = false, at points: [CGPoint]? = nil
     ) {
         let colors = theme.colors
         update(&theme)
-        if rewheel { wheel = wheelFor(theme.colors) }
+        if rewheel {
+            let around = wheelFor(theme.colors)
+            autoRange = around.range
+            if theme.mode == "auto" { wheel = around }
+        }
         if let points {
             self.points = points
         } else if rewheel || theme.colors != colors {
@@ -394,7 +400,7 @@ struct Palette: View {
                 Button {
                     let colors = harmony(hex, max(1, picker.theme.colors.count))
                     // A light or a dark appearance keeps its lightness, like Arc's.
-                    picker.change({ $0.colors = colors }, rewheel: picker.theme.mode == "auto")
+                    picker.change({ $0.colors = colors }, rewheel: true)
                 } label: {
                     Circle().fill(color(hex)).frame(width: 24, height: 24)
                         .overlay(Circle().strokeBorder(.white.opacity(0.3)))
