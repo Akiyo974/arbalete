@@ -933,8 +933,8 @@ struct PermissionButton: View {
 }
 
 /// A site's or a proxy's request to sign in with HTTP authentication, which the sign-in prompt
-/// asks the user about (sync_auth_prompt in app/src/shell.rs). What the user types goes to the app
-/// alone, which hands it to Chromium.
+/// asks the user about (sync_auth_prompt in app/src/shell/auth_prompt.rs). What the user types
+/// goes to the app alone, which hands it to Chromium.
 @MainActor
 final class AuthPrompt: ObservableObject {
     struct Request: Decodable, Equatable {
