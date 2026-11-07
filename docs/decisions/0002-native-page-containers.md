@@ -1,6 +1,6 @@
 # 0002 — Pages in native containers on macOS
 
-- Status: accepted, migration planned in phase 14
+- Status: accepted, migration done on 2026-11-05
 - Date: 2026-11-04
 
 ## Context
@@ -54,7 +54,7 @@ Chromium stays the engine, in Alloy style, with the extension compatibility laye
 - The pages' layout moves from Rust (`app/src/shell.rs`: the card, `lay_out_split`, the inspector's stage) to
   the interface, which grows; the C interface carries which page shows where instead of frames.
 - Linux and Windows will need their own containers, as they need their own interface already.
-- The migration touches the most used paths: it goes step by step (phase 14), each step shipped alone, the
+- The migration touches the most used paths: it went step by step, each step shipped alone, the
   CEF views path kept until its last user moves.
 
 ## Open questions
