@@ -593,13 +593,22 @@ pub fn settings_focused() -> bool {
     unsafe { arbalete_ui_settings_focused() }
 }
 
-/// Runs a command the interface of `window` sends, on the main thread, which is CEF's UI thread
-/// on macOS.
-extern "C" fn send(window: u32, path: *const c_char) {
+/// Runs a command the interface of `window` sends, as JSON, on the main thread, which is CEF's UI
+/// thread on macOS.
+extern "C" fn send(window: u32, json: *const c_char) {
     // SAFETY: the interface passes a string that lives during the call.
-    let path = unsafe { CStr::from_ptr(path) };
-    if let Some(command) = path.to_str().ok().and_then(Command::parse) {
-        crate::shell::run_in(window, command);
+    let json = unsafe { CStr::from_ptr(json) }.to_bytes();
+    match serde_json::from_slice::<Command>(json) {
+        Ok(command) => crate::shell::run_in(window, command),
+        // By its name alone: a sign-in's arguments hold a password.
+        Err(_) => {
+            let command = serde_json::from_slice::<serde_json::Value>(json).ok();
+            let name = command.as_ref().and_then(|command| command.get("name"));
+            eprintln!(
+                "unknown command {}",
+                name.unwrap_or(&serde_json::Value::Null)
+            );
+        }
     }
 }
 

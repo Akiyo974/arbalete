@@ -549,7 +549,7 @@ struct ArchivedTabs: View {
                 favicon: tab.favicon, title: tab.title.isEmpty ? tab.url : tab.title,
                 detail: shortAddress(tab.url), help: tab.space.map { "\(tab.url)\nin \($0)" } ?? tab.url
             ) {
-                model.run("archive/restore/\(rank)")
+                model.run("restore-archived", rank)
                 model.closeLibrary()
             }
         }
@@ -677,12 +677,12 @@ struct DownloadRow: View {
             if hovered.wrappedValue || running {
                 Menu {
                     if there {
-                        Button("Show in Finder") { model.run("download/show/\(download.id)") }
+                        Button("Show in Finder") { model.run("download", "show", download.id) }
                     }
                     if running {
-                        Button("Cancel") { model.run("download/cancel/\(download.id)") }
+                        Button("Cancel") { model.run("download", "cancel", download.id) }
                     } else {
-                        Button("Remove from List") { model.run("download/remove/\(download.id)") }
+                        Button("Remove from List") { model.run("download", "remove", download.id) }
                     }
                 } label: {
                     Image(systemName: "ellipsis").font(.system(size: 13, weight: .semibold))
@@ -707,7 +707,7 @@ struct DownloadRow: View {
             if mediaKind(download) != nil {
                 model.viewing = download.id
             } else {
-                model.run("download/open/\(download.id)")
+                model.run("download", "open", download.id)
             }
         }
         .help(download.url)
@@ -843,10 +843,13 @@ struct SpaceColumn: View {
                 if let emoji = space.emoji { SpaceGlyph(icon: emoji, size: 16) }
                 Text(space.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                 Spacer()
-                ProfileChip(name: profileName) { model.run("menu/space-profile/\(space.id)") }
+                ProfileChip(name: profileName) { model.run("menu", ["space-profile": space.id]) }
                 IconButton(symbol: "paintbrush.pointed.fill", label: "Edit Theme Color", size: 24) {
                     // Like Arc's, beside the column.
-                    model.run("theme/show/\(space.id)/\(inMainWindow(_frame.wrappedValue))")
+                    let column = inMainWindow(_frame.wrappedValue)
+                    model.run(
+                        "show-theme-picker", space.id,
+                        [Int(column.minX.rounded()), Int(column.maxX.rounded())])
                 }
                 .opacity(0.75)
             }
@@ -858,7 +861,7 @@ struct SpaceColumn: View {
                 HStack(spacing: 6) {
                     Rectangle().fill(ink.opacity(0.15)).frame(height: 1)
                     if space.id == model.state?.space {
-                        Button("↓ Clear") { model.run("today/clear") }
+                        Button("↓ Clear") { model.run("clear-today") }
                             .buttonStyle(.plain)
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Ink.secondary)
@@ -885,7 +888,7 @@ struct SpaceColumn: View {
                     .help("Drag to Move")
                 Spacer()
                 IconButton(symbol: "ellipsis", label: "Space options", size: 24) {
-                    model.run("menu/space/\(space.id)")
+                    model.run("menu", ["space": space.id])
                 }
             }
             .padding(.horizontal, 10)
@@ -910,14 +913,14 @@ struct SpaceColumn: View {
         }
         .contentShape(shape)
         .background(Frame(frame: _frame.projectedValue))
-        .rightClick { model.run("menu/space/\(space.id)") }
+        .rightClick { model.run("menu", ["space": space.id]) }
         // Dragged onto another, it takes that one's place.
         .draggable("space:\(space.id)")
         .dropDestination(for: String.self) { ids, _ in
             guard let id = ids.first?.split(separator: ":").last.flatMap({ Int($0) }),
                 ids.first?.hasPrefix("space:") == true, id != space.id
             else { return false }
-            model.run("space/move/\(id)/\(index)")
+            model.run("move-space", id, index)
             return true
         }
     }

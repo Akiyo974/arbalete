@@ -62,7 +62,7 @@ struct SidebarView: View {
                     // Like Arc's, only a button for a new tab.
                     HStack {
                         Spacer()
-                        IconButton(symbol: "plus", label: "New Tab") { model.run("overlay/show") }
+                        IconButton(symbol: "plus", label: "New Tab") { model.run("show-overlay") }
                     }
                     .frame(height: 40)
                 } else {
@@ -79,7 +79,7 @@ struct SidebarView: View {
             }
             // Like Arc's, the sidebar's empty room offers the displayed Space's menu.
             .overlay(RightClick(underOthers: true) {
-                if let page = model.page { model.run("menu/space/\(page.space)") }
+                if let page = model.page { model.run("menu", ["space": page.space]) }
             })
         }
     }
@@ -101,7 +101,7 @@ struct SidebarToolbar: View {
                 IconButton(
                     symbol: "sidebar.left", label: "Toggle sidebar", symbolSize: toolbarSymbol
                 ) {
-                    model.run("sidebar/toggle")
+                    model.run("toggle-sidebar")
                 }
                 Spacer(minLength: 0)
                 if navigates {
@@ -180,9 +180,9 @@ struct NavButtons: View {
         if model.activeTab?.developer == true {
             Menu {
                 Button("Reload the Page") { model.run("reload") }
-                Button("Clear Cache and Refresh") { model.run("menu/choose/site/any/clear-cache") }
+                Button("Clear Cache and Refresh") { model.run("choose-menu", "site", "clear-cache") }
                 Button("Clear Cookies and Refresh") {
-                    model.run("menu/choose/site/any/clear-cookies")
+                    model.run("choose-menu", "site", "clear-cookies")
                 }
             } label: {
                 Image(systemName: "chevron.down").font(.system(size: 8, weight: .medium))
@@ -223,11 +223,11 @@ struct MoreButton: View {
         .popover(isPresented: _shown.projectedValue, arrowEdge: .bottom) {
             VStack(spacing: 0) {
                 row("arrow.clockwise", "Reload", "⌘R") { model.run("reload") }
-                row("arrow.clockwise.circle", "Force Reload", "⇧⌘R") { model.run("reload/force") }
+                row("arrow.clockwise.circle", "Force Reload", "⇧⌘R") { model.run("force-reload") }
                 row("arrow.triangle.2.circlepath", "Clear Cookies", nil) {
-                    model.run("menu/choose/site/any/clear-cookies")
+                    model.run("choose-menu", "site", "clear-cookies")
                 }
-                row("sidebar.left", "Toggle Sidebar", "⌘S") { model.run("sidebar/toggle") }
+                row("sidebar.left", "Toggle Sidebar", "⌘S") { model.run("toggle-sidebar") }
             }
             .padding(8)
             .frame(width: 200)
@@ -336,7 +336,7 @@ struct AddressRow: View {
         let shown = sidebarHovered || model.siteControlsShown || copied
         HStack(spacing: 2) {
             Button {
-                model.run("overlay/edit")
+                model.run("edit-url")
             } label: {
                 Text(tab.map { domain($0.url) } ?? "")
                     .lineLimit(1)
@@ -356,7 +356,7 @@ struct AddressRow: View {
                         Text("Copied").font(.caption).padding(.horizontal, 6)
                     } else {
                         IconButton(symbol: "link", label: "Copy link", size: 26) {
-                            model.run("link/copy")
+                            model.run("copy-link")
                             copied = true
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
                         }
@@ -407,7 +407,7 @@ struct SiteControlsButton: View {
                 symbol: symbol, label: "Site controls", size: 26, symbolSize: symbolSize,
                 active: model.siteControlsShown
             ) {
-                model.run("site/show/\(view)/\(inMainWindow(geometry.frame(in: .global)))")
+                model.run("show-site-controls", commandButton(view, inMainWindow(geometry.frame(in: .global))))
             }
         }
         .frame(width: 26, height: 26)
@@ -423,8 +423,8 @@ struct PinnedExtension: View {
     var body: some View {
         GeometryReader { geometry in
             Button {
-                let rect = inMainWindow(geometry.frame(in: .global))
-                model.run("extension/popup/\(`extension`.id)/\(view)/\(rect)")
+                let button = commandButton(view, inMainWindow(geometry.frame(in: .global)))
+                model.run("open-pinned-extension", `extension`.id, button)
             } label: {
                 Favicon(url: `extension`.icon, size: 16)
                     .frame(width: 26, height: 26)
@@ -433,7 +433,7 @@ struct PinnedExtension: View {
             .buttonStyle(.plain)
             .help(`extension`.name)
             // Like Arc's, its menu (extension_menu in app/src/menu.rs).
-            .rightClick { model.run("extension/context/\(`extension`.id)") }
+            .rightClick { model.run("extension-menu", `extension`.id) }
         }
         .frame(width: 26, height: 26)
     }
@@ -788,7 +788,7 @@ struct FavoriteTile: View {
                 // A tab's tile, or a selected split's: cut in equal parts by a 2-point line,
                 // light grey like the outline in the dark.
                 Button {
-                    if let first = tabs.first { model.run("select/\(first.id)") }
+                    if let first = tabs.first { model.run("select", first.id) }
                 } label: {
                     HStack(spacing: 0) {
                         ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
@@ -822,13 +822,13 @@ struct FavoriteTile: View {
             }
         }
         .help(tabs.map(\.label).joined(separator: " | "))
-        .rightClick { model.run("menu/node/\(item.id)") }
+        .rightClick { model.run("menu", ["node": item.id]) }
     }
 
     /// One tab's part of an unselected split's tile.
     private func part(_ tab: Tab, shape: UnevenRoundedRectangle) -> some View {
         Button {
-            model.run("select/\(tab.id)")
+            model.run("select", tab.id)
         } label: {
             Favicon(url: tab.favicon, size: 13)
                 .frame(maxWidth: .infinity)
@@ -907,7 +907,7 @@ struct FavoritesHint: View {
                 .clipShape(RoundedRectangle(cornerRadius: Measure.radius)))
         .overlay(alignment: .topTrailing) {
             IconButton(symbol: "xmark", label: "Hide this hint", size: 20, symbolSize: 10) {
-                model.run("favorites/hide-hint/\(space)")
+                model.run("hide-favorites-hint", space)
             }
             .padding(4)
         }
@@ -930,7 +930,7 @@ struct SpaceHeader: View {
     var body: some View {
         HStack(spacing: 8) {
             Button {
-                model.run("space/toggle/\(page.space)")
+                model.run("toggle-space", page.space)
             } label: {
                 // Like Arc's: the emoji where the tabs' icons stand, and none without one.
                 HStack(spacing: 6) {
@@ -964,7 +964,7 @@ struct SpaceHeader: View {
             .buttonStyle(.plain)
             if hovered {
                 IconButton(symbol: "ellipsis", label: "Space options", size: 24) {
-                    model.run("menu/space/\(page.space)")
+                    model.run("menu", ["space": page.space])
                 }
             }
         }
@@ -977,7 +977,7 @@ struct SpaceHeader: View {
             RoundedRectangle(cornerRadius: Measure.radius).fill(hovered ? Ink.item : .clear))
         .animation(.easeInOut(duration: 0.12), value: hovered)
         .onHover { hovered = $0 }
-        .rightClick { model.run("menu/space/\(page.space)") }
+        .rightClick { model.run("menu", ["space": page.space]) }
     }
 }
 
@@ -1025,7 +1025,7 @@ struct SpaceField: View {
         model.editingSpace = nil
         let value = text.trimmingCharacters(in: .whitespaces)
         if !value.isEmpty, value != self.value {
-            model.run("space/rename/\(space)/\(percentEncoded(value))")
+            model.run("rename-space", space, value)
         }
     }
 }
@@ -1042,7 +1042,7 @@ struct DividerRow: View {
         HStack(spacing: 12) {
             Rectangle().fill(Ink.divider).frame(height: 1)
             if clearable && model.sidebarHovered {
-                Button("↓ Clear") { model.run("today/clear") }
+                Button("↓ Clear") { model.run("clear-today") }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
@@ -1075,7 +1075,7 @@ struct NewTabRow: View {
 
     var body: some View {
         Button {
-            model.run("overlay/show")
+            model.run("show-overlay")
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "plus").frame(width: 16)
@@ -1254,7 +1254,7 @@ struct TabRow: View {
                     CloseButton(
                         symbol: pinned && active ? "minus" : "xmark", help: "Close \(tab.label)"
                     ) {
-                        model.run("close/\(tab.id)")
+                        model.run("close", tab.id)
                     }
                     .opacity(hovered ? 1 : 0)
                 }
@@ -1284,9 +1284,9 @@ struct TabRow: View {
             // Several tabs selected at once share one menu.
             let tabs = model.acting(on: tab.id)
             if tabs.count > 1 {
-                model.run("menu/tabs/\(percentEncoded("\(tabs)"))")
+                model.run("tabs-menu", tabs)
             } else {
-                model.run("menu/node/\(tab.id)")
+                model.run("menu", ["node": tab.id])
             }
         }
     }
@@ -1323,9 +1323,9 @@ struct FolderRow: View {
         .padding(.vertical, (Measure.row - Measure.rowFill) / 2)
         .contentShape(Rectangle())
         // Like Arc's, a click opens or closes it at once; its menu renames it.
-        .onTapGesture { model.run("toggle/\(id)") }
+        .onTapGesture { model.run("toggle-folder", id) }
         .onHover { hovered = $0 }
-        .rightClick { model.run("menu/node/\(id)") }
+        .rightClick { model.run("menu", ["node": id]) }
     }
 }
 
@@ -1366,7 +1366,7 @@ struct NameField: View {
                 guard !now, _began.wrappedValue else { return }
                 let value = text.trimmingCharacters(in: .whitespaces)
                 if (!value.isEmpty || blank) && value != title {
-                    model.run("rename/\(id)/\(percentEncoded(value))")
+                    model.run("rename", id, value)
                 }
                 model.renaming = nil
             }
@@ -1468,7 +1468,7 @@ struct SplitRow: View {
                         symbol: separate ? "rectangle.lefthalf.inset.filled.arrow.left" : "xmark",
                         help: separate ? "Separate from Split View" : "Close \(tab.label)"
                     ) {
-                        model.run(separate ? "separate/\(tab.id)" : "close/\(tab.id)")
+                        model.run(separate ? "separate" : "close", tab.id)
                     }
                     .padding(.leading, 2)
                 }
@@ -1483,8 +1483,8 @@ struct SplitRow: View {
         // Like Arc's, each tab of the split shown has its bubble.
         .background(RoundedRectangle(cornerRadius: 8).fill(active ? Ink.child : .clear))
         .contentShape(Rectangle())
-        .onTapGesture { model.run("select/\(tab.id)") }
-        .rightClick { model.run("menu/node/\(id)") }
+        .onTapGesture { model.run("select", tab.id) }
+        .rightClick { model.run("menu", ["node": id]) }
         .help(tab.label)
     }
 }
@@ -1632,7 +1632,7 @@ struct UpdateBanner: View {
         switch banner {
         case .ready(let install): install()
         case .updated:
-            model.run("open/\(percentEncoded("https://arbalete.co/releases.html"))")
+            model.run("open", "https://arbalete.co/releases.html")
             withAnimation { updates.banner = nil }
         }
     }
@@ -1833,7 +1833,7 @@ struct SpaceIcon: View {
         .buttonStyle(.plain)
         .help(space.title)
         .onHover { hovered = $0 }
-        .rightClick { model.run("menu/space/\(space.id)") }
+        .rightClick { model.run("menu", ["space": space.id]) }
         // Like Arc's, a drag resting on a Space's icon slides to that Space, to drop there.
         .onDrop(of: [.plainText], delegate: SpaceIconDrop(model: model, space: space.id))
         // Like Arc's, Change Space Icon… opens its picker above the Space's icon.
@@ -1914,15 +1914,15 @@ struct WindowDragArea: NSViewRepresentable {
     func updateNSView(_ view: WindowDrag, context: Context) {}
 }
 
-/// A value as a command's path holds it.
+/// A value as a search address's query holds it.
 func percentEncoded(_ value: String) -> String {
     value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
 }
 
-/// A view's frame, from the top left corner of the window it shows in, as a command's path gives
-/// it: in the main window, the one a panel like the sidebar belongs to, from its content's top
-/// left corner, as "x/y/width/height".
-@MainActor func inMainWindow(_ frame: CGRect) -> String {
+/// A view's frame, from the top left corner of the window it shows in, as a command gives it: in
+/// the main window, the one a panel like the sidebar belongs to, from its content's top left
+/// corner.
+@MainActor func inMainWindow(_ frame: CGRect) -> CGRect {
     var rect = frame
     // In the sidebar, a view of the main window, from the sidebar's top left corner.
     if let from = NSApp.currentEvent?.window, from.parent == nil,
@@ -1939,6 +1939,5 @@ func percentEncoded(_ value: String) -> String {
         rect = CGRect(
             x: inMain.minX, y: mainHeight - inMain.maxY, width: inMain.width, height: inMain.height)
     }
-    return [rect.minX, rect.minY, rect.width, rect.height]
-        .map { String(Int($0.rounded())) }.joined(separator: "/")
+    return rect
 }

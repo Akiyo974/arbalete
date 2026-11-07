@@ -319,7 +319,7 @@ final class PagePlacer {
                     .enclosing(PageContainer.self),
                 let tab = pageContainers.first(where: { $0.value === container })?.key
             else { return event }
-            model.run("select/\(tab)")
+            model.run("select", tab)
             model.run(event.buttonNumber == 3 ? "back" : "forward")
             return nil
         }
@@ -485,8 +485,8 @@ struct PaneBar: View {
         } else if let pane, pane.developer {
             DeveloperBar(
                 model: model, url: pane.url,
-                focus: { if !pane.focused { model.run("select/\(pane.tab)") } },
-                close: { model.run("close/\(pane.tab)") })
+                focus: { if !pane.focused { model.run("select", pane.tab) } },
+                close: { model.run("close", pane.tab) })
         } else if let pane {
             ZStack {
                 HStack(spacing: 0) {
@@ -503,13 +503,13 @@ struct PaneBar: View {
                     Spacer()
                     if pane.focused, let split = pane.split {
                         button("rectangle.split.2x1", "Split View", enabled: true) {
-                            model.run("menu/node/\(split)")
+                            model.run("menu", ["node": split])
                         }
                     }
-                    button("xmark", "Close", enabled: true) { model.run("close/\(pane.tab)") }
+                    button("xmark", "Close", enabled: true) { model.run("close", pane.tab) }
                 }
                 Button {
-                    act(pane, "overlay/edit")
+                    act(pane, "edit-url")
                 } label: {
                     Label(domain(pane.url), systemImage: "link")
                         .font(.system(size: 12))
@@ -534,9 +534,9 @@ struct PaneBar: View {
         }
     }
 
-    /// Runs `command` on the pane's page: it is focused first.
+    /// Runs a command, by its name, on the pane's page: it is focused first.
     private func act(_ pane: Pane, _ command: String) {
-        if !pane.focused { model.run("select/\(pane.tab)") }
+        if !pane.focused { model.run("select", pane.tab) }
         model.run(command)
     }
 
@@ -645,7 +645,7 @@ public func toolsRoom(_ tab: Int64, _ x: Double, _ y: Double, _ width: Double, _
 public func toolsDocked(_ tab: Int64, _ docked: Bool) {
     MainActor.assumeIsolated {
         pageContainers[Int(tab)]?.dockTools(docked) {
-            nativeWindows.values.first?.model.run("inspector/close/\(tab)")
+            nativeWindows.values.first?.model.run("close-inspector", tab)
         }
     }
 }

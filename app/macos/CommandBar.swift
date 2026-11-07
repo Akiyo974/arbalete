@@ -24,27 +24,27 @@ private let suggestionCount = 4
 
 /// The app's actions the Command Bar runs, by their names, and the commands they send.
 let actions: [(title: String, command: String)] = [
-    ("New Folder", "folder/new"),
-    ("New Little Arbalete Window", "little/new"),
-    ("New Profile", "profile/new"),
-    ("Close Tab", "close"),
-    ("Reopen Closed Tab", "reopen"),
-    ("Pin or Unpin Tab", "pin"),
-    ("Copy URL", "link/copy"),
-    ("Clear Today", "today/clear"),
-    ("Next Space", "space/next"),
-    ("Previous Space", "space/previous"),
-    ("Toggle Sidebar", "sidebar/toggle"),
-    ("Toggle Toolbar", "toolbar/toggle"),
-    ("Open Library", "library/show"),
-    ("Show History", "history/show"),
-    ("Show Downloads", "downloads/show"),
-    ("Manage Extensions", "extension/manage"),
-    ("Add Extensions", "site/store"),
-    ("Import Browser Data", "import/show"),
-    ("Settings", "settings/show"),
-    ("View Page Source", "page/source"),
-    ("Developer Tools", "page/devtools"),
+    ("New Folder", command("new-folder")),
+    ("New Little Arbalete Window", command("new-little")),
+    ("New Profile", command("new-profile")),
+    ("Close Tab", command("close")),
+    ("Reopen Closed Tab", command("reopen", 0)),
+    ("Pin or Unpin Tab", command("pin")),
+    ("Copy URL", command("copy-link")),
+    ("Clear Today", command("clear-today")),
+    ("Next Space", command("next-space")),
+    ("Previous Space", command("previous-space")),
+    ("Toggle Sidebar", command("toggle-sidebar")),
+    ("Toggle Toolbar", command("toggle-toolbar")),
+    ("Open Library", command("show-library")),
+    ("Show History", command("show-history")),
+    ("Show Downloads", command("show-downloads")),
+    ("Manage Extensions", command("manage-extensions")),
+    ("Add Extensions", command("show-store")),
+    ("Import Browser Data", command("show-import")),
+    ("Settings", command("show-settings")),
+    ("View Page Source", command("view-source")),
+    ("Developer Tools", command("dev-tools")),
 ]
 
 /// The actions whose names start a word with each word typed, like "new fo" for New Folder: from
@@ -289,7 +289,7 @@ final class CommandBar: ObservableObject {
             }
         if height != self.height {
             self.height = height
-            if little == nil { app.run("overlay/height/\(Int(height))") } else { fit(height) }
+            if little == nil { app.run("overlay-height", Int(height)) } else { fit(height) }
         }
     }
 
@@ -297,7 +297,7 @@ final class CommandBar: ObservableObject {
         completing = !deleting && typed.count > text.count
         text = typed
         picked = 0
-        app.run("\(little == nil ? "overlay" : "little")/search/\(percentEncoded(typed))")
+        app.run(little == nil ? "search-overlay" : "search-little", typed)
         showCompletion()
         sendHeight()
     }
@@ -329,21 +329,21 @@ final class CommandBar: ObservableObject {
     func open(_ row: CommandRow) {
         switch row {
         case .tab(let tab):
-            app.run("select/\(tab.id)")
-            app.run("overlay/hide")
+            app.run("select", tab.id)
+            app.run("hide-overlay")
         case .action(let command, _):
-            app.run("overlay/hide")
-            app.run(command)
+            app.run("hide-overlay")
+            app.run(command: command)
         case .go(let url, _, _), .page(let url, _, _):
             switch little {
             case .some(.some(let id)):
-                app.run("little/\(id)/navigate/\(percentEncoded(url))")
+                app.run("little", id, ["navigate": url])
                 hide()
             case .some(.none):
-                app.run("little/new/\(percentEncoded(url))")
+                app.run("new-little", url)
                 hide()
             case .none:
-                app.run("\(editing ? "navigate" : "open")/\(percentEncoded(url))")
+                app.run(editing ? "navigate" : "open", url)
             }
         }
     }
@@ -354,7 +354,7 @@ final class CommandBar: ObservableObject {
     }
 
     func hide() {
-        if little == nil { app.run("overlay/hide") } else { dismiss() }
+        if little == nil { app.run("hide-overlay") } else { dismiss() }
     }
 
     /// Shows a Little Arbalete window's bar holding `url`, or empty, like the app shows its
@@ -363,7 +363,7 @@ final class CommandBar: ObservableObject {
         var show: [String: Any] = ["search": ["name": engine.name, "url": engine.url]]
         if let url { show["url"] = url }
         handle("arbalete:show", (try? JSONSerialization.data(withJSONObject: show)) ?? Data())
-        app.run("little/search/\(percentEncoded(text))")
+        app.run("search-little", text)
     }
 }
 

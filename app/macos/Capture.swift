@@ -87,7 +87,7 @@ final class CaptureChrome {
         veil.library = { [weak self] in self?.keepPart() }
         veil.edit = { [weak self] in self?.edit() }
         veil.scroll = { dx, dy, point in
-            model.run("page/capture/scroll/\(dx)/\(dy)/\(Int(point.x))/\(Int(point.y))")
+            model.run("scroll-capture", dx, dy, Int(point.x), Int(point.y))
         }
     }
 
@@ -171,7 +171,7 @@ final class CaptureChrome {
         let file = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString + ".png")
         guard (try? png.write(to: file)) != nil else { return }
-        model.run("capture/library/\(percentEncoded(file.path))")
+        model.run("save-capture-to-library", file.path)
         tell("Saved to Library", saving: false, at: NSPoint(x: frame.maxX, y: frame.minY + 6))
     }
 

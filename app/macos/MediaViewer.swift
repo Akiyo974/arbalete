@@ -154,7 +154,7 @@ struct MediaCard: View {
                     .foregroundStyle(.white.opacity(0.6))
                 Spacer(minLength: 8)
                 Menu {
-                    Button("Show in Finder") { model.run("download/show/\(download.id)") }
+                    Button("Show in Finder") { model.run("download", "show", download.id) }
                     if image != nil {
                         Button("Copy Image") { copyImage() }
                     }

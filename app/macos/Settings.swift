@@ -161,7 +161,7 @@ final class SettingsModel: ObservableObject {
         window.contentView = NSHostingView(rootView: SettingsView(settings: self))
         window.center()
         window.closed = { [weak self] in self?.window = nil }
-        window.escaped = { [weak self] in self?.app.run("settings/hide") }
+        window.escaped = { [weak self] in self?.app.run("hide-settings") }
         window.makeKeyAndOrderFront(nil)
         self.window = window
     }
@@ -400,7 +400,7 @@ private struct GeneralSettings: View {
     }
 
     private func binding(_ value: Bool, _ key: String) -> Binding<Bool> {
-        Binding(get: { value }, set: { settings.app.run("settings/\(key)/\($0)") })
+        Binding(get: { value }, set: { settings.app.run("set-setting", key, $0) })
     }
 }
 
@@ -428,7 +428,7 @@ private struct AdvancedSettings: View {
                             SettingsLine()
                             SettingsRow(label: site) {
                                 Button("Let It Sleep") {
-                                    settings.app.run("awake/off/\(percentEncoded(site))")
+                                    settings.app.run("keep-awake", site, false)
                                 }
                             }
                             .padding(.leading, 28)
@@ -440,7 +440,7 @@ private struct AdvancedSettings: View {
     }
 
     private func binding(_ value: Bool, _ key: String) -> Binding<Bool> {
-        Binding(get: { value }, set: { settings.app.run("settings/\(key)/\($0)") })
+        Binding(get: { value }, set: { settings.app.run("set-setting", key, $0) })
     }
 }
 
@@ -491,7 +491,7 @@ private struct LinksSettings: View {
                             ? "Another app, like Arc, already uses ⌥⌘N: quit it or turn its shortcut off." : nil,
                         isOn: Binding(
                             get: { detail.settings.littleHotkey },
-                            set: { settings.app.run("settings/little-hotkey/\($0)") }))
+                            set: { settings.app.run("set-setting", "little-hotkey", $0) }))
                 }
             }
             SettingsCard {
@@ -590,10 +590,7 @@ private struct AirTrafficControl: View {
     }
 
     private func save(_ routing: UrlRouting) {
-        guard let json = try? JSONEncoder().encode(routing),
-            let text = String(data: json, encoding: .utf8)
-        else { return }
-        settings.app.run("routing/\(percentEncoded(text))")
+        settings.app.run("set-url-routing", jsonObject(routing))
     }
 }
 
@@ -703,7 +700,7 @@ private struct ProfilesSettings: View {
         let names = settings.detail?.profiles.map(\.name) ?? []
         showDialog { close in
             RenameProfileDialog(profile: profile, names: names, close: close) {
-                settings.app.run("profile/rename/\(profile.id)/\(percentEncoded($0))")
+                settings.app.run("rename-profile", profile.id, $0)
             }
         }
     }
@@ -711,7 +708,7 @@ private struct ProfilesSettings: View {
     private func delete(_ profile: SettingsDetail.ProfileSettings) {
         showDialog { close in
             DeleteProfileDialog(profile: profile, close: close) {
-                settings.app.run("profile/delete/\(profile.id)")
+                settings.app.run("delete-profile", profile.id)
             }
         }
     }
@@ -830,7 +827,7 @@ private struct ProfileDetail: View {
                 SettingsRow(label: "Search engine", height: 43) {
                     Picker("", selection: Binding(
                         get: { profile.searchEngine },
-                        set: { settings.app.run("profile/search/\(profile.id)/\($0)") }
+                        set: { settings.app.run("set-search-engine", profile.id, $0) }
                     )) {
                         ForEach(detail.engines) { Text($0.name).tag($0.id) }
                     }
@@ -846,13 +843,13 @@ private struct ProfileDetail: View {
                     label: "Include search engine suggestions",
                     isOn: Binding(
                         get: { profile.searchSuggestions },
-                        set: { settings.app.run("profile/suggestions/\(profile.id)/\($0 ? "on" : "off")") }))
+                        set: { settings.app.run("set-search-suggestions", profile.id, $0) }))
             }
             SettingsCard {
                 SettingsRow(label: "Archive tabs after", height: 44) {
                     Picker("", selection: Binding(
                         get: { profile.archiveAfter },
-                        set: { settings.app.run("profile/archive/\(profile.id)/\($0)") }
+                        set: { settings.app.run("set-archive-after", profile.id, $0) }
                     )) {
                         ForEach(detail.delays) { Text($0.name).tag($0.id) }
                     }
@@ -862,10 +859,7 @@ private struct ProfileDetail: View {
                 SettingsLine()
                 SettingsRow(label: "Download location", height: 43) {
                     DownloadLocationPicker(location: profile.downloadLocation) { location in
-                        guard let json = try? JSONEncoder().encode(location),
-                            let text = String(data: json, encoding: .utf8)
-                        else { return }
-                        settings.app.run("profile/downloads/\(profile.id)/\(percentEncoded(text))")
+                        settings.app.run("set-download-location", profile.id, jsonObject(location))
                     }
                 }
             }
@@ -885,7 +879,7 @@ private struct ProfileDetail: View {
 
     /// Shows one of Chromium's pages in the profile, like Arc's, the settings closing.
     private func open(_ address: String) {
-        settings.app.run("profile/page/\(profile.id)/\(percentEncoded(address))")
+        settings.app.run("profile-page", profile.id, address)
     }
 }
 

@@ -1,12 +1,48 @@
 // The native macOS interface's side of the bridge with the app (app/src/native.rs): the app
-// attaches it to its window, gives it the events the web UI gets, and runs the commands it sends
-// back, the same as the web UI's (app/src/command.rs).
+// attaches it to its window and gives it events, and runs the commands it sends back
+// (app/src/command.rs).
 
 import AppKit
 import SwiftUI
 
-/// Runs a command from a window, given as its path, like `select/12`.
+/// Runs a command from a window, given as JSON (command(_:_:)).
 public typealias Send = @convention(c) (UInt32, UnsafePointer<CChar>) -> Void
+
+/// A command as the app reads it (app/src/command.rs), in JSON: its name, and its arguments in
+/// the app's order, a lone one given as itself, like `command("rename", 12, "Work")`.
+func command(_ name: String, _ args: Any...) -> String {
+    command(name, args: args)
+}
+
+func command(_ name: String, args: [Any]) -> String {
+    var command: [String: Any] = ["name": name]
+    if args.count == 1 {
+        command["args"] = args[0]
+    } else if !args.isEmpty {
+        command["args"] = args
+    }
+    // Sorted, the same command reads the same each time, which tells whether it changed.
+    guard JSONSerialization.isValidJSONObject(command),
+        let json = try? JSONSerialization.data(withJSONObject: command, options: .sortedKeys)
+    else { return "" }
+    return String(decoding: json, as: UTF8.self)
+}
+
+/// An encodable value as a command's argument.
+func jsonObject(_ value: some Encodable) -> Any {
+    (try? JSONEncoder().encode(value))
+        .flatMap { try? JSONSerialization.jsonObject(with: $0, options: .fragmentsAllowed) }
+        ?? NSNull()
+}
+
+/// A button as a command's argument (Button in app/src/command.rs): the view it shows in, and its
+/// frame from the main window's top left corner (inMainWindow).
+func commandButton(_ view: String, _ frame: CGRect) -> [String: Any] {
+    [
+        "view": view, "x": Int(frame.minX.rounded()), "y": Int(frame.minY.rounded()),
+        "width": Int(frame.width.rounded()), "height": Int(frame.height.rounded()),
+    ]
+}
 
 /// What the interface knows of the app, from its events.
 @MainActor
@@ -132,8 +168,14 @@ final class AppModel: ObservableObject {
         if let flags { NSEvent.removeMonitor(flags) }
     }
 
-    func run(_ path: String) {
-        path.withCString { send(window, $0) }
+    /// Runs a command, by its name and its arguments (command(_:_:)), like `run("select", 12)`.
+    func run(_ name: String, _ args: Any...) {
+        run(command: command(name, args: args))
+    }
+
+    /// Runs a command made by command(_:_:).
+    func run(command: String) {
+        command.withCString { send(window, $0) }
     }
 
     /// The displayed Space's page.
@@ -157,7 +199,7 @@ final class AppModel: ObservableObject {
     /// The window's colors last sent, so as to send them only when they change.
     private var colors = ""
 
-    /// An event dispatched to the web UI's sidebar.
+    /// An event for the sidebar.
     func handle(_ name: String, _ detail: Data) {
         switch name {
         case "arbalete:state":
@@ -229,7 +271,7 @@ final class AppModel: ObservableObject {
             if let draft = draftSpace {
                 if swipe > threshold {
                     draftSpace = nil
-                    run("space/delete/\(draft)")
+                    run("delete-space", draft)
                 }
                 withAnimation(.spring(duration: 0.3)) { swipe = 0 }
                 return
@@ -244,7 +286,7 @@ final class AppModel: ObservableObject {
                 withAnimation(.easeOut(duration: 0.25)) {
                     swipe = forward ? -pageWidth : pageWidth
                 } completion: {
-                    self.run(forward ? "space/next" : "space/previous")
+                    self.run(forward ? "next-space" : "previous-space")
                     // Should the app not show it, the page comes back.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         guard self.swipedTo != nil else { return }
@@ -274,7 +316,7 @@ final class AppModel: ObservableObject {
         guard let state, space != state.space,
             let from = state.spaces.firstIndex(where: { $0.id == state.space }),
             let to = state.spaces.firstIndex(where: { $0.id == space })
-        else { return run("space/\(space)") }
+        else { return run("show-space", space) }
         let forward = to > from
         carousel = state.spaces[min(from, to)...max(from, to)].map { space in
             (space.id, seenPages[space.id].map { ($0, space) })
@@ -282,7 +324,7 @@ final class AppModel: ObservableObject {
         var still = Transaction()
         still.disablesAnimations = true
         withTransaction(still) { carouselShare = forward ? 0 : 1 }
-        run("space/\(space)")
+        run("show-space", space)
         // Longer the more Spaces it passes, a little.
         let duration = min(0.5, spaceSlide + 0.05 * Double(abs(to - from) - 1))
         withAnimation(.easeInOut(duration: duration)) {
@@ -389,7 +431,7 @@ final class AppModel: ObservableObject {
         guard id != parent else { return }
         // From another Space, which a drag switched from.
         guard let from = place(of: id) else {
-            run("move/\(id)/\(parent)/\(index)")
+            run("move", id, parent, index)
             return
         }
         let to = from.parent == parent && from.index < index ? index - 1 : index
@@ -397,7 +439,7 @@ final class AppModel: ObservableObject {
         let pinning = page.map { page in
             page.today.flatMap(\.tabs).contains { $0.id == id } && pins(parent, in: page)
         } ?? false
-        run("move/\(id)/\(parent)/\(to)")
+        run("move", id, parent, to)
         if pinning { hintRename(id) }
     }
 
@@ -434,7 +476,7 @@ final class AppModel: ObservableObject {
     func split(_ id: Int, onto target: Int, before: Bool = false) {
         guard id != target else { return }
         let command = NSEvent.modifierFlags.contains(.option) ? "split-duplicate" : "split"
-        run("\(command)/\(id)/\(target)\(before ? "/before" : "")")
+        run(command, id, target, before)
     }
 
     /// Shows the library, on a section or the one it showed last.
@@ -446,17 +488,17 @@ final class AppModel: ObservableObject {
     func openLibrary(_ section: LibrarySection?) {
         recent.markRead()
         libraryShown = true
-        run("library/show")
+        run("show-library")
         pick(section ?? self.section)
     }
 
     func pick(_ section: LibrarySection) {
         self.section = section
         query = ""
-        run(section.wide ? "library/wide" : "library/narrow")
+        run("wide-library", section.wide)
         // Their page may have changed them.
         switch section {
-        case .archive: run("archive/list")
+        case .archive: run("send-archive")
         default: break
         }
     }
@@ -464,7 +506,7 @@ final class AppModel: ObservableObject {
     /// Back to the displayed Space, the card resting beside the sidebar again.
     func closeLibrary() {
         libraryShown = false
-        run("card/offset/0")
+        run("card-offset", 0)
     }
 
 
@@ -482,11 +524,17 @@ final class AppModel: ObservableObject {
         let panel = isDark(theme) ? "#1e1a28" : "#f8f6fb"
         let lead = theme?.colors.first
         let card = cardColor
-        let command = "window/colors/\(card.dropFirst())/0/\((lead ?? panel).dropFirst())"
-        if command != colors {
-            colors = command
-            run(command)
+        let painted = command(
+            "window-colors", ["card": argb(card), "grain": 0, "colors": [argb(lead ?? panel)]])
+        if painted != colors {
+            colors = painted
+            run(command: painted)
         }
+    }
+
+    /// A #rrggbb color as opaque ARGB.
+    private func argb(_ hex: String) -> UInt32 {
+        0xff00_0000 | (UInt32(hex.dropFirst(), radix: 16) ?? 0)
     }
 }
 
@@ -633,7 +681,7 @@ final class NativeWindow {
         siteSurface.beak = 0
         site.beak = { [weak siteSurface] in siteSurface?.beak = $0 }
         siteSurface.takesKeyboard = true
-        siteSurface.resigned = { app.run("site/hide") }
+        siteSurface.resigned = { app.run("hide-site-controls") }
         surfaces["site"] = siteSurface
         let picker = ThemePickerModel(app: app)
         themePicker = picker
@@ -643,7 +691,7 @@ final class NativeWindow {
         // Like Arc's, a clean panel's edge rather than a translucent line over the colors.
         themeSurface.panelEdge()
         themeSurface.takesKeyboard = true
-        themeSurface.resigned = { app.run("theme/hide") }
+        themeSurface.resigned = { app.run("hide-theme-picker") }
         surfaces["theme"] = themeSurface
         let permission = PermissionPrompt(app: app)
         permissionPrompt = permission
@@ -717,8 +765,7 @@ public func detach(_ id: UInt32) {
     }
 }
 
-/// An event dispatched to a web surface the interface stands in for, like "sidebar", in the
-/// window `id`.
+/// An event for a surface of the interface, like "sidebar", in the window `id`.
 @_cdecl("arbalete_ui_event")
 public func event(
     _ id: UInt32, _ surface: UnsafePointer<CChar>, _ name: UnsafePointer<CChar>,

@@ -39,7 +39,7 @@ private final class ExtensionPopupWindow: NSWindow, NSWindowDelegate {
 public func extensionPopupView(_ id: UInt32) -> UnsafeMutableRawPointer? {
     // As an address: a pointer may not leave the main actor's closure.
     let address: UInt = MainActor.assumeIsolated {
-        let popup = ExtensionPopupWindow { nativeWindows[id]?.model.run("extension/close") }
+        let popup = ExtensionPopupWindow { nativeWindows[id]?.model.run("close-extension-popup") }
         extensionPopups.append(popup)
         return UInt(bitPattern: Unmanaged.passUnretained(popup.page).toOpaque())
     }

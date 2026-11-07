@@ -39,11 +39,11 @@ final class FindBar: ObservableObject {
 
     func find(forward: Bool) {
         if text.isEmpty { found = nil }
-        app.run("find/\(forward ? "forward" : "backward")/\(percentEncoded(text))")
+        app.run("find", ["text": text, "forward": forward])
     }
 
     func hide() {
-        app.run("find/hide")
+        app.run("hide-find")
     }
 }
 
@@ -189,7 +189,7 @@ struct PageToolbar: View {
             }
             if let tab {
                 Button {
-                    model.run("overlay/edit")
+                    model.run("edit-url")
                 } label: {
                     Label(domain(tab.url), systemImage: "link")
                         .font(.system(size: 13, weight: .semibold))
@@ -227,7 +227,7 @@ struct BarStart: View {
         let page = model.state?.page
         HStack(spacing: 0) {
             if !model.sidebarDocked {
-                barTool("sidebar.left", "Toggle sidebar") { model.run("sidebar/toggle") }
+                barTool("sidebar.left", "Toggle sidebar") { model.run("toggle-sidebar") }
             }
             barTool("arrow.left", "Back") { model.run("back") }
                 .disabled(!(page?.canGoBack ?? false))
@@ -255,7 +255,7 @@ struct BarEnd: View {
                 model: model, view: "toolbar", symbol: "slider.horizontal.2.square", symbolSize: 15
             )
             .frame(width: 37)
-            barTool("rectangle.split.2x1", "Add Split View") { model.run("pane/add") }
+            barTool("rectangle.split.2x1", "Add Split View") { model.run("add-pane") }
         }
     }
 }
@@ -296,7 +296,7 @@ struct DeveloperBar: View {
             if url.hasPrefix("https://") {
                 Button {
                     focus()
-                    model.run("site/certificate")
+                    model.run("show-certificate")
                 } label: {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 13, weight: .bold))
@@ -315,26 +315,26 @@ struct DeveloperBar: View {
                 .foregroundStyle(dark ? Color.white : Ink.primary)
                 .padding(.leading, 6)
             Spacer(minLength: 8)
-            tool("link", "Copy URL") { model.run("menu/choose/site/any/copy-link") }
+            tool("link", "Copy URL") { model.run("choose-menu", "site", "copy-link") }
             separator
             // Like Arc's: Portrait Mode, whose panel shows under it, then a part of the page.
             GeometryReader { geometry in
                 tool("photo.artframe", "Capture in Portrait Mode") {
                     nativeWindows[model.window]?.capture.button = geometry.frame(in: .global)
-                    model.run("page/capture")
+                    model.run("capture")
                 }
             }
             .frame(width: 28, height: 28)
-            tool("camera", "Capture Part of the Page") { model.run("page/capture/area") }
+            tool("camera", "Capture Part of the Page") { model.run("capture-area") }
             separator
-            tool("apple.terminal", "Console") { model.run("page/devtools/console") }
-            tool("network", "Network") { model.run("page/devtools/network") }
-            tool("scope", "Inspect Element") { model.run("page/devtools/elements") }
+            tool("apple.terminal", "Console") { model.run("dev-tools-panel", "console") }
+            tool("network", "Network") { model.run("dev-tools-panel", "network") }
+            tool("scope", "Inspect Element") { model.run("dev-tools-panel", "elements") }
             separator
             // Like Arc's, a menu of the extensions in place of the pinned ones.
             GeometryReader { geometry in
                 tool("puzzlepiece.extension", "Extensions") {
-                    model.run("extension/menu/toolbar/\(inMainWindow(geometry.frame(in: .global)))")
+                    model.run("extensions-menu", commandButton("toolbar", inMainWindow(geometry.frame(in: .global))))
                 }
             }
             .frame(width: 28, height: 28)
@@ -343,7 +343,7 @@ struct DeveloperBar: View {
                 BarEnd(model: model)
             } else {
                 SiteControlsButton(model: model, view: "toolbar")
-                tool("rectangle.split.2x1", "Add Split View") { model.run("pane/add") }
+                tool("rectangle.split.2x1", "Add Split View") { model.run("add-pane") }
             }
             if let close {
                 IconButton(symbol: "xmark", label: "Close", size: 28, symbolSize: 15, action: close)
@@ -377,7 +377,7 @@ struct DeveloperBar: View {
                         ?? "https://www.google.com/search?q="
                     let target = toURL(typed) ?? engine + percentEncoded(typed)
                     focus()
-                    model.run("navigate/\(percentEncoded(target))")
+                    model.run("navigate", target)
                 }
                 .onExitCommand { _editing.wrappedValue = false }
                 .onChange(of: _focused.wrappedValue) { _, focused in
@@ -484,10 +484,10 @@ final class SiteControls: ObservableObject {
 /// The site controls' actions, like Arc's: share, copy the link (where Arc has its Boosts),
 /// capture a part of the page, and capture all of it; their commands.
 private let siteActions = [
-    ("menu/choose/site/any/share", "Share", "square.and.arrow.up"),
-    ("menu/choose/site/any/copy-link", "Copy Link", "link"),
-    ("page/capture/area", "Capture", "camera"),
-    ("page/capture/full", "Capture Full Page", "text.viewfinder"),
+    (command("choose-menu", "site", "share"), "Share", "square.and.arrow.up"),
+    (command("choose-menu", "site", "copy-link"), "Copy Link", "link"),
+    (command("capture-area"), "Capture", "camera"),
+    (command("capture-full"), "Capture Full Page", "text.viewfinder"),
 ]
 
 /// The site controls' panel, like Arc's, measured from a recording of it, in points: 236 wide,
@@ -503,15 +503,15 @@ struct SiteView: View {
                 HStack(spacing: 8) {
                     ForEach(siteActions, id: \.0) { command, label, symbol in
                         SiteTile(label: label, sunken: true) {
-                            app.run("site/hide")
-                            app.run(command)
+                            app.run("hide-site-controls")
+                            app.run(command: command)
                         } content: {
                             Image(systemName: symbol).font(.system(size: 17))
                         }
                     }
                 }
                 SiteSection(
-                    title: "Extensions", more: "Manage", action: { app.run("extension/manage") }
+                    title: "Extensions", more: "Manage", action: { app.run("manage-extensions") }
                 ) {
                     LazyVGrid(
                         columns: Array(repeating: GridItem(.fixed(48), spacing: 8), count: 4),
@@ -521,7 +521,7 @@ struct SiteView: View {
                             SiteExtensionTile(app: app, extension: ext)
                         }
                         SiteTile(label: "Add Extensions") {
-                            app.run("site/store")
+                            app.run("show-store")
                         } content: {
                             Image(systemName: "plus").font(.system(size: 15))
                         }
@@ -534,16 +534,14 @@ struct SiteView: View {
                             symbol: "hammer.fill", title: "Developer Mode", on: site.developer,
                             help: "Turn \(site.developer ? "off" : "on") Developer Mode for this site"
                         ) {
-                            let turn = site.developer ? "off" : "on"
-                            app.run("developer/\(turn)/\(percentEncoded(site.site))")
+                            app.run("developer-mode", site.site, !site.developer)
                         }
                         if site.suspends {
                             SiteSetting(
                                 symbol: "sun.max.fill", title: "Keep Awake", on: site.awake,
                                 help: "Keep this site's tabs from being suspended"
                             ) {
-                                let turn = site.awake ? "off" : "on"
-                                app.run("awake/\(turn)/\(percentEncoded(site.site))")
+                                app.run("keep-awake", site.site, !site.awake)
                             }
                         }
                     }
@@ -552,7 +550,7 @@ struct SiteView: View {
                 if !site.permissions.isEmpty {
                     SiteSection(
                         title: "Permissions", more: "Reset",
-                        action: { app.run("permission/site/reset") }
+                        action: { app.run("reset-site-permissions") }
                     ) {
                         VStack(alignment: .leading, spacing: 11) {
                             ForEach(site.permissions) { permission in
@@ -561,8 +559,8 @@ struct SiteView: View {
                                     on: permission.allowed,
                                     help: permission.allowed ? "Block" : "Allow"
                                 ) {
-                                    let turn = permission.allowed ? "block" : "allow"
-                                    app.run("permission/site/\(turn)/\(permission.setting)")
+                                    app.run(
+                                        "set-site-permission", permission.setting, !permission.allowed)
                                 }
                             }
                         }
@@ -574,7 +572,7 @@ struct SiteView: View {
                     let secure = site.url.hasPrefix("https://")
                     // Like Arc's, it shows the site's certificate.
                     Button {
-                        app.run("site/certificate")
+                        app.run("show-certificate")
                     } label: {
                         HStack(spacing: 9) {
                             Image(systemName: secure ? "lock.fill" : "lock.open.fill")
@@ -612,7 +610,7 @@ struct SiteView: View {
 
     /// Tells the app the panel's height, with its beak, which it fits it to.
     private func report(_ height: CGFloat) {
-        controls.app.run("site/height/\(Int((height + Surface.beakHeight).rounded(.up)))")
+        controls.app.run("site-controls-height", Int((height + Surface.beakHeight).rounded(.up)))
     }
 }
 
@@ -624,13 +622,13 @@ struct SiteMore: View {
 
     var body: some View {
         Menu {
-            Button("Clear Cache") { run("menu/choose/site/any/clear-cache") }
-            Button("Clear Cookies") { run("menu/choose/site/any/clear-cookies") }
+            Button("Clear Cache") { run(command("choose-menu", "site", "clear-cache")) }
+            Button("Clear Cookies") { run(command("choose-menu", "site", "clear-cookies")) }
             Divider()
-            Button("Manage Extensions…") { run("extension/manage") }
-            Button("Add Extension…") { run("site/store") }
+            Button("Manage Extensions…") { run(command("manage-extensions")) }
+            Button("Add Extension…") { run(command("show-store")) }
             Divider()
-            Button("All Site Settings…") { run("site/settings") }
+            Button("All Site Settings…") { run(command("show-site-settings")) }
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 15, weight: .semibold))
@@ -649,8 +647,8 @@ struct SiteMore: View {
 
     /// Runs `command` in place of the site controls.
     private func run(_ command: String) {
-        app.run("site/hide")
-        app.run(command)
+        app.run("hide-site-controls")
+        app.run(command: command)
     }
 }
 
@@ -698,7 +696,7 @@ struct SiteExtensionTile: View {
     var body: some View {
         let ext = `extension`
         SiteTile(label: ext.enabled ? ext.name : "\(ext.name) (off)") {
-            app.run("site/extension/\(ext.id)")
+            app.run("open-extension-popup", ext.id)
         } content: {
             Favicon(url: ext.icon, size: 16)
                 .opacity(ext.enabled ? 1 : 0.4)
@@ -707,7 +705,7 @@ struct SiteExtensionTile: View {
         .overlay(alignment: .bottomTrailing) {
             if ext.pinned || hovered.wrappedValue {
                 Button {
-                    app.run("extension/\(ext.pinned ? "unpin" : "pin")/\(ext.id)")
+                    app.run("pin-extension", ext.id, !ext.pinned)
                 } label: {
                     Image(systemName: "pin.fill")
                         .font(.system(size: 7.5, weight: .bold))
@@ -724,7 +722,7 @@ struct SiteExtensionTile: View {
                 .transition(.opacity)
             }
         }
-        .rightClick { app.run("extension/context/\(ext.id)") }
+        .rightClick { app.run("extension-menu", ext.id) }
         .onHover { over in
             waiting.wrappedValue?.cancel()
             guard over else {
@@ -861,7 +859,7 @@ final class PermissionPrompt: ObservableObject {
     /// Gives the site the user's answer, once the request has shown for half a second.
     func answer(_ allow: Bool) {
         guard let request, Date().timeIntervalSince(shown) >= 0.5 else { return }
-        app.run("permission/\(allow ? "allow" : "block")/\(request.id)")
+        app.run("answer-permission", request.id, allow)
     }
 }
 
@@ -908,7 +906,7 @@ struct PermissionView: View {
 
     /// Tells the app the prompt's height, which it fits it to.
     private func report(_ height: CGFloat) {
-        prompt.app.run("permission/height/\(Int(height.rounded(.up)))")
+        prompt.app.run("permission-prompt-height", Int(height.rounded(.up)))
     }
 }
 
@@ -969,9 +967,9 @@ final class AuthPrompt: ObservableObject {
     func answer(_ signIn: Bool) {
         guard let request else { return }
         if signIn {
-            app.run("auth/sign-in/\(request.id)/\(percentEncoded(user))/\(percentEncoded(password))")
+            app.run("answer-auth", request.id, [user, password])
         } else {
-            app.run("auth/cancel/\(request.id)")
+            app.run("answer-auth", request.id, NSNull())
         }
         (user, password) = ("", "")
     }
@@ -1032,7 +1030,7 @@ struct AuthView: View {
 
     /// Tells the app the prompt's height, which it fits it to.
     private func report(_ height: CGFloat) {
-        prompt.app.run("auth/height/\(Int(height.rounded(.up)))")
+        prompt.app.run("auth-prompt-height", Int(height.rounded(.up)))
     }
 }
 

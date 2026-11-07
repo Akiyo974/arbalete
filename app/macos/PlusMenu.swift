@@ -35,7 +35,7 @@ extension AppModel {
                     [weak self] in self?.newSpace()
                 },
                 PlusMenuItem(id: "folder", symbol: "folder", title: "New Folder") {
-                    [weak self] in self?.run("folder/new")
+                    [weak self] in self?.run("new-folder")
                 },
             ],
             [
@@ -51,9 +51,9 @@ extension AppModel {
                 PlusMenuItem(
                     id: "split", symbol: "rectangle.split.2x1", title: "New Split",
                     shortcut: "⌃⇧=", enabled: page?.selected != nil
-                ) { [weak self] in self?.run("pane/add") },
+                ) { [weak self] in self?.run("add-pane") },
                 PlusMenuItem(id: "tab", symbol: "plus.square", title: "New Tab", shortcut: "⌘T") {
-                    [weak self] in self?.run("overlay/show")
+                    [weak self] in self?.run("show-overlay")
                 },
             ],
         ]

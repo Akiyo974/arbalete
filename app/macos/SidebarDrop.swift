@@ -96,7 +96,7 @@ extension AppModel {
             return
         }
         marked = []
-        run("select/\(id)")
+        run("select", id)
     }
 
     /// The tabs a drag or a menu from the tab `id` acts on, in the sidebar's order: the ones
@@ -181,7 +181,7 @@ extension AppModel {
             edgeWait = nil
             // Like Arc's, held there, it switches again every `edgeDelay`.
             edgeAt = nil
-            run(leading ? "space/previous" : "space/next")
+            run(leading ? "previous-space" : "next-space")
         }
         edgeWait = wait
         DispatchQueue.main.asyncAfter(deadline: .now() + edgeDelay, execute: wait)

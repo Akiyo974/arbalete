@@ -83,7 +83,7 @@ final class SplitHandleView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if dragging { send("resized") }
+        if dragging { send(command("resized")) }
         dragging = false
         let point = convert(event.locationInWindow, from: nil)
         pill.isHidden = stacked || !bounds.contains(point)
@@ -96,7 +96,7 @@ final class SplitHandleView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
-        if event.clickCount == 2 { send("pane/even/\(index)") }
+        if event.clickCount == 2 { send(command("even-panes", index)) }
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -106,7 +106,7 @@ final class SplitHandleView: NSView {
         // In the window's points from its content's top left corner, like the app's.
         let point = window.convertPoint(fromScreen: NSEvent.mouseLocation)
         let along = stacked ? content.frame.height - point.y : point.x
-        send("pane/resize/\(index)/\(along)")
+        send(command("resize-pane", index, along))
     }
 }
 
@@ -137,7 +137,7 @@ final class SplitHandles {
     func arrange() {
         while views.count < frames.count {
             let view = SplitHandleView(frame: .zero)
-            view.send = { [weak model] path in model?.run(path) }
+            view.send = { [weak model] command in model?.run(command: command) }
             views.append(view)
         }
         guard let holder = pages.holder else {

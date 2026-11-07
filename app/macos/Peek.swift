@@ -93,7 +93,7 @@ final class PeekChrome {
     init(in parent: NSWindow, model: AppModel) {
         self.parent = parent
         let clicks = Catcher()
-        clicks.closed = { model.run("peek/close") }
+        clicks.closed = { model.run("close-peek") }
         // Over the whole window, as it changes size too.
         clicks.autoresizingMask = [.width, .height]
         catcher = Overlay(view: clicks)
@@ -217,14 +217,14 @@ private struct PeekBar: View {
     var body: some View {
         ZStack {
             HStack(spacing: 0) {
-                button("arrow.left", "Back", enabled: page.back) { model.run("peek/back") }
+                button("arrow.left", "Back", enabled: page.back) { model.run("peek-page", "back") }
                 button("arrow.right", "Forward", enabled: page.forward) {
-                    model.run("peek/forward")
+                    model.run("peek-page", "forward")
                 }
                 if page.loading {
-                    button("xmark", "Stop", enabled: true) { model.run("peek/stop") }
+                    button("xmark", "Stop", enabled: true) { model.run("peek-page", "stop") }
                 } else {
-                    button("arrow.clockwise", "Reload", enabled: true) { model.run("peek/reload") }
+                    button("arrow.clockwise", "Reload", enabled: true) { model.run("peek-page", "reload") }
                 }
                 Spacer()
             }
@@ -268,15 +268,15 @@ private struct PeekControls: View {
         VStack(spacing: controlsSpacing) {
             PeekControl(
                 symbol: "xmark", label: "Close", keys: ["⌘", "W"], hovered: { hovered(0, $0) }
-            ) { model.run("peek/close") }
+            ) { model.run("close-peek") }
             PeekControl(
                 symbol: "arrow.up.left.and.arrow.down.right", label: "Expand", keys: ["⌘", "O"],
                 hovered: { hovered(1, $0) }
-            ) { model.run("peek/tab") }
+            ) { model.run("keep-peek", ["split": false]) }
             PeekControl(
                 symbol: "rectangle.split.2x1", label: "Create Split View", keys: [],
                 hovered: { hovered(2, $0) }
-            ) { model.run("peek/split") }
+            ) { model.run("keep-peek", ["split": true]) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }

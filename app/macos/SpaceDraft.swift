@@ -12,8 +12,10 @@ extension AppModel {
         // Like Arc's, the form shows in the sidebar, the library closed.
         if libraryShown { closeLibrary() }
         awaitingDraft = Set(state.spaces.map(\.id))
-        let title = percentEncoded("Space \(state.spaces.count + 1)")
-        run("space/create/purple//\(title)" + (tab.map { "/\($0)" } ?? ""))
+        let title = "Space \(state.spaces.count + 1)"
+        var space: [String: Any] = ["title": title, "emoji": "", "color": "purple"]
+        if let tab { space["tab"] = tab }
+        run("create-space", space)
     }
 
     /// Notes the Space created to fill in, once displayed, and forgets it once another one is.
@@ -23,12 +25,12 @@ extension AppModel {
             awaitingDraft = nil
             draftSpace = state.space
             // Like Arc's, it starts without colors.
-            let bare = #"{"colors":[],"mode":"auto","intensity":0.8,"noise":0}"#
-            run("space/theme/\(state.space)/\(percentEncoded(bare))")
+            let bare: [String: Any] = ["colors": [], "mode": "auto", "intensity": 0.8, "noise": 0]
+            run("set-space-theme", state.space, bare)
         } else if let draft = draftSpace, draft != state.space {
             // Left for another Space without its button, it was never created, like Arc's.
             draftSpace = nil
-            run("space/delete/\(draft)")
+            run("delete-space", draft)
         }
     }
 }
@@ -76,7 +78,7 @@ struct SpaceDraft: View {
                     Menu(profileName) {
                         ForEach(model.state?.profiles ?? []) { profile in
                             Button(profile.name) {
-                                model.run("space/profile/\(space.id)/\(profile.id)")
+                                model.run("set-space-profile", space.id, profile.id)
                             }
                         }
                         Divider()
@@ -95,7 +97,7 @@ struct SpaceDraft: View {
                         .help("You can use a Profile to give this Space its own logins, history, and browsing data.")
                 }
                 Button {
-                    model.run("theme/show/\(space.id)")
+                    model.run("show-theme-picker", space.id, NSNull())
                 } label: {
                     field {
                         Image(systemName: "paintbrush.pointed.fill").frame(width: 24)
@@ -180,15 +182,15 @@ struct SpaceDraft: View {
     private func create() {
         guard !name.isEmpty else { return }
         model.draftSpace = nil
-        model.run("space/rename/\(space.id)/\(percentEncoded(name))")
+        model.run("rename-space", space.id, name)
         if let emoji = _emoji.wrappedValue {
-            model.run("space/emoji/\(space.id)/\(percentEncoded(emoji))")
+            model.run("set-space-emoji", space.id, emoji)
         }
     }
 
     private func cancel() {
         model.draftSpace = nil
-        model.run("space/delete/\(space.id)")
+        model.run("delete-space", space.id)
     }
 }
 

@@ -4,8 +4,8 @@
 //! relies on is implemented explicitly.
 
 use crate::command::{
-    Button, ButtonView, Command, DownloadAction, ExtensionTarget, HitTarget, LittleAction,
-    PeekAction, Setting, ShortcutEdit, SiteData, Target, Zoom,
+    Button, ButtonView, Command, DownloadAction, ExtensionTarget, HitTarget, InspectorPanel,
+    LittleAction, PeekAction, Setting, ShortcutEdit, SiteData, Target, Zoom,
 };
 use crate::downloads::{self, Download};
 use crate::extensions;
@@ -6857,10 +6857,10 @@ fn run_command(command: Command) {
         }
         // The bar's picker picks an element in the page, the others show their panel.
         (Command::DevToolsPanel(panel), Some(browser)) => {
-            let then = (panel == "elements")
+            let then = (panel == InspectorPanel::Elements)
                 .then(|| InspectorAction::Script("DevToolsAPI.enterInspectElementMode()".into()));
             if let Some(tab) = page_tab(&browser) {
-                show_inspector(tab, panel, then);
+                show_inspector(tab, panel.name(), then);
             }
         }
         (Command::Capture, Some(_)) => capture(CaptureMode::Portrait),

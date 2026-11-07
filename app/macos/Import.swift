@@ -79,11 +79,9 @@ final class ImportModel: ObservableObject {
 
     func run() {
         let picked = choices.filter(\.checked)
-        guard !picked.isEmpty,
-            let json = (try? JSONEncoder().encode(picked)).flatMap({ String(data: $0, encoding: .utf8) })
-        else { return }
+        guard !picked.isEmpty else { return }
         importing = true
-        app.run("import/run/\(percentEncoded(json))")
+        app.run("import", jsonObject(picked))
     }
 }
 
@@ -106,7 +104,7 @@ struct ImportView: View {
                                         HStack {
                                             Text("macOS keeps \(browser.name)'s data private. To import it, give Arbalete Full Disk Access in System Settings, then open the import again.")
                                                 .font(.system(size: 12))
-                                            Button("Open System Settings") { model.app.run("import/full-disk-access") }
+                                            Button("Open System Settings") { model.app.run("open-full-disk-access") }
                                         }
                                     } else if let i = model.index(b, p) {
                                         ImportRow(model: model, index: i, name: profile.name, arc: browser.arc, targets: sources.profiles)
@@ -119,7 +117,7 @@ struct ImportView: View {
                 }
                 HStack {
                     Spacer()
-                    Button("Not now") { model.app.run("import/close") }
+                    Button("Not now") { model.app.run("close-import") }
                         .disabled(model.importing)
                         .keyboardShortcut(.cancelAction)
                     Button(model.importing ? "Importing…" : "Import") { model.run() }

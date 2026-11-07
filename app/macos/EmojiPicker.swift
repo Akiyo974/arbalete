@@ -230,6 +230,6 @@ struct EmojiPicker: View {
     /// Gives the Space this icon, or none for an empty one, and closes the picker.
     private func pick(_ text: String) {
         model.editingSpace = nil
-        model.run("space/emoji/\(space)/\(percentEncoded(text))")
+        model.run("set-space-emoji", space, text)
     }
 }

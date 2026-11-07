@@ -220,7 +220,7 @@ struct LibraryEntry: View {
         for source in mediaSources {
             let on = sources.contains(source.id)
             let action = MenuAction { [model] in
-                model.run("media/source/\(source.id)/\(on ? "off" : "on")")
+                model.run("media-source", source.id, !on)
             }
             let item = NSMenuItem(
                 title: source.name, action: #selector(MenuAction.run), keyEquivalent: "")
@@ -390,7 +390,7 @@ private struct RecentRow: View {
             Spacer(minLength: 4)
             if item.running, let download = item.download {
                 Button {
-                    model.run("download/cancel/\(download.id)")
+                    model.run("download", "cancel", download.id)
                 } label: {
                     Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
                         .foregroundStyle(model.titleInk.opacity(0.6))
@@ -423,11 +423,11 @@ private struct RecentRow: View {
             Button("Hide from Arbalete") { recent.hide(item) }
             Button("Move to Trash") {
                 try? FileManager.default.trashItem(at: URL(fileURLWithPath: item.path), resultingItemURL: nil)
-                if let download = item.download { model.run("download/remove/\(download.id)") }
+                if let download = item.download { model.run("download", "remove", download.id) }
                 recent.hide(item)
             }
             if item.running, let download = item.download {
-                Button("Cancel Download") { model.run("download/cancel/\(download.id)") }
+                Button("Cancel Download") { model.run("download", "cancel", download.id) }
             }
         }
     }

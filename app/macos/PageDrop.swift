@@ -44,7 +44,7 @@ final class PageDrop {
     var sidebar: NSRect?
     /// The split's pages shown, from the card's top left corner.
     var panes: [Pane] = [] {
-        didSet { if previewed == "pane/preview/none" { stable = panes } }
+        didSet { if previewed == command("preview-pane") { stable = panes } }
     }
     /// The empty page the app opened among the split's pages for a drag, where the drag shows
     /// the room it would take.
@@ -93,25 +93,24 @@ final class PageDrop {
     private func preview(_ target: PageDropTarget?) {
         let page: String
         if let target, stable.count < 2 {
-            page = "page/preview/\(target.before ? "before" : "after")/"
-                + (target.stacked ? "stacked" : "side")
+            page = command("preview-drop", [target.before, target.stacked])
         } else {
-            page = "page/preview/none"
+            page = command("preview-drop")
         }
         if page != previewedPage {
             previewedPage = page
-            model.run(page)
+            model.run(command: page)
         }
-        let pane = target?.index.map { "pane/preview/\($0)" } ?? "pane/preview/none"
+        let pane = target?.index.map { command("preview-pane", $0) } ?? command("preview-pane")
         if pane != previewed {
             previewed = pane
-            model.run(pane)
+            model.run(command: pane)
         }
     }
-    private var previewedPage = "page/preview/none"
+    private var previewedPage = command("preview-drop")
     /// The card's frame, from the window's top left corner, before it gave a drag room.
     private var stableCard: NSRect?
-    private var previewed = "pane/preview/none"
+    private var previewed = command("preview-pane")
 
     /// What a drag shows over the page, like Arc's: a dark card with the tab's icon and title.
     private func cardImage() -> NSImage {
@@ -216,7 +215,7 @@ final class PageDrop {
         guard let selected = model.page?.selected, selected != dragged else { return nil }
         // Arc's edges: up to 50 points at the top and the bottom, then 45% at either side, of
         // the card as it stood before it gave the tab room, in the view's coordinates.
-        if previewedPage == "page/preview/none" { stableCard = model.card }
+        if previewedPage == command("preview-drop") { stableCard = model.card }
         let room =
             stableCard?.offsetBy(dx: -(sidebar?.maxX ?? 0), dy: 0)
             ?? view.bounds.insetBy(dx: cardMargin, dy: cardMargin)
@@ -247,15 +246,15 @@ final class PageDrop {
             let index = stable.firstIndex(where: { $0.tab == target.tab })
         {
             let next = index + 1 < stable.count
-            model.run("separate/\(target.tab)")
+            model.run("separate", target.tab)
             model.split(dragged, onto: stable[next ? index + 1 : index - 1].tab, before: next)
         } else {
             model.split(dragged, onto: target.tab, before: target.before)
             // Replaced, the tab leaves the split, as a row after it.
-            if target.replace { model.run("separate/\(target.tab)") }
+            if target.replace { model.run("separate", target.tab) }
         }
         // A split made of a page shown alone lays its pages out as the drop asked.
-        if target.stacked, panes.count < 2 { model.run("pane/flip") }
+        if target.stacked, panes.count < 2 { model.run("flip-panes") }
         model.dragged = nil
         model.dropTarget = nil
     }

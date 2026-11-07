@@ -183,8 +183,7 @@ final class ThemePickerModel: ObservableObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { [weak self] in
                 guard let self, let sent = self.pending else { return }
                 self.pending = nil
-                let json = (try? JSONEncoder().encode(sent)).flatMap { String(data: $0, encoding: .utf8) }
-                self.app.run("space/theme/\(self.space)/\(percentEncoded(json ?? ""))")
+                self.app.run("set-space-theme", self.space, jsonObject(sent))
             }
         }
         pending = theme

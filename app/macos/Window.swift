@@ -246,13 +246,13 @@ final class SidebarHost {
         container.addSubview(effect)
         container.addSubview(host)
         leave.exited = { [weak self] in
-            if self?.revealed == true { model.run("sidebar/conceal") }
+            if self?.revealed == true { model.run("conceal-sidebar") }
         }
-        edge.entered = { model.run("sidebar/reveal") }
+        edge.entered = { model.run("reveal-sidebar") }
         edge.isHidden = true
         edge.autoresizingMask = [.height]
         window.contentView?.addSubview(edge)
-        resize.send = { model.run($0) }
+        resize.send = { model.run(command: $0) }
         resize.ended = { [weak self] in
             // Hidden by the drag, it goes once the drag ends.
             guard let self, self.holder.alphaValue == 0 else { return }
@@ -439,14 +439,14 @@ final class SidebarResize: NSView {
     override func mouseDown(with event: NSEvent) {
         // Like Arc's, a double-click gives it back its usual width (SNAP_SIDEBAR).
         if event.clickCount == 2 {
-            send("sidebar/width/228")
+            send(command("resize-sidebar", 228))
             return
         }
         dragging = true
     }
     override func mouseUp(with event: NSEvent) {
         dragging = false
-        send("resized")
+        send(command("resized"))
         ended()
     }
 
@@ -455,7 +455,7 @@ final class SidebarResize: NSView {
         NSCursor.resizeLeftRight.set()
         guard let window else { return }
         // In the window's points from its left edge, like the app's.
-        send("sidebar/width/\(window.convertPoint(fromScreen: NSEvent.mouseLocation).x)")
+        send(command("resize-sidebar", window.convertPoint(fromScreen: NSEvent.mouseLocation).x))
     }
 }
 

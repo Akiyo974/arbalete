@@ -15,9 +15,7 @@ extension AppModel {
         showDialog { close in
             CreateProfileDialog(names: names, spaces: spaces, space: space, close: close) {
                 name, spaces in
-                let json = (try? JSONSerialization.data(withJSONObject: ["name": name, "spaces": spaces]))
-                    .flatMap { String(data: $0, encoding: .utf8) } ?? ""
-                self.run("profile/create/\(percentEncoded(json))")
+                self.run("create-profile", ["name": name, "spaces": spaces])
             }
         }
     }

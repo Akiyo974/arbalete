@@ -342,7 +342,7 @@ private struct ShortcutRow: View {
                 } else {
                     model.record(shortcut.id) { keys in
                         settings.app.run(
-                            "shortcut/set/\(shortcut.id)/\(keys.modifiers)/\(percentEncoded(keys.key))")
+                            "shortcut", ["set": [shortcut.id, keys.key, keys.modifiers]])
                     }
                 }
             }
@@ -366,14 +366,14 @@ private struct ShortcutRow: View {
         .contentShape(Rectangle())
         .onTapGesture { model.picked = shortcut.id }
         .contextMenu {
-            Button("Remove Shortcut") { settings.app.run("shortcut/remove/\(shortcut.id)") }
+            Button("Remove Shortcut") { settings.app.run("shortcut", ["remove": shortcut.id]) }
                 .disabled(shortcut.keys.isEmpty)
-            Button("Reset Shortcut to Default") { settings.app.run("shortcut/reset/\(shortcut.id)") }
+            Button("Reset Shortcut to Default") { settings.app.run("shortcut", ["reset": shortcut.id]) }
                 .disabled(!shortcut.changed)
             if conflict {
                 Divider()
                 Button(conflicts.count == 1 ? "Remove Conflicting Shortcut" : "Remove Conflicting Shortcuts") {
-                    for other in conflicts { settings.app.run("shortcut/remove/\(other.id)") }
+                    for other in conflicts { settings.app.run("shortcut", ["remove": other.id]) }
                 }
             }
         }
@@ -549,7 +549,7 @@ private struct ShortcutDetail: View {
                         "",
                         selection: Binding(
                             get: { shortcut.priority },
-                            set: { settings.app.run("shortcut/priority/\(shortcut.id)/\($0)") })
+                            set: { settings.app.run("shortcut", ["priority": [shortcut.id, $0]]) })
                     ) {
                         ForEach(priorities, id: \.id) { Text($0.name).tag($0.id) }
                     }
@@ -564,7 +564,7 @@ private struct ShortcutDetail: View {
                 Spacer(minLength: 12)
                 HStack(spacing: 4) {
                     Button("Reset Shortcut to Default") {
-                        settings.app.run("shortcut/reset/\(shortcut.id)")
+                        settings.app.run("shortcut", ["reset": shortcut.id])
                     }
                     .disabled(!shortcut.changed)
                     MoreMenu(settings: settings, all: all)
@@ -583,7 +583,7 @@ private struct ShortcutDetail: View {
                     .padding(.top, 8)
                 Spacer(minLength: 12)
                 HStack(spacing: 4) {
-                    Button("Reset All Shortcuts") { settings.app.run("shortcuts/reset") }
+                    Button("Reset All Shortcuts") { settings.app.run("shortcut", "reset-all") }
                         .disabled(!all.contains(where: \.changed))
                     MoreMenu(settings: settings, all: all)
                 }
@@ -600,7 +600,7 @@ private struct MoreMenu: View {
 
     var body: some View {
         Menu {
-            Button("Reset All Shortcuts") { settings.app.run("shortcuts/reset") }
+            Button("Reset All Shortcuts") { settings.app.run("shortcut", "reset-all") }
                 .disabled(!all.contains(where: \.changed))
         } label: {
             Image(systemName: "ellipsis").font(.system(size: 11, weight: .bold))

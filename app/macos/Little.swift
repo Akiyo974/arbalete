@@ -69,7 +69,8 @@ final class LittleBar: ObservableObject {
         let x = little.frame.minX + frame.minX - main.frame.minX
         let y = main.frame.maxY - (little.frame.maxY - frame.minY)
         app.run(
-            "extension/menu/toolbar/\(Int(x))/\(Int(y))/\(Int(frame.width))/\(Int(frame.height))")
+            "extensions-menu",
+            commandButton("toolbar", CGRect(x: x, y: y, width: frame.width, height: frame.height)))
     }
 
     /// Copies its page's address, which the button shows a moment.
@@ -194,7 +195,7 @@ final class LittleWindow: NSObject, NSWindowDelegate {
 
     /// Its page becomes its profile's active tab for the extensions.
     func windowDidBecomeKey(_ notification: Notification) {
-        bar.app.run("little/\(bar.id)/focus")
+        bar.app.run("little", bar.id, "focused")
     }
 
     /// Its page closes first, which closes the window (arbalete_ui_little_closed).
@@ -290,7 +291,7 @@ struct LittleBarView: View {
                 // Like Little Arc's: the displayed Space, or another from the chevron.
                 HStack(spacing: 0) {
                     Button {
-                        bar.app.run("little/\(bar.id)/open")
+                        bar.app.run("little", bar.id, ["open-in-space": NSNull()])
                     } label: {
                         HStack(spacing: 5) {
                             Text("Open in").foregroundStyle(.secondary)
@@ -313,7 +314,7 @@ struct LittleBarView: View {
                     Menu {
                         ForEach(page.spaces ?? []) { space in
                             Button((space.emoji.map { "\($0) " } ?? "") + space.title) {
-                                bar.app.run("little/\(bar.id)/open/\(space.id)")
+                                bar.app.run("little", bar.id, ["open-in-space": space.id])
                             }
                         }
                     } label: {
@@ -356,7 +357,7 @@ struct LittleBarView: View {
                                 isOn: Binding(
                                     get: { choice.current },
                                     set: { _ in
-                                        bar.app.run("little/\(bar.id)/profile/\(choice.id)")
+                                        bar.app.run("little", bar.id, ["set-profile": choice.id])
                                     }))
                         }
                     } label: {
