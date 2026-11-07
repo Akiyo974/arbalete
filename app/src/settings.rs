@@ -27,7 +27,7 @@ pub struct Settings {
     /// The sidebar's width, in points, which dragging its edge changes.
     pub sidebar_width: i32,
     /// The sites turned in or out of developer mode, by host (and port), unlike their default
-    /// (developer_mode in app/src/shell.rs).
+    /// (developer_mode in app/src/shell/settings_ui.rs).
     pub developer_sites: BTreeMap<String, bool>,
     /// The shortcuts changed in the settings, by menu action (mac::apply_shortcuts).
     pub shortcuts: BTreeMap<String, ShortcutOverride>,

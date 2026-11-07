@@ -1,6 +1,7 @@
 // The settings window, which the app opens from Arbalete › Settings… (show_settings in
-// app/src/shell.rs): the app's own settings, each profile's search engine and archiving, where
-// links from other apps open, and every shortcut. Escape closes it, like its close button.
+// app/src/shell/settings_ui.rs): the app's own settings, each profile's search engine and
+// archiving, where links from other apps open, and every shortcut. Escape closes it, like its
+// close button.
 
 import AppKit
 import SwiftUI
