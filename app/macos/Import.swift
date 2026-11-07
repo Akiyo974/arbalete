@@ -1,7 +1,7 @@
-// The import assistant, shown above the page by the app on the first launch
-// and from the menu (show_import in app/src/shell.rs), to import other browsers' data. Arc is
-// picked by default: Arbalete users most likely come from it. While the app reads the browsers'
-// data, it shows the import running; the app hides it once done.
+// The import assistant, shown above the page by the app on the first launch and from the menu
+// (show_import in app/src/shell/import_ui.rs), to import other browsers' data. Arc is picked by
+// default: Arbalete users most likely come from it. While the app reads the browsers' data, it
+// shows the import running; the app hides it once done.
 
 import AppKit
 import SwiftUI
