@@ -1895,8 +1895,19 @@ fn chromium_locale_of(tag: &str) -> String {
 /// ask for keychain access. Decided by what runs, not how it was compiled, so that a release, under
 /// its own identifier, always encrypts cookies and passwords with a real keychain key.
 pub fn mock_keychain() -> bool {
-    let id = objc2_foundation::NSBundle::mainBundle().bundleIdentifier();
-    is_development_bundle(id.map(|id| id.to_string()).as_deref())
+    is_development_bundle(bundle_identifier().as_deref())
+}
+
+/// Whether the app runs as a release, under an identifier without a `dev` part: the one that
+/// keeps its data in "Arbalete" (main::default_data_dir). A bare binary is not one.
+pub fn release_bundle() -> bool {
+    bundle_identifier().is_some_and(|id| !is_development_bundle(Some(&id)))
+}
+
+fn bundle_identifier() -> Option<String> {
+    objc2_foundation::NSBundle::mainBundle()
+        .bundleIdentifier()
+        .map(|id| id.to_string())
 }
 
 /// Whether a bundle identifier is a development bundle's or one of its helpers': a `dev` part.

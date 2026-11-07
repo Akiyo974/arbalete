@@ -67,7 +67,7 @@ fn main() {
 
 /// Where Arbalete keeps its data, resolved because CEF compares paths after resolving symlinks.
 /// `ARBALETE_DATA_DIR` overrides it, to run the app on another session (benchmarks, tests).
-/// A development build keeps its own, "Arbalete Dev", away from an installed Arbalete's.
+/// A development bundle keeps its own, "Arbalete Dev", away from an installed Arbalete's.
 fn data_dir() -> PathBuf {
     let dir = std::env::var_os("ARBALETE_DATA_DIR").map_or_else(default_data_dir, PathBuf::from);
     std::fs::create_dir_all(&dir).unwrap();
@@ -76,6 +76,11 @@ fn data_dir() -> PathBuf {
 
 fn default_data_dir() -> PathBuf {
     let home = home();
+    // Decided by what runs, like the keychain (mac::mock_keychain): only a bundle under a release
+    // identifier reads an installed Arbalete's data, never a development one or a bare binary.
+    #[cfg(target_os = "macos")]
+    let dev = !mac::release_bundle();
+    #[cfg(not(target_os = "macos"))]
     let dev = cfg!(debug_assertions);
     if cfg!(target_os = "macos") {
         home.join("Library/Application Support")
