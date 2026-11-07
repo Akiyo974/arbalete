@@ -20,6 +20,17 @@ pub(super) fn open_tab(url: &str) {
     show_selected();
 }
 
+/// Opens a tab in the displayed Space behind the one shown.
+pub(super) fn open_background_tab(url: &str) {
+    if is_chrome_page(url) {
+        return open_chrome_page(url);
+    }
+    update_sidebar(|sidebar| {
+        let space = sidebar.displayed().id;
+        sidebar.open_tab(space, url).expect("the displayed Space");
+    });
+}
+
 /// Shows a tab, with its Space; a favorite is shown in the displayed Space.
 pub(super) fn select_tab(id: NodeId) {
     let selected = update_sidebar(|sidebar| {

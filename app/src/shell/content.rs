@@ -162,14 +162,16 @@ wrap_request_handler! {
             1
         }
 
-        /// A link clicked with ⇧ shows in Peek, and one clicked with ⌘ opens in a tab, like
-        /// Arc's.
+        /// A link clicked with ⇧ shows in Peek, one clicked with ⌘ opens in a tab behind the one
+        /// shown, and one clicked with ⌘⇧ in a tab shown, like Arc's.
         fn on_open_urlfrom_tab(&self, _browser: Option<&mut Browser>, _frame: Option<&mut Frame>, target_url: Option<&CefString>, target_disposition: WindowOpenDisposition, user_gesture: i32) -> i32 {
             let Some(url) = target_url.map(CefString::to_string).filter(|_| user_gesture == 1) else { return 0 };
             if target_disposition == WindowOpenDisposition::NEW_WINDOW {
                 post(Command::Peek(url));
-            } else if [WindowOpenDisposition::NEW_FOREGROUND_TAB, WindowOpenDisposition::NEW_BACKGROUND_TAB].contains(&target_disposition) {
+            } else if target_disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB {
                 post(Command::Open(url));
+            } else if target_disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB {
+                post(Command::OpenInBackground(url));
             } else {
                 return 0;
             }

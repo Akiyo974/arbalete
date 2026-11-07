@@ -271,6 +271,8 @@ pub enum Command {
     WideLibrary(bool),
     /// Opens a tab on an address.
     Open(String),
+    /// Opens a tab on an address behind the one shown.
+    OpenInBackground(String),
     /// Closes a tab, or the selected one.
     Close(Option<NodeId>),
     /// Closes a tab's page's developer tools, like their window's close button.

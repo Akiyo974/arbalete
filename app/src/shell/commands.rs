@@ -76,6 +76,7 @@ fn run_command(command: Command) {
                 open_tab(&url);
             }
         }
+        (Command::OpenInBackground(url), _) => open_background_tab(&url),
         (Command::AddPane(tab), _) => {
             if let Some(tab) = tab {
                 select_tab(tab);
