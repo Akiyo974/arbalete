@@ -51,6 +51,15 @@ extension AppModel {
         (space?.theme.colors.isEmpty ?? true) ? color("#333ce8") : themeColor
     }
 
+    /// The text on those buttons: white, or the theme's dark shade on a dark theme, whose
+    /// accent is light.
+    var accentInk: Color {
+        guard let theme = space?.theme, let lead = theme.colors.first, isDark(theme) else {
+            return .white
+        }
+        return color(ThemePalette(lead).shadedDark)
+    }
+
     /// The selected tab's row, like Arc's: in the dark, it falls to a row at rest's while another
     /// app is in front, measured.
     var selectedInk: Color {

@@ -122,7 +122,7 @@ struct SpaceDraft: View {
             Button(action: create) {
                 Text("Create Space")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(model.accentInk)
                     .frame(maxWidth: .infinity, minHeight: 36)
                     .background(RoundedRectangle(cornerRadius: 6).fill(model.accent))
                     .contentShape(Rectangle())
