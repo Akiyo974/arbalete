@@ -101,6 +101,24 @@ pub(super) fn end_sidebar_resize() {
     if SIDEBAR_DRAG.take().is_some() {
         in_each_window(relayout_library);
     }
+    if win().sidebar_mode.get() == SidebarMode::Hidden {
+        hint_sidebar_shortcut();
+    }
+}
+
+/// Like Arc's, the first time a drag hides the sidebar, a toast tells its shortcut, once.
+fn hint_sidebar_shortcut() {
+    if app_settings().sidebar_hint_shown {
+        return;
+    }
+    SETTINGS.with_borrow_mut(|settings| settings.sidebar_hint_shown = true);
+    save_settings();
+    toast(json!({
+        "text": "You can use",
+        "keys": "⌘S",
+        "trailing": "to easily show and hide your Sidebar!",
+        "icon": "sidebar.left",
+    }));
 }
 
 /// The docked library shows the Spaces, over the window but for a strip of the card.
