@@ -123,6 +123,9 @@ final class Surface {
         inner.lineWidth = 3
         inner.mask = CAShapeLayer()
         inner.isHidden = true
+        // Above its blur, whose layer AppKit keeps on top of the ones added by hand.
+        inner.zPosition = 1
+        border.zPosition = 1
         holder.layer?.addSublayer(inner)
         holder.layer?.addSublayer(border)
         overlay = Overlay(view: holder)
