@@ -80,6 +80,7 @@ dependencies = [
  "arbalete-core",
  "block2",
  "cef",
+ "idna",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",

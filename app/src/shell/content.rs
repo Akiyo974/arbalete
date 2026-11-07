@@ -580,7 +580,8 @@ wrap_display_handler! {
         /// The hovered link's address, or none.
         fn on_status_message(&self, browser: Option<&mut Browser>, value: Option<&CefString>) {
             let Some(browser) = browser else { return };
-            status(browser, &value.map(CefString::to_string).unwrap_or_default(), false);
+            let address = value.map(CefString::to_string).unwrap_or_default();
+            status(browser, &readable_address(&address), false);
         }
 
         fn on_loading_progress_change(&self, browser: Option<&mut Browser>, progress: f64) {
@@ -603,6 +604,103 @@ fn status(browser: &Browser, text: &str, instant: bool) {
     if let Some(host) = browser.host() {
         crate::native::page_status(host.window_handle(), text, instant);
     }
+}
+
+/// `address` as people read it, like Chromium's status bubble: an international host in its own
+/// letters unless they mix scripts whose lookalikes pass for another site, and the characters
+/// beyond ASCII decoded but invisible ones. ASCII ones, like `%20` or `%2F`, stay encoded:
+/// decoded, they could change what the address means.
+fn readable_address(address: &str) -> String {
+    let Some(at) = address.find("://") else {
+        return decoded(address);
+    };
+    let (scheme, rest) = address.split_at(at + 3);
+    let (authority, tail) = rest.split_at(rest.find(['/', '?', '#']).unwrap_or(rest.len()));
+    let (user, host_port) = authority.split_at(authority.rfind('@').map_or(0, |at| at + 1));
+    let (host, port) = host_port.split_at(host_port.find(':').unwrap_or(host_port.len()));
+    format!(
+        "{scheme}{user}{}{port}{}",
+        readable_host(host),
+        decoded(tail)
+    )
+}
+
+/// `host` in its own letters when they are all of one script, as far as `script` tells.
+fn readable_host(host: &str) -> String {
+    let (unicode, valid) = idna::domain_to_unicode(host);
+    let mut scripts = unicode.chars().filter_map(script);
+    let first = scripts.next();
+    if valid.is_err() || scripts.any(|script| Some(script) != first) {
+        return host.to_owned();
+    }
+    unicode
+}
+
+/// A letter's script, as far as telling lookalikes apart: Latin, Greek, Cyrillic, or another.
+fn script(letter: char) -> Option<u8> {
+    match letter {
+        'a'..='z' | 'A'..='Z' | '\u{C0}'..='\u{24F}' | '\u{1E00}'..='\u{1EFF}' => Some(0),
+        '\u{370}'..='\u{3FF}' | '\u{1F00}'..='\u{1FFF}' => Some(1),
+        '\u{400}'..='\u{52F}' => Some(2),
+        _ if letter.is_alphabetic() => Some(3),
+        _ => None,
+    }
+}
+
+/// `text` with its percent-encoded characters beyond ASCII decoded, but invisible ones and bytes
+/// that are no UTF-8.
+fn decoded(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('%') {
+        out.push_str(&rest[..at]);
+        rest = &rest[at..];
+        let bytes: Vec<u8> = rest.as_bytes().chunks(3).map_while(high_byte).collect();
+        if bytes.is_empty() {
+            out.push('%');
+            rest = &rest[1..];
+            continue;
+        }
+        // Each byte is three characters of `run`.
+        let (run, after) = rest.split_at(bytes.len() * 3);
+        let mut taken = 0;
+        for chunk in bytes.utf8_chunks() {
+            for character in chunk.valid().chars() {
+                let next = taken + character.len_utf8();
+                if invisible(character) {
+                    out.push_str(&run[taken * 3..next * 3]);
+                } else {
+                    out.push(character);
+                }
+                taken = next;
+            }
+            let next = taken + chunk.invalid().len();
+            out.push_str(&run[taken * 3..next * 3]);
+            taken = next;
+        }
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The byte beyond ASCII that `escape`, like `%D0`, encodes.
+fn high_byte(escape: &[u8]) -> Option<u8> {
+    let [b'%', high, low] = escape else {
+        return None;
+    };
+    let byte = u8::from_str_radix(std::str::from_utf8(&[*high, *low]).ok()?, 16).ok()?;
+    (byte >= 0x80).then_some(byte)
+}
+
+/// Whether `character` shows nothing, or could hide or reorder what follows it.
+fn invisible(character: char) -> bool {
+    character.is_whitespace()
+        || character.is_control()
+        || matches!(
+            character,
+            '\u{AD}' | '\u{61C}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}'
+        )
 }
 
 /// Whether the sidebar's tab `tab` is as `is` asks.
@@ -907,5 +1005,49 @@ mod tests {
             super::highlight_link("https://a.test/page#top", "Dia  reads-between,\n& more"),
             "https://a.test/page#:~:text=Dia%20reads%2Dbetween%2C%20%26%20more"
         );
+    }
+
+    #[test]
+    fn shows_a_link_address_readable() {
+        // A Cyrillic path, query and fragment, decoded.
+        assert_eq!(
+            readable_address(
+                "https://ru.wikipedia.org/wiki/%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0?q=%D0%B0#%D0%B1"
+            ),
+            "https://ru.wikipedia.org/wiki/Москва?q=а#б"
+        );
+        // International hosts in their own letters, the user and port kept.
+        assert_eq!(
+            readable_address("https://u@xn--mnchen-3ya.de:8080/"),
+            "https://u@münchen.de:8080/"
+        );
+        assert_eq!(
+            readable_address("http://xn--e1afmkfd.xn--p1ai/"),
+            "http://пример.рф/"
+        );
+        // Both, ASCII escapes kept encoded.
+        assert_eq!(
+            readable_address("https://xn--e1afmkfd.xn--p1ai/%D0%B0%20b%2Fc"),
+            "https://пример.рф/а%20b%2Fc"
+        );
+        // A Cyrillic "а" in a Latin host stays in punycode.
+        assert_eq!(
+            readable_address("https://xn--pple-43d.com/"),
+            "https://xn--pple-43d.com/"
+        );
+        // Bytes that are no UTF-8, and invisible characters, stay encoded.
+        assert_eq!(
+            readable_address("https://a.test/%D0%9C%FF%D0"),
+            "https://a.test/М%FF%D0"
+        );
+        assert_eq!(
+            readable_address("https://a.test/a%E2%80%AEb%C2%A0"),
+            "https://a.test/a%E2%80%AEb%C2%A0"
+        );
+        assert_eq!(
+            readable_address("https://a.test/100%"),
+            "https://a.test/100%"
+        );
+        assert_eq!(readable_address("mailto:%D0%B0@a.test"), "mailto:а@a.test");
     }
 }

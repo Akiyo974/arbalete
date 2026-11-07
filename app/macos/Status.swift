@@ -24,7 +24,8 @@ final class StatusPill: NSView {
     /// The theme's color, very dark, over the blur, like Arc's.
     private let tint = NSView()
     private let label = NSTextField(labelWithString: "")
-    /// The address, as Chromium gives it.
+    /// The address, made readable (readable_address in app/src/shell/content.rs): Chromium
+    /// encodes it back the same when it opens it.
     private var address = ""
     /// Whether it shows, or is showing, rather than hiding.
     private var shown = false
