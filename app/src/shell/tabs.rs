@@ -7,11 +7,12 @@ pub(super) fn active_tab(sidebar: &mut Sidebar) -> Option<&mut Tab> {
     sidebar.tab_mut(id)
 }
 
-/// Opens a tab in the displayed Space and shows it.
+/// Opens a tab in the displayed Space and shows it, in place of the site controls.
 pub(super) fn open_tab(url: &str) {
     if is_chrome_page(url) {
         return open_chrome_page(url);
     }
+    hide_site_controls();
     update_sidebar(|sidebar| {
         let space = sidebar.displayed().id;
         let tab = sidebar.open_tab(space, url).expect("the displayed Space");

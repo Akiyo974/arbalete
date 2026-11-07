@@ -108,6 +108,13 @@ fn page_ended(browser: &Browser) {
     }
 }
 
+/// The address of a frame, empty without one.
+fn frame_url(frame: Option<&mut Frame>) -> String {
+    frame
+        .map(|frame| CefString::from(&frame.url()).to_string())
+        .unwrap_or_default()
+}
+
 /// Who takes a shortcut first: the settings' choice, or its default.
 fn shortcut_priority(id: &str) -> settings::Priority {
     let changed = app_settings()
@@ -125,18 +132,24 @@ wrap_request_handler! {
         /// the tab staying on its site.
         fn on_before_browse(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, request: Option<&mut Request>, user_gesture: i32, is_redirect: i32) -> i32 {
             let (Some(browser), Some(frame), Some(request)) = (browser, frame, request) else { return 0 };
+            let url = CefString::from(&request.url()).to_string();
             // A page going elsewhere no longer asks to sign in.
             if frame.is_main() == 1 {
                 forget_auth(browser);
+                // Nor reaches a Chromium page that crashes out of a Chromium window, from a link
+                // of chrome://about or a tab saved on one.
+                if url.starts_with("chrome://") && !is_tab_page(&url) {
+                    return 1;
+                }
             }
             if user_gesture == 0 || is_redirect == 1 || frame.is_main() == 0 {
                 return 0;
             }
             let Some(tab) = page_tab(browser) else { return 0 };
             let anchored = STATE.with_borrow(|state| state.sidebar.is_pinned(tab) || state.sidebar.is_favorite(tab));
-            let (url, current) = (CefString::from(&request.url()).to_string(), CefString::from(&frame.url()).to_string());
+            let current = CefString::from(&frame.url()).to_string();
             let elsewhere = origin(&current).is_some() && origin(&url).is_some() && origin(&url) != origin(&current);
-            if !(anchored && elsewhere && web_may_open(&url)) {
+            if !(anchored && elsewhere && page_may_open(&current, &url)) {
                 return 0;
             }
             post(Command::Peek(url));
@@ -164,9 +177,9 @@ wrap_request_handler! {
 
         /// A link clicked with ⇧ shows in Peek, one clicked with ⌘ opens in a tab behind the one
         /// shown, and one clicked with ⌘⇧ in a tab shown, like Arc's.
-        fn on_open_urlfrom_tab(&self, _browser: Option<&mut Browser>, _frame: Option<&mut Frame>, target_url: Option<&CefString>, target_disposition: WindowOpenDisposition, user_gesture: i32) -> i32 {
+        fn on_open_urlfrom_tab(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, target_url: Option<&CefString>, target_disposition: WindowOpenDisposition, user_gesture: i32) -> i32 {
             let Some(url) = target_url.map(CefString::to_string).filter(|_| user_gesture == 1) else { return 0 };
-            if !web_may_open(&url) {
+            if !page_may_open(&frame_url(frame), &url) {
                 return 1;
             }
             if target_disposition == WindowOpenDisposition::NEW_WINDOW {
@@ -419,7 +432,8 @@ wrap_context_menu_handler! {
             let link = CefString::from(&params.link_url()).to_string();
             let image = CefString::from(&params.source_url()).to_string();
             // A web page's link to an internal page goes nowhere, like a click on it.
-            if !web_may_open(&link) || !web_may_open(&image) {
+            let page = CefString::from(&params.page_url()).to_string();
+            if !page_may_open(&page, &link) || !page_may_open(&page, &image) {
                 return 1;
             }
             let download = |url: String| {
@@ -505,6 +519,7 @@ wrap_display_handler! {
             if tab_has(tab, |tab| tab.url == url) {
                 return;
             }
+            left_page(self.profile, tab);
             update_sidebar(|sidebar| {
                 if let Some(tab) = sidebar.tab_mut(tab) {
                     // Another site's page has its own icon, or none: the previous page's goes
@@ -581,7 +596,7 @@ fn status(browser: &Browser, text: &str, instant: bool) {
 }
 
 /// Whether the sidebar's tab `tab` is as `is` asks.
-fn tab_has(tab: NodeId, is: impl FnOnce(&Tab) -> bool) -> bool {
+pub(super) fn tab_has(tab: NodeId, is: impl FnOnce(&Tab) -> bool) -> bool {
     STATE.with_borrow(|state| {
         state
             .sidebar
@@ -747,7 +762,7 @@ wrap_life_span_handler! {
         fn on_before_popup(
             &self,
             _browser: Option<&mut Browser>,
-            _frame: Option<&mut Frame>,
+            frame: Option<&mut Frame>,
             _popup_id: i32,
             target_url: Option<&CefString>,
             _target_frame_name: Option<&CefString>,
@@ -760,7 +775,7 @@ wrap_life_span_handler! {
             _extra_info: Option<&mut Option<DictionaryValue>>,
             _no_javascript_access: Option<&mut i32>,
         ) -> i32 {
-            if let Some(url) = target_url.map(CefString::to_string).filter(|url| popup_allowed(user_gesture) && web_may_open(url)) {
+            if let Some(url) = target_url.map(CefString::to_string).filter(|url| popup_allowed(user_gesture) && page_may_open(&frame_url(frame), url)) {
                 open_tab(&url);
             }
             1

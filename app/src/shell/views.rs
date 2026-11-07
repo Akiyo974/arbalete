@@ -183,8 +183,15 @@ pub(super) fn focus_page(tab: NodeId) {
 /// Shows or hides a tab's page where the card lays it out; Chromium learns it, which stops
 /// drawing a hidden page.
 fn show_page(tab: NodeId, shown: bool) {
-    if let Some(host) = PAGES.with_borrow(|pages| pages.get(&tab)?.browser.host()) {
-        host.was_hidden((!shown).into());
+    let Some((host, profile)) = PAGES.with_borrow(|pages| {
+        let live = pages.get(&tab)?;
+        Some((live.browser.host()?, live.profile))
+    }) else {
+        return;
+    };
+    host.was_hidden((!shown).into());
+    if !shown {
+        left_page(profile, tab);
     }
 }
 

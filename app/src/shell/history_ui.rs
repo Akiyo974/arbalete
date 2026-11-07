@@ -42,7 +42,7 @@ pub(super) fn with_history<R>(profile: ProfileId, f: impl FnOnce(&mut History) -
     })
 }
 
-/// Shows the history: Chromium's own page, as the library has none, like Arc's.
+/// Shows the history: Chromium's own page, in a tab, as the library has none, like Arc's.
 pub(super) fn show_history() {
-    open_chrome_page("chrome://history");
+    open_tab("chrome://history");
 }

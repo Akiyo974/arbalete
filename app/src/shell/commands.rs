@@ -78,7 +78,8 @@ fn run_command(command: Command) {
         }
         (Command::OpenInBackground(url), _) => open_background_tab(&url),
         // A link the pointer is on in the shown page, like a click on it (page_may_open).
-        (Command::OpenInSplit(url) | Command::OpenInLittle(url), _) if !web_may_open(&url) => {}
+        (Command::OpenInSplit(url) | Command::OpenInLittle(url), _)
+            if !page_may_open(&selected_url().unwrap_or_default(), &url) => {}
         (Command::OpenInSplit(url), _) => open_in_pane(&url),
         (Command::OpenInLittle(url), _) => open_little(Some(url)),
         (Command::AddPane(tab), _) => {
@@ -240,11 +241,16 @@ fn run_command(command: Command) {
         (Command::NewProfile, _) => ask("arbalete:new-profile", &json!(null)),
         (Command::CreateProfile { name, spaces }, _) => create_profile(&name, &spaces),
         (Command::DeleteProfile(id), _) => delete_profile(id),
-        // Like Arc's, the page shows in front of the browser, the settings closed.
+        // Like Arc's, the page shows in front of the browser, the settings closed: in a tab, unless
+        // it is another profile's or one tabs do not show.
         (Command::ProfilePage(id, url), _) => {
-            if is_chrome_page(&url) {
+            if url.starts_with("chrome://") {
                 close_settings();
-                open_profile_page(&url, id);
+                if id == displayed_profile() && !is_chrome_page(&url) {
+                    open_tab(&url);
+                } else {
+                    open_profile_page(&url, id);
+                }
             }
         }
         // Like a folder, an unknown profile or a blank name from the UI is ignored.
@@ -428,7 +434,7 @@ fn run_command(command: Command) {
         (Command::ShowStore, _) => show_store(),
         (Command::ShowCertificate, _) => show_certificate(),
         // Like Arc's, Chromium's extensions page.
-        (Command::ManageExtensions, _) => open_chrome_page("chrome://extensions"),
+        (Command::ManageExtensions, _) => open_tab("chrome://extensions"),
         (Command::SiteTargets(targets), _) => win().site_targets.set(targets),
         (Command::RemoveExtension(id), _) => {
             let profile = displayed_profile();

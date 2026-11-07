@@ -1,5 +1,5 @@
-//! Chromium's own pages and windows: its settings and the store in a window, the windows it
-//! asks the user in, the browsers it opens by itself, and the pages drawn nowhere.
+//! Chromium's own pages and windows: its settings and others in tabs, the rest in a window, the
+//! windows it asks the user in, the browsers it opens by itself, and the pages drawn nowhere.
 
 use super::*;
 
@@ -40,16 +40,54 @@ thread_local! {
     pub(super) static CHROME_PAGE: RefCell<Option<(Window, BrowserView, ProfileId)>> = const { RefCell::new(None) };
 }
 
-/// Whether `url` is one of Chromium's own pages, like chrome://extensions, which Alloy pages do
-/// not show.
-pub(super) fn is_chrome_page(url: &str) -> bool {
-    url.starts_with("chrome://")
+/// Chromium's own pages that open in a tab, like any page, rather than in a window of their own:
+/// those the CEF Arbalete takes lets Alloy pages show (cef-builds' alloy-webui patch, which keeps
+/// what their buttons do from crashing out of a Chromium window), and the internals CEF lets them
+/// show already. The others, like chrome://bookmarks, need a Chromium window and crash in a tab.
+const TAB_PAGES: [&str; 26] = [
+    "settings",
+    "extensions",
+    "history",
+    "downloads",
+    "password-manager",
+    "flags",
+    "management",
+    "components",
+    "inspect",
+    "about",
+    "chrome-urls",
+    "version",
+    "credits",
+    "gpu",
+    "net-internals",
+    "net-export",
+    "accessibility",
+    "histograms",
+    "media-internals",
+    "process-internals",
+    "serviceworker-internals",
+    "webrtc-internals",
+    "indexeddb-internals",
+    "blob-internals",
+    "tracing",
+    "system",
+];
+
+/// Whether `url` is one of Chromium's own pages that open in a tab.
+pub(super) fn is_tab_page(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("chrome://") else {
+        return false;
+    };
+    let host = &rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())];
+    TAB_PAGES.iter().any(|page| page.eq_ignore_ascii_case(host))
 }
 
-/// Whether a web page may send the app to `url`, in a tab, Peek or a window: never to Chromium's
-/// own pages, the app's, DevTools or a page's source, which only the user and the app open.
-/// Spaces and controls inside a scheme are dropped first, like Chromium does.
-pub(super) fn web_may_open(url: &str) -> bool {
+/// Whether a page at `page` may send the app to `url`, in a tab, Peek or a window: never to the
+/// app's pages, DevTools or a page's source, and to Chromium's own pages only from one of them
+/// that opens in a tab, like chrome://settings to chrome://extensions. The app's loads reach
+/// every chrome:// page in the CEF it takes, which refuses them to web pages only. Spaces and
+/// controls inside a scheme are dropped first, like Chromium does.
+pub(super) fn page_may_open(page: &str, url: &str) -> bool {
     let url: String = url
         .chars()
         .filter(|c| !c.is_ascii_whitespace() && !c.is_ascii_control())
@@ -57,10 +95,26 @@ pub(super) fn web_may_open(url: &str) -> bool {
     let scheme = url
         .split_once(':')
         .map(|(scheme, _)| scheme.to_ascii_lowercase());
-    !matches!(
-        scheme.as_deref(),
-        Some("chrome" | "arbalete" | "devtools" | "view-source")
-    )
+    match scheme.as_deref() {
+        Some("chrome") => is_tab_page(page),
+        Some("arbalete" | "devtools" | "view-source") => false,
+        _ => true,
+    }
+}
+
+/// Whether `url` is one of Chromium's own pages that opens in its window rather than in a tab:
+/// one that tabs do not show, or any of them in an incognito window, whose profile has none.
+pub(super) fn is_chrome_page(url: &str) -> bool {
+    let incognito = INCOGNITO.with_borrow(|incognito| incognito.contains_key(&displayed_profile()));
+    url.starts_with("chrome://") && (incognito || !is_tab_page(url))
+}
+
+/// A tab's page leaves its address, hidden or gone elsewhere: when it was the extensions page,
+/// what it changed shows, as Chromium tells nothing of it.
+pub(super) fn left_page(profile: ProfileId, tab: NodeId) {
+    if tab_has(tab, |tab| tab.url.starts_with("chrome://extensions")) {
+        extensions::reload(profile);
+    }
 }
 
 /// Whether the window of Chromium's own pages is the one in front.
@@ -71,9 +125,9 @@ pub(super) fn chrome_page_focused() -> bool {
     })
 }
 
-/// Shows one of Chromium's own pages, like a site's settings or the extensions, in a Chrome-style
-/// window of its own, in the displayed Space's profile: Alloy pages have none, and macOS has no
-/// Chrome style in a native view.
+/// Shows one of Chromium's own pages that tabs do not show, like its bookmarks, in a Chrome-style
+/// window of its own, in the displayed Space's profile: macOS has no Chrome style in a native
+/// view.
 pub(super) fn open_chrome_page(url: &str) {
     // An incognito window's profile, whose web data stays in memory, has no Chrome-style page:
     // Chromium's own pages show the first profile's, as an incognito window keeps no history.
@@ -112,7 +166,7 @@ pub(super) fn show_site_settings() {
     };
     // The origin as a query's value: its ":" and "/" encoded, like Chrome's own links to it.
     let site = origin.replace(':', "%3A").replace('/', "%2F");
-    open_chrome_page(&format!(
+    open_tab(&format!(
         "chrome://settings/content/siteDetails?site={site}"
     ));
 }
@@ -570,10 +624,24 @@ mod tests {
     }
 
     #[test]
+    fn opens_only_some_chromium_pages_in_a_tab() {
+        assert!(is_tab_page("chrome://settings/privacy"));
+        assert!(is_tab_page("chrome://downloads"));
+        assert!(!is_tab_page("chrome://bookmarks"));
+        assert!(!is_tab_page("chrome://newtab/"));
+        assert!(!is_tab_page("arbalete://settings"));
+    }
+
+    #[test]
     fn web_pages_never_open_internal_pages() {
-        assert!(web_may_open("https://b.test/"));
-        assert!(web_may_open("chrome-extension://abc/welcome.html"));
-        assert!(web_may_open("about:blank"));
+        let web = "https://a.test/";
+        assert!(page_may_open(web, "https://b.test/"));
+        assert!(page_may_open(web, "chrome-extension://abc/welcome.html"));
+        assert!(page_may_open(web, "about:blank"));
+        assert!(page_may_open("chrome://settings/", "chrome://extensions/"));
+        assert!(page_may_open("chrome://settings/", "https://a.test/"));
+        assert!(!page_may_open("chrome://bookmarks/", "chrome://settings/"));
+        assert!(!page_may_open("chrome://settings/", "arbalete://ui/"));
         for url in [
             "chrome://settings",
             "CHROME://settings",
@@ -585,7 +653,7 @@ mod tests {
             "devtools://devtools/bundled/inspector.html",
             "view-source:chrome://settings",
         ] {
-            assert!(!web_may_open(url), "{url}");
+            assert!(!page_may_open(web, url), "{url}");
         }
     }
 }

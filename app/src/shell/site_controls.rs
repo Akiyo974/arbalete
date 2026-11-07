@@ -398,7 +398,7 @@ wrap_life_span_handler! {
         fn on_before_popup(
             &self,
             _browser: Option<&mut Browser>,
-            _frame: Option<&mut Frame>,
+            frame: Option<&mut Frame>,
             _popup_id: i32,
             target_url: Option<&CefString>,
             _target_frame_name: Option<&CefString>,
@@ -411,7 +411,8 @@ wrap_life_span_handler! {
             _extra_info: Option<&mut Option<DictionaryValue>>,
             _no_javascript_access: Option<&mut i32>,
         ) -> i32 {
-            let Some(url) = target_url.map(CefString::to_string).filter(|url| popup_allowed(user_gesture) && web_may_open(url)) else { return 1 };
+            let page = frame.map(|frame| CefString::from(&frame.url()).to_string()).unwrap_or_default();
+            let Some(url) = target_url.map(CefString::to_string).filter(|url| popup_allowed(user_gesture) && page_may_open(&page, url)) else { return 1 };
             // A link clicked with ⇧, which would open a window, shows in Peek, like Arc's.
             if target_disposition == WindowOpenDisposition::NEW_WINDOW {
                 post(Command::Peek(url));
