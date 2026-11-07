@@ -3,6 +3,10 @@
 //! Every profile has a root container for its favorites, shared by the Spaces attached to it. Every
 //! Space has two root containers: its pinned tabs and its "Today" tabs. Tabs, folders and splits are
 //! nodes of a single tree, stored flat and linked by `parent` and `children`.
+//!
+//! Several Spaces can share one profile, and with it its web data and favorites. The sidebar, its
+//! archived tabs and its URL routing are saved as JSON (crate::store); each profile's history is a
+//! SQLite database of its own (crate::history).
 
 use crate::search::SearchEngine;
 use crate::url_routing::{Destination, UrlRouting};

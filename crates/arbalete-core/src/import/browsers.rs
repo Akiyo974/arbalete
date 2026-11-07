@@ -1,5 +1,14 @@
-//! Finds the browsers installed for a user and their profiles, from the paths in docs/PLAN.md,
-//! section 4. Only macOS paths for now.
+//! Finds the browsers installed for a user and their profiles. Only macOS paths for now.
+//!
+//! | Family | Profiles | Bookmarks | History |
+//! |---|---|---|---|
+//! | Chromium | `Local State` (`profile.info_cache`) | `Bookmarks` (JSON) | `History` (SQLite, µs since 1601) |
+//! | Firefox | `profiles.ini` | `places.sqlite` (`moz_bookmarks`) | `places.sqlite` (`moz_places`, `moz_historyvisits`) |
+//! | Safari | none | `Bookmarks.plist` | `History.db` (SQLite, seconds since 2001) |
+//!
+//! SQLite databases are copied before they are read, as a running browser locks them. Safari's
+//! data needs Full Disk Access, which macOS asks the user for. Passwords and cookies are left out:
+//! the browsers encrypt them with the system keychain.
 
 use serde_json::Value;
 use std::fs;

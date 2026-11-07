@@ -1,7 +1,30 @@
-//! Reads Arc's sidebar, `StorableSidebar.json`, into Spaces and tabs.
+//! Reads Arc's sidebar, `StorableSidebar.json`, into Spaces and tabs, with its archive and its
+//! URL routing.
 //!
-//! The format is described in docs/PLAN.md, section 4. Items Arbalete has no equivalent for, or
-//! that are malformed, are skipped: one odd item must not stop the import of the others.
+//! Arc keeps them in `~/Library/Application Support/Arc/`, documented here only as far as reading
+//! the user's own data needs:
+//!
+//! - **`StorableSidebar.json`**: in `sidebar.containers`, the entry with `items`, `spaces` and
+//!   `topAppsContainerIDs`, each a flat array alternating keys (ids) and values. Items are linked
+//!   by `parentID` / `childrenIds` and hold one kind in `data`: `tab` (`savedURL`, `savedTitle`;
+//!   the item's `title` when renamed), `list` (a folder), `splitView` (its tabs as children) or
+//!   `itemContainer` (a root). A Space's `containerIDs` alternates `pinned` / `unpinned` and their
+//!   root; its `profile` is `{"default": true}` or `{"custom": {"_0": {"directoryBasename": …}}}`,
+//!   the profile's directory in `User Data`. Its `customInfo` holds `iconType` (`emoji_v2`, or a
+//!   named `icon`) and `windowTheme`: under `background.single._0.style.color._0`, one of
+//!   `basicColor`, `blendedSingleColor` (`color`) or `blendedGradient` (`baseColors`, then
+//!   `overlayColors` whose first is transparent), each with `translucencyStyle` (`light`, `dark`,
+//!   `auto`) and `modifiers` (`intensityFactor`, `noiseFactor`, `overlay`); colors are
+//!   `extendedSRGB` components, a little beyond 0 to 1. A Space without colors has no
+//!   `windowTheme`. `topAppsContainerIDs` alternates a profile and its Favorites root. `spaces` is
+//!   read in its own order; `sidebarSyncState` and `firebaseSyncState` are sync copies.
+//! - **`StorableArchiveItems.json`**: the archived tabs, each with its Space and `archivedAt`.
+//! - **`StorableLinkRouting.json`**: the routes and the default destination.
+//! - **`User Data/`**: a Chromium data directory, whose `Local State` names the profiles
+//!   (`profile.info_cache.<directory>.name`, no colors) and whose profiles hold the history.
+//!
+//! Items Arbalete has no equivalent for, or that are malformed, are skipped: one odd item must not
+//! stop the import of the others.
 
 use super::{Copy, chromium};
 use crate::sidebar::{
