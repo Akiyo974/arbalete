@@ -1,6 +1,6 @@
 // The Command Bar, shown above the page by the app (open_overlay in
-// app/src/shell.rs): empty, it opens a tab; holding the selected tab's address (⌘L), it loads
-// another in that tab. Below what is typed, the address it opens or a search, the app's actions
+// app/src/shell/overlay.rs): empty, it opens a tab; holding the selected tab's address (⌘L), it
+// loads another in that tab. Below what is typed, the address it opens or a search, the app's actions
 // it names, the search engine's suggestions, then the open tabs and the history pages matching
 // it; the arrows pick one, Enter or a click opens it, Escape closes the bar. Typing forward
 // completes the field with the best result's address, selected: typing on replaces it, deleting
@@ -10,7 +10,7 @@ import AppKit
 import SwiftUI
 
 /// The search row's height and a result's, and the space around the results, measured on Arc's:
-/// the app fits the Command Bar to them (place_overlay in app/src/shell.rs).
+/// the app fits the Command Bar to them (place_overlay in app/src/shell/overlay.rs).
 private let searchRow: CGFloat = 64
 private let resultRow: CGFloat = 50
 private let resultsPadding: CGFloat = 8
