@@ -110,7 +110,7 @@ fn run_command(command: Command) {
                 show_selected();
             }
         }
-        (Command::CloseSplit(split), _) => close_rows(|sidebar| {
+        (Command::CloseSplit(split), _) => close_rows("Split View closed", |sidebar| {
             let profile = sidebar.profile_of(split).ok_or(Error::UnknownNode)?;
             Ok((sidebar.remove_split(split)?, profile))
         }),
