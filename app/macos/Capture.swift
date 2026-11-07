@@ -1,4 +1,4 @@
-// Page captures, like Arc's (capture in app/src/shell.rs hands the page's picture over).
+// Page captures, like Arc's (capture in app/src/shell/capture.rs hands the page's picture over).
 // - A part of the page: the page turns grey under a veil, where a drag picks the part, in color,
 //   then a menu copies it, saves it, edits it (CaptureEditor.swift) or picks another part.
 // - The whole page, from the developer bar: framed on a color, copied at once, with a panel under
