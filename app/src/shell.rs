@@ -7098,8 +7098,8 @@ wrap_app! {
     impl App {
         fn on_before_command_line_processing(&self, _process_type: Option<&CefString>, command_line: Option<&mut CommandLine>) {
             let Some(command_line) = command_line else { return };
-            // Development builds are signed ad hoc, so each build would ask for keychain access.
-            if cfg!(debug_assertions) {
+            #[cfg(target_os = "macos")]
+            if crate::mac::mock_keychain() {
                 command_line.append_switch(Some(&CefString::from("use-mock-keychain")));
             }
             // Sites asking to sign in reach the sign-in prompt (auth_credentials): Chrome's own

@@ -1890,6 +1890,20 @@ fn chromium_locale_of(tag: &str) -> String {
     }
 }
 
+/// Whether Chromium keeps its keys in a mock keychain rather than the real one: for a development
+/// bundle only (`mise run app`'s identifier ends with `.dev`), signed ad hoc, so each build would
+/// ask for keychain access. Decided by what runs, not how it was compiled, so that a release, under
+/// its own identifier, always encrypts cookies and passwords with a real keychain key.
+pub fn mock_keychain() -> bool {
+    let id = objc2_foundation::NSBundle::mainBundle().bundleIdentifier();
+    is_development_bundle(id.map(|id| id.to_string()).as_deref())
+}
+
+/// Whether a bundle identifier is a development bundle's or one of its helpers': a `dev` part.
+fn is_development_bundle(id: Option<&str>) -> bool {
+    id.is_some_and(|id| id.split('.').any(|part| part == "dev"))
+}
+
 /// Whether a link another app sends may open: a web page or a file, never an internal page like
 /// `chrome://` that only the user may open.
 fn opens_from_another_app(url: &str) -> bool {
@@ -1914,6 +1928,26 @@ mod link_tests {
         ));
         assert!(!opens_from_another_app("javascript:alert(1)"));
         assert!(!opens_from_another_app("example.com"));
+    }
+}
+
+#[cfg(test)]
+mod keychain_tests {
+    use super::is_development_bundle;
+
+    #[test]
+    fn mocks_the_keychain_for_development_bundles_only() {
+        assert!(is_development_bundle(Some(
+            "io.github.amenophis.arbalete.dev"
+        )));
+        assert!(is_development_bundle(Some(
+            "io.github.amenophis.arbalete.dev.helper.renderer"
+        )));
+        assert!(!is_development_bundle(Some("io.github.amenophis.arbalete")));
+        assert!(!is_development_bundle(Some(
+            "io.github.amenophis.arbalete.helper.renderer"
+        )));
+        assert!(!is_development_bundle(None));
     }
 }
 
