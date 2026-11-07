@@ -1,5 +1,5 @@
 // Peek, like Arc's: the app shows a link's page in a card over the window (peek in
-// app/src/shell.rs); here, the card with its bar and the page drawn in it, the page under it
+// app/src/shell/peek.rs); here, the card with its bar and the page drawn in it, the page under it
 // fading back, a click elsewhere closing it, and its controls at its right, which close it or
 // keep its page in a tab or a split.
 
