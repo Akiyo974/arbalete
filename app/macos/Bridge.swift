@@ -600,6 +600,7 @@ final class NativeWindow {
     let pages: PagePlacer
     let pageDrop: PageDrop
     let peek: PeekChrome
+    let toasts: Toasts
     let capture: CaptureChrome
     let viewer: MediaViewer
     /// The panels above the page, by the name of the web view they stand for, like "overlay".
@@ -718,7 +719,9 @@ final class NativeWindow {
         pageDrop = PageDrop(in: window, model: app)
         peek = PeekChrome(in: window, model: app)
         peek.fade = { [weak pages] in pages?.fade($0) }
-        capture = CaptureChrome(in: window, model: app)
+        let toasts = Toasts(in: window, model: app)
+        self.toasts = toasts
+        capture = CaptureChrome(in: window, model: app, toasts: toasts)
         let viewer = MediaViewer(in: window, model: app)
         self.viewer = viewer
         app.viewingChanged = { [weak viewer] in viewer?.update() }
@@ -735,6 +738,7 @@ final class NativeWindow {
         pageDrop.close()
         peek.close()
         capture.close()
+        toasts.close()
         viewer.close()
     }
 

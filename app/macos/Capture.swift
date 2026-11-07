@@ -2,7 +2,7 @@
 // - A part of the page: the page turns grey under a veil, where a drag picks the part, in color,
 //   then a menu copies it, saves it, edits it (CaptureEditor.swift) or picks another part.
 // - The whole page, from the developer bar: framed on a color, copied at once, with a panel under
-//   the button to pick the color, and a note to save it.
+//   the button to pick the color, and a toast to save it.
 
 import AppKit
 import CoreImage
@@ -43,14 +43,10 @@ final class CaptureChrome {
     private let veil = Veil()
     private let veilOverlay: Overlay
     private let actions: Overlay
-    private let note: Overlay
-    private let noteModel = NoteModel()
-    private var hiding: DispatchWorkItem?
+    private let toasts: Toasts
     private let framing = FramingModel()
     private let framePanel: Surface
     private var editor: CaptureEditor?
-    /// What the note's Save button saves.
-    private var noteImage: CGImage?
     /// The marks the editor drew on the part picked, which it edits again.
     private var marks: [Mark] = []
     /// The page's frame and its picture, while a capture shows.
@@ -59,27 +55,20 @@ final class CaptureChrome {
     /// panel framing the page shows under it.
     var button: NSRect?
 
-    init(in parent: NSWindow, model: AppModel) {
+    init(in parent: NSWindow, model: AppModel, toasts: Toasts) {
         self.parent = parent
         self.model = model
+        self.toasts = toasts
         veilOverlay = Overlay(view: veil)
         let menu = NSHostingView(rootView: CaptureMenu(veil: veil))
         menu.safeAreaRegions = []
         menu.sizingOptions = []
         actions = Overlay(view: menu)
-        let host = NSHostingView(rootView: NoteView(model: noteModel))
-        host.safeAreaRegions = []
-        host.sizingOptions = []
-        note = Overlay(view: host)
         let framing = framing
         framePanel = Surface(in: parent, radius: 16) { FramingView(model: framing) }
         framePanel.takesKeyboard = true
         framePanel.resigned = { [weak self] in self?.closeFraming() }
         framing.capture = { [weak self] in self?.copyFramed() }
-        noteModel.save = { [weak self] in
-            guard let self, let image = self.noteImage else { return }
-            saveImage(image, named: self.title, in: self.parent)
-        }
         veil.picked = { [weak self] rect in self?.picked(rect) }
         veil.done = { [weak self] in self?.closeVeil() }
         veil.copy = { [weak self] in self?.copyPart() }
@@ -131,14 +120,13 @@ final class CaptureChrome {
         }
     }
 
-    /// Copies all of the page, from the site controls, which a note tells, with a button saving
+    /// Copies all of the page, from the site controls, which a toast tells, with a button saving
     /// it.
     func copyWhole(_ png: Data, frame: NSRect) {
         guard let image = NSBitmapImageRep(data: png)?.cgImage else { return }
         self.frame = frame
         copyImage(image)
-        noteImage = image
-        tell("Full Page Copied to Clipboard", saving: true, at: NSPoint(x: frame.maxX - 6, y: frame.minY + 6))
+        tell("Full Page Copied to Clipboard", saving: image)
     }
 
     // MARK: A part of the page
@@ -161,7 +149,7 @@ final class CaptureChrome {
         guard let image = veil.part else { return }
         copyImage(image)
         closeVeil()
-        tell("Copied Image", saving: false, at: NSPoint(x: frame.maxX, y: frame.minY + 6))
+        tell("Copied Image")
     }
 
     /// Keeps the part picked in the library's Media, like Arc's Save to Library.
@@ -172,7 +160,7 @@ final class CaptureChrome {
             .appendingPathComponent(UUID().uuidString + ".png")
         guard (try? png.write(to: file)) != nil else { return }
         model.run("save-capture-to-library", file.path)
-        tell("Saved to Library", saving: false, at: NSPoint(x: frame.maxX, y: frame.minY + 6))
+        tell("Saved to Library")
     }
 
     private func savePart() {
@@ -214,45 +202,36 @@ final class CaptureChrome {
 
     // MARK: The whole page, framed
 
-    /// Copies the framed page, like Arc's "Capture in Portrait Mode", which a note in the bar
+    /// Copies the framed page, like Arc's "Capture in Portrait Mode", which a toast in the bar
     /// tells, with a button saving it.
     private func copyFramed() {
         guard let image = framing.framed else { return }
         copyImage(image)
-        noteImage = image
-        tell("Screenshot Copied to Clipboard", saving: true, at: NSPoint(x: frame.maxX - 4, y: frame.minY - 33))
+        tell("Screenshot Copied to Clipboard", saving: image, at: NSPoint(x: frame.maxX - 10, y: frame.minY - 33))
     }
 
     private func closeFraming() {
         framePanel.place(false, .zero)
     }
 
-    // MARK: Notes
+    // MARK: Toasts
 
-    /// Shows `text` a moment, with a button saving the framed capture if `saving`, its top right
-    /// corner at `corner`, in the window's points from its top left corner.
-    func tell(_ text: String, saving: Bool = false, at corner: NSPoint) {
-        noteModel.text = text
-        noteModel.saving = saving
-        let size = NSSize(width: 380, height: saving ? 33 : 42)
-        note.place(
-            in: parent,
-            NSRect(x: corner.x - size.width, y: corner.y, width: size.width, height: size.height),
-            raise: true)
-        hiding?.cancel()
-        let hide = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.note.place(in: self.parent, nil)
+    /// Tells `text` at the page's top right, or at `corner`, with a button saving `image`.
+    private func tell(_ text: String, saving image: CGImage? = nil, at corner: NSPoint? = nil) {
+        let save = image.map { image in
+            { [weak self] in
+                guard let self else { return }
+                saveImage(image, named: self.title, in: self.parent)
+            }
         }
-        hiding = hide
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: hide)
+        let toast = Toast(text: text, button: image == nil ? nil : "Save", action: save)
+        if let corner { toasts.show(toast, at: corner) } else { toasts.show(toast, over: frame) }
     }
 
     func close() {
         closeVeil()
         veilOverlay.close()
         actions.close()
-        note.close()
         framePanel.close()
     }
 }
@@ -785,48 +764,6 @@ private struct FrameHueTrack: View {
                     choice = .hue(min(max(Double((value.location.x - 11) / (width - 22)), 0), 1))
                 })
         }
-    }
-}
-
-// MARK: Notes
-
-@MainActor
-private final class NoteModel: ObservableObject {
-    @Published var text = ""
-    @Published var saving = false
-    var save: () -> Void = {}
-}
-
-/// A short note, like "Copied Image", at the page's top right, like Arc's: white on dark purple,
-/// with a button saving the framed capture.
-private struct NoteView: View {
-    @ObservedObject var model: NoteModel
-
-    var body: some View {
-        HStack {
-            Spacer()
-            HStack(spacing: 10) {
-                Text(model.text)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
-                if model.saving {
-                    Button("Save", action: model.save)
-                        .buttonStyle(.plain)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8)
-                        .frame(height: 24)
-                        .background(RoundedRectangle(cornerRadius: 6).fill(.white.opacity(0.18)))
-                }
-            }
-            .padding(.horizontal, 16)
-            .frame(height: 42)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(red: 0x22 / 255, green: 0x0F / 255, blue: 0x41 / 255)))
-        }
-        .padding(.trailing, 6)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
