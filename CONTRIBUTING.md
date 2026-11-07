@@ -18,12 +18,29 @@ Simple code reads quickly, is easy to test and can be deleted without fear.
    the UI only keeps a copy.
 7. **Few dependencies.** Every dependency (crate or npm package) must be justified in the commit that adds it.
    Standard library first.
-8. **No optimization without measurement.** The only exceptions are the UI rules in [docs/PLAN.md](docs/PLAN.md).
+8. **No optimization without measurement.** The only exceptions are the [UI rules](#ui-rules).
 9. **Test behavior, not implementation.** A test must survive a refactoring that does not change behavior.
 10. **Split when needed, not before.** One more file, module or crate only when the existing one becomes hard to
     read or test.
 
 **Mandatory review question: "Can it be simpler?"** If yes, simplify before merging.
+
+## UI rules
+
+The interface must feel native and stay fast ([decision 0003](docs/decisions/0003-rust-logic-native-interface.md)).
+These rules apply without a measurement:
+
+- **Rust is the source of truth.** The interface keeps a copy of the state it receives and sends commands; it
+  never decides alone.
+- **No heavy computation in the interface**: search, ranking and sorting happen in Rust.
+- **Keyboard shortcuts go through the app's native menus** (`⌘T`, `⌘L`, `⌘W`…), so they work while a web page has
+  focus.
+- **Native where it shows**: AppKit menus and context menus, the window's translucency (`NSVisualEffectView` on
+  macOS), the system's window buttons, cursors and scrolling.
+- **No title bar, like Arc**: the window buttons sit at the top of the sidebar, and the sidebar's empty areas drag
+  the window.
+- **Panels above the page** (Command Bar, Peek, site controls) are views of the window, not windows of their own.
+- **Animate transforms and opacity, not layout**, so animations stay smooth.
 
 ## Open source
 
