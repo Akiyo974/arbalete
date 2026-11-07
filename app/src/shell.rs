@@ -1082,7 +1082,7 @@ fn favicon_file(path: &str) -> Option<PathBuf> {
 mod tests {
     use super::{
         CARD_MARGIN, EDGE_WIDTH, FLOAT_INSET, LIBRARY_WIDTH, Rect, SIDEBAR_WIDTH, SidebarMode,
-        Size, UiState, favicon_file, lerp_rect, site, win,
+        Size, UiState, favicon_file, site, win,
     };
 
     #[test]
@@ -1141,20 +1141,6 @@ mod tests {
         // It docks into the docked sidebar's place.
         let docked = (0, 0, SIDEBAR_WIDTH, 600);
         assert_eq!(rect(&SidebarMode::Shown.layout(&SIZE).reveal), docked);
-    }
-
-    #[test]
-    fn interpolates_rectangles() {
-        let from = Rect {
-            x: 269,
-            y: 9,
-            width: 722,
-            height: 582,
-        };
-        let to = SidebarMode::Hidden.layout(&SIZE).card;
-        assert_eq!(rect(&lerp_rect(&from, &to, 0.0)), rect(&from));
-        assert_eq!(rect(&lerp_rect(&from, &to, 0.5)), (140, 10, 851, 581));
-        assert_eq!(rect(&lerp_rect(&from, &to, 1.0)), rect(&to));
     }
 
     const SIZE: Size = Size {

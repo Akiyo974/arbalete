@@ -268,7 +268,7 @@ wrap_task! {
 }
 
 /// `t` of the way from one rectangle to another.
-pub(super) fn lerp_rect(from: &Rect, to: &Rect, t: f64) -> Rect {
+fn lerp_rect(from: &Rect, to: &Rect, t: f64) -> Rect {
     use crate::motion::lerp;
     Rect {
         x: lerp(from.x, to.x, t),
@@ -586,6 +586,16 @@ pub fn scroll(scroll: crate::swipe::Scroll) {
 mod tests {
     use super::*;
 
+    fn rect(rect: &Rect) -> (i32, i32, i32, i32) {
+        (rect.x, rect.y, rect.width, rect.height)
+    }
+
+    /// A window, in points.
+    const SIZE: Size = Size {
+        width: 1000,
+        height: 600,
+    };
+
     #[test]
     fn the_toggle_hides_the_sidebar_beside_a_page_and_floats_it_beside_an_empty_panel() {
         assert_eq!(toggled(SidebarMode::Shown, true), SidebarMode::Hidden);
@@ -609,5 +619,19 @@ mod tests {
         assert!(slide_duration(Revealed, Shown) < slide_duration(Shown, Hidden));
         assert!(slide_duration(Floating, Shown) > 0);
         assert_eq!(slide_duration(Shown, Floating), 0);
+    }
+
+    #[test]
+    fn interpolates_rectangles() {
+        let from = Rect {
+            x: 269,
+            y: 9,
+            width: 722,
+            height: 582,
+        };
+        let to = SidebarMode::Hidden.layout(&SIZE).card;
+        assert_eq!(rect(&lerp_rect(&from, &to, 0.0)), rect(&from));
+        assert_eq!(rect(&lerp_rect(&from, &to, 0.5)), (140, 10, 851, 581));
+        assert_eq!(rect(&lerp_rect(&from, &to, 1.0)), rect(&to));
     }
 }
