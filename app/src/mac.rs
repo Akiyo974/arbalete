@@ -1934,6 +1934,7 @@ mod link_tests {
         assert!(opens_from_another_app("HTTP://example.com/"));
         assert!(opens_from_another_app("file:///Users/me/page.html"));
         assert!(!opens_from_another_app("chrome://settings"));
+        assert!(!opens_from_another_app("arbalete://settings"));
         assert!(!opens_from_another_app(
             "devtools://devtools/bundled/inspector.html"
         ));

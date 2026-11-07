@@ -147,7 +147,7 @@ func toURL(_ text: String) -> String? {
     func matches(_ pattern: String) -> Bool {
         text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
     }
-    if matches("^(https?|file|ftp|chrome)://") || matches("^(about|data|mailto|view-source):") {
+    if matches("^(https?|file|ftp|chrome|arbalete)://") || matches("^(about|data|mailto|view-source):") {
         return text
     }
     if text.contains(where: \.isWhitespace) { return nil }

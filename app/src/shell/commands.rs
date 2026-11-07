@@ -52,7 +52,7 @@ fn run_command(command: Command) {
             place_overlay(i32::try_from(height).unwrap_or(OVERLAY_ROW));
             round_overlay();
         }
-        (Command::Navigate(url), _) => navigate(&url),
+        (Command::Navigate(url), _) => navigate(&url_to_load(&url)),
         (Command::ToggleSidebar, _) => {
             let has_tab = STATE.with_borrow(|state| state.sidebar.displayed().selected.is_some());
             set_sidebar(toggled(win().sidebar_mode.get(), has_tab));
@@ -68,7 +68,7 @@ fn run_command(command: Command) {
         (Command::ShowLibrary, _) => show_library(),
         (Command::WideLibrary(wide), _) => widen_library(wide),
         (Command::Open(url), _) => {
-            let pane = win().adding_pane.get();
+            let (url, pane) = (url_to_load(&url), win().adding_pane.get());
             show_overlay(false);
             if pane {
                 open_in_pane(&url);
@@ -154,7 +154,7 @@ fn run_command(command: Command) {
             let url = STATE
                 .with_borrow_mut(|state| active_tab(&mut state.sidebar).map(|tab| tab.url.clone()));
             if let Some(url) = url {
-                crate::mac::copy(&url);
+                crate::mac::copy(&shown_url(&url));
             }
         }
         (Command::Shortcut(edit), _) => edit_shortcut(edit),

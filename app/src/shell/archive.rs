@@ -45,7 +45,7 @@ pub(super) fn send_archive() {
                 let space = spaces.iter().find(|space| space.id == archived.space);
                 let profile = space.map_or(sidebar.displayed().profile, |space| space.profile);
                 json!({
-                    "url": archived.tab.url,
+                    "url": shown_url(&archived.tab.url),
                     "title": archived.tab.label(),
                     "favicon": favicon_url(profile, &archived.tab),
                     "space": space.map(|space| space.title.clone()),

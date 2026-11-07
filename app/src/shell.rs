@@ -687,7 +687,7 @@ impl UiState {
             "extensions": self.pinned_extensions(),
             // All of them, which the library lists.
             "closed": self.closed.iter().rev().take(RECENTLY_CLOSED).map(|closed| json!({
-                "url": closed.tab.url,
+                "url": shown_url(&closed.tab.url),
                 "title": closed.tab.label(),
                 "favicon": favicon_url(closed.profile, &closed.tab),
                 "closedAt": closed.at.duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64),
@@ -794,7 +794,7 @@ impl UiState {
 fn tab_json(id: NodeId, tab: &Tab, profile: ProfileId) -> serde_json::Value {
     json!({
         "id": id,
-        "url": tab.url,
+        "url": shown_url(&tab.url),
         "title": tab.label(),
         "favicon": favicon_url(profile, tab),
         "muted": tab.muted,

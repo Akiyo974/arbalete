@@ -64,7 +64,7 @@ pub(super) fn switch_tab(forward: bool) {
                     return None;
                 };
                 let favicon = favicon_url(profile(id)?, tab);
-                Some(json!({ "id": id, "url": tab.url, "title": tab.label(), "favicon": favicon }))
+                Some(json!({ "id": id, "url": shown_url(&tab.url), "title": tab.label(), "favicon": favicon }))
             })
             .collect()
     });
@@ -132,7 +132,7 @@ fn open_overlay(visible: bool, tab: Option<(String, Option<String>)>) {
         let engine = engine.unwrap_or_default();
         let search = json!({ "name": engine.name(), "url": engine.url() });
         let empty = url.is_none();
-        let detail = json!({ "url": url, "favicon": favicon.flatten(), "search": search });
+        let detail = json!({ "url": url.as_deref().map(shown_url), "favicon": favicon.flatten(), "search": search });
         dispatch(&win().overlay_view, "arbalete:show", &detail.to_string());
         // Like Arc's, an empty bar offers the sites visited most.
         if empty {
@@ -270,14 +270,14 @@ pub(super) fn search_overlay(text: &str, surface: &'static str) {
                 .as_ref()
                 .and_then(|db| favicon::of_page(&profile_dir(profile), db, &page.url));
             let favicon = icon.map(|source| icon_url(profile, &source));
-            json!({ "url": page.url, "title": page.title, "favicon": favicon })
+            json!({ "url": shown_url(&page.url), "title": page.title, "favicon": favicon })
         })
         .collect();
     let tabs: Vec<_> = tabs
         .iter()
         .map(|(id, tab, profile)| {
             let favicon = favicon_url(*profile, tab);
-            json!({ "id": id, "url": tab.url, "title": tab.label(), "favicon": favicon })
+            json!({ "id": id, "url": shown_url(&tab.url), "title": tab.label(), "favicon": favicon })
         })
         .collect();
     let detail = json!({ "text": text, "tabs": tabs, "pages": pages });

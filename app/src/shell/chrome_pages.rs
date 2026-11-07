@@ -1,5 +1,6 @@
-//! Chromium's own pages and windows: its settings and others in tabs, the rest in a window, the
-//! windows it asks the user in, the browsers it opens by itself, and the pages drawn nowhere.
+//! Chromium's own pages and windows: its settings and others in tabs, shown as arbalete://, the
+//! rest in a window, the windows it asks the user in, the browsers it opens by itself, and the
+//! pages drawn nowhere.
 
 use super::*;
 
@@ -73,13 +74,44 @@ const TAB_PAGES: [&str; 26] = [
     "system",
 ];
 
+/// The scheme the user sees Chromium's pages that open in a tab under, as Arbalete's own.
+const SHOWN_SCHEME: &str = "arbalete://";
+
 /// Whether `url` is one of Chromium's own pages that open in a tab.
 pub(super) fn is_tab_page(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix("chrome://") else {
-        return false;
-    };
+    page_host(url, "chrome://").is_some()
+}
+
+/// The host of one of Chromium's pages that open in a tab, at `url` under `scheme`.
+fn page_host<'a>(url: &'a str, scheme: &str) -> Option<&'a str> {
+    let rest = url
+        .get(..scheme.len())
+        .filter(|start| start.eq_ignore_ascii_case(scheme))
+        .map(|_| &url[scheme.len()..])?;
     let host = &rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())];
-    TAB_PAGES.iter().any(|page| page.eq_ignore_ascii_case(host))
+    TAB_PAGES
+        .iter()
+        .any(|page| page.eq_ignore_ascii_case(host))
+        .then_some(host)
+}
+
+/// The address the user sees for `url`: arbalete://settings for chrome://settings, a page that
+/// opens in a tab; any other as it is. Only what shows changes: the session and the history
+/// keep Chromium's.
+pub(super) fn shown_url(url: &str) -> String {
+    match page_host(url, "chrome://") {
+        Some(_) => format!("{SHOWN_SCHEME}{}", &url["chrome://".len()..]),
+        None => url.to_string(),
+    }
+}
+
+/// The address to load for `url`, typed or opened by the user: chrome://settings for
+/// arbalete://settings (shown_url); any other as it is.
+pub(super) fn url_to_load(url: &str) -> String {
+    match page_host(url, SHOWN_SCHEME) {
+        Some(_) => format!("chrome://{}", &url[SHOWN_SCHEME.len()..]),
+        None => url.to_string(),
+    }
 }
 
 /// Whether a page at `page` may send the app to `url`, in a tab, Peek or a window: never to the
@@ -621,6 +653,45 @@ mod tests {
         );
         assert_eq!(origin("https://example.com"), Some("https://example.com"));
         assert_eq!(origin("about:blank"), None);
+    }
+
+    #[test]
+    fn shows_chromium_pages_that_open_in_a_tab_as_arbalete_s() {
+        assert_eq!(shown_url("chrome://settings"), "arbalete://settings");
+        assert_eq!(
+            shown_url("chrome://settings/content/siteDetails?site=https%3A%2F%2Fa.test"),
+            "arbalete://settings/content/siteDetails?site=https%3A%2F%2Fa.test"
+        );
+        assert_eq!(
+            shown_url("chrome://extensions/?id=a"),
+            "arbalete://extensions/?id=a"
+        );
+        assert_eq!(shown_url("chrome://bookmarks/"), "chrome://bookmarks/");
+        assert_eq!(shown_url("chrome://settingsx/"), "chrome://settingsx/");
+        assert_eq!(
+            shown_url("https://settings.test/"),
+            "https://settings.test/"
+        );
+        assert_eq!(shown_url("arbalete://ui/"), "arbalete://ui/");
+    }
+
+    #[test]
+    fn loads_arbalete_addresses_as_chromium_s() {
+        assert_eq!(url_to_load("arbalete://settings"), "chrome://settings");
+        assert_eq!(
+            url_to_load("Arbalete://history/?q=a"),
+            "chrome://history/?q=a"
+        );
+        assert_eq!(url_to_load("arbalete://bookmarks"), "arbalete://bookmarks");
+        assert_eq!(url_to_load("arbalete://ui/"), "arbalete://ui/");
+        assert_eq!(url_to_load("https://a.test/"), "https://a.test/");
+        for url in [
+            "chrome://settings/help",
+            "chrome://password-manager/passwords",
+            "chrome://flags/#a",
+        ] {
+            assert_eq!(url_to_load(&shown_url(url)), url);
+        }
     }
 
     #[test]

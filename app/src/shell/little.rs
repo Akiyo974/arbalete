@@ -173,7 +173,7 @@ pub(super) fn little_action(id: u32, action: LittleAction) {
         }
         LittleAction::Navigate(url) => {
             if let Some(frame) = little_browser(id).and_then(|browser| browser.main_frame()) {
-                frame.load_url(Some(&CefString::from(url.as_str())));
+                frame.load_url(Some(&CefString::from(url_to_load(&url).as_str())));
             }
         }
         LittleAction::OpenInSpace(space) => {
@@ -273,7 +273,7 @@ fn send_little(id: u32) {
         });
         let search = json!({ "name": engine.name(), "url": engine.url() });
         let detail = json!({
-            "url": little.url,
+            "url": shown_url(&little.url),
             "title": little.title,
             "profile": name,
             "profiles": profiles,

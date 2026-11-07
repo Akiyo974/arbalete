@@ -97,7 +97,7 @@ pub(super) fn send_peek() {
     #[cfg(target_os = "macos")]
     crate::native::peek_bar(
         win().id,
-        &url,
+        &shown_url(&url),
         color.as_deref().unwrap_or_default(),
         browser.can_go_back() == 1,
         browser.can_go_forward() == 1,
