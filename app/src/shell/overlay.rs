@@ -311,6 +311,9 @@ fn suggest(profile: ProfileId, text: &str, surface: &'static str) {
     let _ = urlrequest_create(Some(&mut request.clone()), Some(&mut client), None);
 }
 
+/// How much of a suggestions response is read, the rest ignored: they weigh less than 10 KB.
+const SUGGESTIONS_SIZE: usize = 64 * 1024;
+
 wrap_urlrequest_client! {
     struct SuggestionsClient {
         text: String,
@@ -323,7 +326,9 @@ wrap_urlrequest_client! {
             if !data.is_null() {
                 // SAFETY: CEF hands the chunk received, `data_length` bytes long.
                 let chunk = unsafe { std::slice::from_raw_parts(data, data_length) };
-                self.body.borrow_mut().extend_from_slice(chunk);
+                let mut body = self.body.borrow_mut();
+                let room = SUGGESTIONS_SIZE.saturating_sub(body.len());
+                body.extend_from_slice(&chunk[..chunk.len().min(room)]);
             }
         }
 
