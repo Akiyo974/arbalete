@@ -1,11 +1,12 @@
 // An extension's popup, like Arc's: a small window of its own with a title bar to move or close
 // it, under the site controls' button, or over the main window's middle for an options page
-// (open_extension_popup in app/src/shell.rs). CEF draws the extension's page in it, at the size
-// the page asks for.
+// (open_extension_popup in app/src/shell/site_controls.rs). CEF draws the extension's page in it,
+// at the size the page asks for.
 
 import AppKit
 
-/// How far the popup stands under the site controls' button (PANEL_GAP in app/src/shell.rs).
+/// How far the popup stands under the site controls' button (PANEL_GAP in
+/// app/src/shell/site_controls.rs).
 private let buttonGap: CGFloat = 6
 
 /// The window an extension's popup shows in: closing it closes the popup.

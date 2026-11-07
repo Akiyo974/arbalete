@@ -429,10 +429,10 @@ struct DeveloperBar: View {
 }
 
 /// The selected tab's site controls, under their button (show_site_controls in
-/// app/src/shell.rs): actions on its link and what the site keeps, the profile's extensions,
-/// whose popup a click opens in place of the panel, the Chrome Web Store to add more, the library
-/// to manage them, and whether the connection is secure. It closes on losing the focus and on
-/// Escape, and sizes itself to what it shows.
+/// app/src/shell/site_controls.rs): actions on its link and what the site keeps, the profile's
+/// extensions, whose popup a click opens in place of the panel, the Chrome Web Store to add more,
+/// the library to manage them, and whether the connection is secure. It closes on losing the
+/// focus and on Escape, and sizes itself to what it shows.
 @MainActor
 final class SiteControls: ObservableObject {
     struct Site: Decodable {
