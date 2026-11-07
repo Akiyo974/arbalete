@@ -38,7 +38,7 @@ unsafe extern "C" {
         sizes: *const usize,
         count: usize,
     );
-    fn arbalete_ui_open_little(id: u32) -> *mut c_void;
+    fn arbalete_ui_open_little(id: u32, width: i32, height: i32) -> *mut c_void;
     fn arbalete_ui_little_closed(id: u32);
     fn arbalete_ui_focused_little() -> i64;
     fn arbalete_ui_little_bar();
@@ -307,11 +307,12 @@ pub fn surface(window: u32, name: &str, shown: bool, frame: &Rect) {
     }
 }
 
-/// Opens the Little Arbalete window `id`, with its bar, and returns the view CEF makes its page's
-/// browser in.
-pub fn open_little(id: u32) -> Option<*mut c_void> {
-    // SAFETY: a plain value; the view lives until little_closed.
-    let view = unsafe { arbalete_ui_open_little(id) };
+/// Opens the Little Arbalete window `id`, with its bar, its page `size` or the usual size, and
+/// returns the view CEF makes its page's browser in.
+pub fn open_little(id: u32, size: Option<(i32, i32)>) -> Option<*mut c_void> {
+    let (width, height) = size.unwrap_or_default();
+    // SAFETY: plain values; the view lives until little_closed.
+    let view = unsafe { arbalete_ui_open_little(id, width, height) };
     (!view.is_null()).then_some(view)
 }
 

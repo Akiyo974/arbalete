@@ -154,7 +154,7 @@ fn make_page(
     };
     browser_host_create_browser_sync(
         Some(&info),
-        Some(&mut ContentClient::new(profile, false)),
+        Some(&mut ContentClient::new(profile, false, None)),
         Some(&CefString::from(url)),
         Some(&BrowserSettings::default()),
         None,

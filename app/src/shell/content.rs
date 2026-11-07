@@ -8,11 +8,14 @@ wrap_client! {
         profile: ProfileId,
         // A Little Arbalete window's page, rather than a tab's.
         little: bool,
+        // The Little Arbalete window of a page's popup.
+        popup: Option<u32>,
     }
 
     impl Client {
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(BrowserLifeSpan::new((!self.little).then_some(self.profile)))
+            let tab = (!self.little).then_some(self.profile);
+            Some(BrowserLifeSpan::new(tab, Some(self.profile), self.popup))
         }
 
         fn focus_handler(&self) -> Option<FocusHandler> {
@@ -733,8 +736,8 @@ wrap_load_handler! {
     }
 }
 
-/// Whether a page's popup opens as a tab: only one the user asked for, by a click or a key, so a
-/// page cannot open tabs on its own, like a script calling `window.open` in a loop.
+/// Whether a page's popup opens: only one the user asked for, by a click or a key, so a
+/// page cannot open tabs or windows on its own, like a script calling `window.open` in a loop.
 pub(super) fn popup_allowed(user_gesture: i32) -> bool {
     user_gesture == 1
 }
@@ -762,34 +765,80 @@ wrap_focus_handler! {
 
 wrap_life_span_handler! {
     pub(super) struct BrowserLifeSpan {
+        // A tab's page's profile.
         profile: Option<ProfileId>,
+        // The profile of a web page, whose popups open in windows of their own.
+        opener: Option<ProfileId>,
+        // The Little Arbalete window of a page's popup.
+        popup: Option<u32>,
     }
 
     impl LifeSpanHandler {
+        /// A popup a page opens with `window.open` and a size, like a sign-in's, opens in a
+        /// Little Arbalete window, like Arc's, keeping its opener: it sends its result there and
+        /// closes. Others open in tabs.
         fn on_before_popup(
             &self,
             _browser: Option<&mut Browser>,
             frame: Option<&mut Frame>,
-            _popup_id: i32,
+            popup_id: i32,
             target_url: Option<&CefString>,
             _target_frame_name: Option<&CefString>,
-            _target_disposition: WindowOpenDisposition,
+            target_disposition: WindowOpenDisposition,
             user_gesture: i32,
-            _popup_features: Option<&PopupFeatures>,
-            _window_info: Option<&mut WindowInfo>,
-            _client: Option<&mut Option<Client>>,
+            popup_features: Option<&PopupFeatures>,
+            window_info: Option<&mut WindowInfo>,
+            client: Option<&mut Option<Client>>,
             _settings: Option<&mut BrowserSettings>,
             _extra_info: Option<&mut Option<DictionaryValue>>,
             _no_javascript_access: Option<&mut i32>,
         ) -> i32 {
-            if let Some(url) = target_url.map(CefString::to_string).filter(|url| popup_allowed(user_gesture) && page_may_open(&frame_url(frame), url)) {
-                open_tab(&url);
+            let Some(url) = target_url.map(CefString::to_string).filter(|url| popup_allowed(user_gesture) && page_may_open(&frame_url(frame), url)) else {
+                return 1;
+            };
+            #[cfg(target_os = "macos")]
+            if let (Some(profile), Some(window_info), Some(client)) = (self.opener, window_info, client)
+                && target_disposition == WindowOpenDisposition::NEW_POPUP
+                && !is_chrome_page(&url)
+            {
+                let size = popup_features
+                    .filter(|features| features.width_set == 1 && features.height_set == 1)
+                    .map(|features| (features.width, features.height));
+                let Some((id, view)) = open_popup(size) else { return 1 };
+                let (width, height) = size.unwrap_or((800, 600));
+                *window_info = WindowInfo {
+                    parent_view: view,
+                    bounds: Rect { x: 0, y: 0, width, height },
+                    runtime_style: RuntimeStyle::ALLOY,
+                    ..Default::default()
+                };
+                *client = Some(ContentClient::new(profile, true, Some(id)));
+                OPENING_POPUPS.with_borrow_mut(|popups| popups.push((popup_id, id)));
+                return 0;
             }
+            open_tab(&url);
             1
+        }
+
+        /// A popup CEF did not make after all leaves its window.
+        fn on_before_popup_aborted(&self, _browser: Option<&mut Browser>, popup_id: i32) {
+            let popup = OPENING_POPUPS.with_borrow_mut(|popups| {
+                let at = popups.iter().position(|&(id, _)| id == popup_id)?;
+                Some(popups.remove(at).1)
+            });
+            #[cfg(target_os = "macos")]
+            if let Some(little) = popup {
+                crate::native::little_closed(little);
+            }
         }
 
         fn on_after_created(&self, browser: Option<&mut Browser>) {
             OPEN_BROWSERS.set(OPEN_BROWSERS.get() + 1);
+            #[cfg(target_os = "macos")]
+            if let (Some(id), Some(profile), Some(browser)) = (self.popup, self.opener, browser.as_deref()) {
+                OPENING_POPUPS.with_borrow_mut(|popups| popups.retain(|&(_, little)| little != id));
+                popup_created(id, profile, browser);
+            }
             if let Some(profile) = self.profile {
                 content_created(profile, browser);
             }
@@ -847,7 +896,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_a_popup_the_user_asked_for_opens_a_tab() {
+    fn only_a_popup_the_user_asked_for_opens() {
         assert!(popup_allowed(1));
         assert!(!popup_allowed(0));
     }

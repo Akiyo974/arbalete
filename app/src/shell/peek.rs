@@ -54,7 +54,7 @@ pub(super) fn peek(url: &str) {
     let mut context = profile_context(profile);
     let Some(browser) = browser_host_create_browser_sync(
         Some(&info),
-        Some(&mut ContentClient::new(profile, true)),
+        Some(&mut ContentClient::new(profile, true, None)),
         Some(&CefString::from(url)),
         Some(&BrowserSettings::default()),
         None,

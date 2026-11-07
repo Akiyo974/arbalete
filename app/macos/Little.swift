@@ -128,10 +128,11 @@ final class LittleWindow: NSObject, NSWindowDelegate {
     let page = PageHost()
     private var command: Surface!
 
-    init(id: Int, app: AppModel) {
+    /// `size` is its window's: a popup's page asks for its own.
+    init(id: Int, app: AppModel, size: NSSize) {
         bar = LittleBar(id: id, app: app)
         window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: littleSize),
+            contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false)
         super.init()
@@ -140,16 +141,16 @@ final class LittleWindow: NSObject, NSWindowDelegate {
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
-        let content = NSView(frame: NSRect(origin: .zero, size: littleSize))
+        let content = NSView(frame: NSRect(origin: .zero, size: size))
         let host = NSHostingView(rootView: LittleBarView(bar: bar, edit: { [weak self] in self?.edit() }))
         // Its own room, not the title bar's safe area.
         host.safeAreaRegions = []
         host.frame = NSRect(
-            x: 0, y: littleSize.height - littleBarHeight, width: littleSize.width,
+            x: 0, y: size.height - littleBarHeight, width: size.width,
             height: littleBarHeight)
         host.autoresizingMask = [.width, .minYMargin]
         page.frame = NSRect(
-            x: 0, y: 0, width: littleSize.width, height: littleSize.height - littleBarHeight)
+            x: 0, y: 0, width: size.width, height: size.height - littleBarHeight)
         page.autoresizingMask = [.width, .height]
         content.addSubview(page)
         content.addSubview(host)
@@ -423,14 +424,17 @@ struct LittleBarView: View {
 
 @MainActor var littles: [Int: LittleWindow] = [:]
 
-/// Opens the Little Arbalete window `id` and returns the view CEF draws its page in.
+/// Opens the Little Arbalete window `id`, its page `width` by `height` points, or the usual size
+/// for 0, and returns the view CEF draws its page in.
 @_cdecl("arbalete_ui_open_little")
-public func openLittle(_ id: UInt32) -> UnsafeMutableRawPointer? {
+public func openLittle(_ id: UInt32, _ width: Int32, _ height: Int32) -> UnsafeMutableRawPointer? {
     // As an address: a pointer may not leave the main actor's closure.
     let address: UInt = MainActor.assumeIsolated {
         // Its commands go through a window of the app's, any.
         guard let app = nativeWindows.values.first?.model else { return 0 }
-        let little = LittleWindow(id: Int(id), app: app)
+        let size = width > 0 && height > 0
+            ? NSSize(width: CGFloat(width), height: CGFloat(height) + littleBarHeight) : littleSize
+        let little = LittleWindow(id: Int(id), app: app, size: size)
         littles[Int(id)] = little
         return UInt(bitPattern: Unmanaged.passUnretained(little.page).toOpaque())
     }

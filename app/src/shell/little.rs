@@ -68,13 +68,12 @@ fn open_in_window(space: Option<SpaceId>, url: &str) {
 /// Opens a Little Arbalete window on `url`, in the displayed Space's profile, like Arc's Little
 /// Arc: a page without the sidebar, which its bar moves into the Space.
 pub(super) fn open_little(url: Option<String>) {
-    let id = NEXT_LITTLE.get();
-    NEXT_LITTLE.set(id + 1);
+    let id = next_little();
     let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
     let url = url.unwrap_or_default();
     #[cfg(target_os = "macos")]
     {
-        let Some(view) = crate::native::open_little(id) else {
+        let Some(view) = crate::native::open_little(id, None) else {
             return;
         };
         let Some(browser) = little_page(view, profile, &url) else {
@@ -91,6 +90,40 @@ pub(super) fn open_little(url: Option<String>) {
         });
         send_little(id);
     }
+}
+
+fn next_little() -> u32 {
+    let id = NEXT_LITTLE.get();
+    NEXT_LITTLE.set(id + 1);
+    id
+}
+
+/// Opens a Little Arbalete window for a page's popup, its page `size` if it asks for one, like
+/// Arc's: CEF makes the popup in the view returned, keeping its opener, which a sign-in popup
+/// sends its result to before closing.
+#[cfg(target_os = "macos")]
+pub(super) fn open_popup(size: Option<(i32, i32)>) -> Option<(u32, *mut std::ffi::c_void)> {
+    let id = next_little();
+    Some((id, crate::native::open_little(id, size)?))
+}
+
+/// Makes a popup CEF made its Little Arbalete window's page, with the keyboard.
+#[cfg(target_os = "macos")]
+pub(super) fn popup_created(id: u32, profile: ProfileId, browser: &Browser) {
+    if let Some(host) = browser.host() {
+        host.set_focus(1);
+    }
+    extensions::page_created(profile, browser);
+    LITTLE.with_borrow_mut(|littles| {
+        littles.push(Little {
+            id,
+            profile,
+            browser: browser.clone(),
+            url: String::new(),
+            title: String::new(),
+        })
+    });
+    send_little(id);
 }
 
 /// Makes a Little Arbalete window's page, in `profile`, on `url`, in its window's `view`, with
@@ -112,7 +145,7 @@ fn little_page(view: *mut std::ffi::c_void, profile: ProfileId, url: &str) -> Op
     let start = if url.is_empty() { "about:blank" } else { url };
     let browser = browser_host_create_browser_sync(
         Some(&info),
-        Some(&mut ContentClient::new(profile, true)),
+        Some(&mut ContentClient::new(profile, true, None)),
         Some(&CefString::from(start)),
         Some(&BrowserSettings::default()),
         None,

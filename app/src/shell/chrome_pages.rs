@@ -251,7 +251,7 @@ wrap_client! {
 
     impl Client {
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(BrowserLifeSpan::new(None))
+            Some(BrowserLifeSpan::new(None, None, None))
         }
 
         fn load_handler(&self) -> Option<LoadHandler> {
@@ -491,7 +491,7 @@ wrap_client! {
 
     impl Client {
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(BrowserLifeSpan::new(None))
+            Some(BrowserLifeSpan::new(None, None, None))
         }
     }
 }
@@ -502,7 +502,7 @@ wrap_client! {
 
     impl Client {
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(BrowserLifeSpan::new(None))
+            Some(BrowserLifeSpan::new(None, None, None))
         }
 
         fn load_handler(&self) -> Option<LoadHandler> {
@@ -620,7 +620,7 @@ wrap_client! {
         }
 
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(BrowserLifeSpan::new(None))
+            Some(BrowserLifeSpan::new(None, None, None))
         }
     }
 }

@@ -164,6 +164,8 @@ thread_local! {
     /// The Little Arbalete windows' pages closing as another profile's take their place, by
     /// browser id.
     static REPLACED_LITTLE_PAGES: RefCell<Vec<i32>> = const { RefCell::new(Vec::new()) };
+    /// The pages' popups CEF is making, by popup id, with the Little Arbalete window each opens in.
+    static OPENING_POPUPS: RefCell<Vec<(i32, u32)>> = const { RefCell::new(Vec::new()) };
     /// The Little Arbalete window in front last, until a main window comes there: its page is
     /// its profile's active tab for the extensions, while their popup has the keyboard too.
     static ACTIVE_LITTLE: Cell<Option<u32>> = const { Cell::new(None) };
