@@ -159,7 +159,8 @@ struct KeyField: NSViewRepresentable {
 }
 
 /// The bar at the page's top in toolbar mode: back, forward and reload at its left, the selected
-/// tab's domain in its middle, which a click edits in the Command Bar, its site controls at its
+/// tab's domain in its middle, which a click edits in the Command Bar (without a tab, a prompt
+/// opening it), its site controls at its
 /// right, and the page loading along its bottom.
 struct PageToolbar: View {
     @ObservedObject var model: AppModel
@@ -200,6 +201,19 @@ struct PageToolbar: View {
                 }
                 .buttonStyle(.plain)
                 .help(tab.url)
+            } else {
+                // Like Arc's, without a tab it offers the Command Bar.
+                Button {
+                    model.run("show-overlay")
+                } label: {
+                    Text("Search or Enter URL…")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .frame(height: 26)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 2.25)
