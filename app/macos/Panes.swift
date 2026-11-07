@@ -1,7 +1,8 @@
 // The tabs' pages in native containers, each a split's page's bar over a view CEF draws the page
 // in, the bar above a page alone and the focused page's outline, like Arc's Split View: the app
-// tells where each page shows (send_panes in app/src/shell.rs). They are views of the card's
-// window, so a bar and its page move in one go, and the sidebar passes over them, like Arc's.
+// tells where each page shows (send_panes in app/src/shell/split.rs). They are views of the
+// card's window, so a bar and its page move in one go, and the sidebar passes over them, like
+// Arc's.
 
 import AppKit
 import SwiftUI

@@ -1,6 +1,6 @@
 // The handles between a split's pages, which resize them, like Arc's Split View: the app places
-// them in the room between the pages (place_split_handles in app/src/shell.rs). They are views of
-// the card's stage, above the pages' containers.
+// them in the room between the pages (place_split_handles in app/src/shell/split.rs). They are
+// views of the card's stage, above the pages' containers.
 
 import AppKit
 
