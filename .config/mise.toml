@@ -15,13 +15,24 @@ CEF_PATH = "{{env.HOME}}/cef"
 SPARKLE_PATH = "{{env.HOME}}/sparkle/2.10.1"
 
 # CEF's version, the cef crate's in the workspace's Cargo.toml, picks the CEF to download and the
-# bundling tool to install.
+# bundling tool to install. The official CEF leaves out Chromium's proprietary codecs (H.264, AAC),
+# which sites like Twitch need: amenophis/cef-codecs builds the same CEF with them.
 [tasks.cef]
-description = "Download CEF to CEF_PATH"
+description = "Download CEF, with Chromium's proprietary codecs, to CEF_PATH"
 run = """
 version=$(sed -n 's/^cef = "=\\(.*\\)"/\\1/p' Cargo.toml)
 cargo install --locked export-cef-dir --version "=$version"
-export-cef-dir --force "$CEF_PATH"
+# The crate 156.0.0+156.0.7 takes CEF 156.0.7, named in full in CEF's index.
+cef=$(sed -n '/^name = "cef"$/{n;s/^version = ".*+\\(.*\\)"/\\1/p;}' Cargo.lock)
+name=$(curl -fsSL https://cef-builds.spotifycdn.com/index.json | grep -o "cef_binary_$cef+[^\\"]*_macosarm64_minimal.tar.bz2" | head -1)
+[ -n "$name" ] || { echo "CEF $cef is not in CEF's index" >&2; exit 1; }
+url="https://github.com/amenophis/cef-codecs/releases/download/cef-$cef-codecs/$(echo "$name" | sed 's/+/%2B/g')"
+download=$(mktemp -d)
+curl -fsSL -o "$download/$name" "$url" && curl -fsSL -o "$download/$name.sha256" "$url.sha256" ||
+  { echo "amenophis/cef-codecs has no build of CEF $cef: build it there first (its README)." >&2; exit 1; }
+(cd "$download" && shasum -a 256 -c "$name.sha256")
+export-cef-dir --force --archive "$download/$name" "$CEF_PATH"
+rm -rf "$download"
 """
 
 [tasks.cef-bundler]

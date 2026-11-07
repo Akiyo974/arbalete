@@ -37,6 +37,9 @@
       "labels": [
         "chromium"
       ],
+      "prBodyNotes": [
+        "CEF comes with Chromium's proprietary codecs from amenophis/cef-codecs: build this version there first, or `mise run cef` fails."
+      ],
       "automerge": false
     }
   ]

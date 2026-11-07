@@ -110,5 +110,11 @@ To report a security issue, see [SECURITY.md](SECURITY.md).
 
 [Mozilla Public License 2.0](LICENSE).
 
+Arbalete embeds CEF built with Chromium's proprietary codecs (H.264, AAC, HEVC), from
+[amenophis/cef-codecs](https://github.com/amenophis/cef-codecs). FFmpeg, part of Chromium, decodes
+them under the LGPL 2.1; macOS decodes HEVC. Their licenses, and those of Chromium's other
+components, are in the app's `CREDITS.html`. These formats may be covered by patents in some
+countries.
+
 Arbalete is an independent project, not affiliated with or endorsed by The Browser Company.
 Arc is a trademark of its owner.
