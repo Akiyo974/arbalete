@@ -190,7 +190,7 @@ pub(super) fn send_panes() {
                     "back": can(true), "forward": can(false),
                     "loading": browser.as_ref().is_some_and(|browser| browser.is_loading() == 1),
                     "focused": focused == Some(tab),
-                    "color": TOP_COLORS.with_borrow(|colors| colors.get(&tab).cloned()),
+                    "color": top_color(tab),
                     "developer": developer,
                     "toolbar": false, "alone": false, "square": false,
                     "cardX": card.x, "cardY": card.y,
@@ -232,7 +232,7 @@ pub(super) fn send_panes() {
                 "bar": PAGE_TOOLBAR_HEIGHT, "url": selected_url().unwrap_or_default(),
                 "back": false, "forward": false, "loading": false, "focused": true,
                 // Like Arc's, the bar takes the color at the page's top.
-                "color": focused.and_then(|tab| TOP_COLORS.with_borrow(|colors| colors.get(&tab).cloned())),
+                "color": focused.and_then(top_color),
                 "developer": false, "toolbar": true, "alone": false, "square": square_card(),
                 "cardX": card.x, "cardY": card.y,
             }));

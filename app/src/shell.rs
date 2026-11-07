@@ -191,8 +191,9 @@ thread_local! {
     static PEEK: RefCell<Option<Peek>> = RefCell::default();
     /// Peek's page closing, and the window it showed in.
     static PEEK_CLOSING: Cell<Option<(i32, u32)>> = const { Cell::new(None) };
-    /// The color at the top of each tab's page, as #rrggbb, which tints its bar in a split.
-    static TOP_COLORS: RefCell<HashMap<NodeId, String>> = RefCell::default();
+    /// The color at the top of the tabs' pages, as #rrggbb, which tints their bar in a split: the
+    /// last ones sent only, the most recent last.
+    static TOP_COLORS: RefCell<Vec<(NodeId, String)>> = RefCell::default();
     /// The tabs whose unloaded page opens again, covered by its picture once it is made.
     static REVIVED: RefCell<HashSet<NodeId>> = RefCell::default();
     /// The tab whose page is being made, as its view joins the card.

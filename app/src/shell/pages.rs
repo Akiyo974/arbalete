@@ -145,9 +145,39 @@ pub fn page_top_color(page: i32, color: &str) {
         }
         return;
     };
-    if TOP_COLORS.with_borrow_mut(|colors| colors.insert(tab, hex.clone())) != Some(hex) {
+    if TOP_COLORS.with_borrow_mut(|colors| remember(colors, tab, hex, TOP_COLORS_SIZE)) {
         pane_changed(tab);
     }
+}
+
+/// How many pages' top colors are kept, the least recently sent dropped beyond: Arc's.
+const TOP_COLORS_SIZE: usize = 50;
+
+/// The color at the top of a tab's page, as #rrggbb, if it is known.
+pub(super) fn top_color(tab: NodeId) -> Option<String> {
+    TOP_COLORS.with_borrow(|colors| {
+        let (_, color) = colors.iter().find(|(id, _)| *id == tab)?;
+        Some(color.clone())
+    })
+}
+
+/// Keeps `value` for `key` as the most recent of `cache`, the most recent last, dropping the
+/// least recent beyond `size`. Returns whether the value changed.
+fn remember<K: PartialEq, V: PartialEq>(
+    cache: &mut Vec<(K, V)>,
+    key: K,
+    value: V,
+    size: usize,
+) -> bool {
+    let old = cache
+        .iter()
+        .position(|(k, _)| *k == key)
+        .map(|index| cache.remove(index).1);
+    let changed = old.as_ref() != Some(&value);
+    cache.push((key, value));
+    let over = cache.len().saturating_sub(size);
+    cache.drain(..over);
+    changed
 }
 
 /// A CSS rgb() or rgba() color as #rrggbb.
@@ -245,6 +275,19 @@ pub(super) fn set_frozen(host: Option<&BrowserHost>, frozen: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remembers_the_most_recent_values_dropping_the_least_recent() {
+        let mut cache = Vec::new();
+        assert!(remember(&mut cache, 1, "a", 2));
+        assert!(remember(&mut cache, 2, "b", 2));
+        // Sent again, unchanged, it becomes the most recent.
+        assert!(!remember(&mut cache, 1, "a", 2));
+        assert!(remember(&mut cache, 3, "c", 2));
+        assert_eq!(cache, [(1, "a"), (3, "c")]);
+        assert!(remember(&mut cache, 1, "d", 2));
+        assert_eq!(cache, [(3, "c"), (1, "d")]);
+    }
 
     #[test]
     fn pages_suspend_sooner_on_low_memory_or_battery_saving() {
