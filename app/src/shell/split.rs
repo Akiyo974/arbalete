@@ -223,10 +223,11 @@ pub(super) fn send_panes() {
             }));
         }
         // A page alone has the bar above it in toolbar or developer mode, a view of the card like
-        // a split's page's, which the sidebar passes over, like Arc's.
+        // a split's page's, which the sidebar passes over, like Arc's. It stays without a page:
+        // its tab, which the interface reads only for pages, is never null, which it would refuse.
         if tabs.is_empty() && page_toolbar() {
             panes.push(json!({
-                "tab": focused, "split": null,
+                "tab": 0, "split": null,
                 "x": 0, "y": 0, "width": card.width, "height": card.height,
                 "bar": PAGE_TOOLBAR_HEIGHT, "url": selected_url().unwrap_or_default(),
                 "back": false, "forward": false, "loading": false, "focused": true,
