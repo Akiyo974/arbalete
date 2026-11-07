@@ -39,7 +39,8 @@ fn main() {
     let settings = Settings {
         root_cache_path: CefString::from(root.to_str().unwrap()),
         cache_path: CefString::from(root.join("Default").to_str().unwrap()),
-        // The extensions' bridge runs in a page without a window (shell::make_bridge).
+        // The extensions' bridge runs in a page without a window (make_bridge in
+        // app/src/shell/chrome_pages.rs).
         windowless_rendering_enabled: 1,
         // Like Arc's, Chromium's own menus, pages and dialogs speak the system's language.
         #[cfg(target_os = "macos")]
