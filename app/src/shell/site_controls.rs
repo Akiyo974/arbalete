@@ -411,7 +411,7 @@ wrap_life_span_handler! {
             _extra_info: Option<&mut Option<DictionaryValue>>,
             _no_javascript_access: Option<&mut i32>,
         ) -> i32 {
-            let Some(url) = target_url.map(CefString::to_string).filter(|_| popup_allowed(user_gesture)) else { return 1 };
+            let Some(url) = target_url.map(CefString::to_string).filter(|url| popup_allowed(user_gesture) && web_may_open(url)) else { return 1 };
             // A link clicked with ⇧, which would open a window, shows in Peek, like Arc's.
             if target_disposition == WindowOpenDisposition::NEW_WINDOW {
                 post(Command::Peek(url));

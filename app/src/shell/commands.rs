@@ -77,6 +77,8 @@ fn run_command(command: Command) {
             }
         }
         (Command::OpenInBackground(url), _) => open_background_tab(&url),
+        // A link the pointer is on in the shown page, like a click on it (page_may_open).
+        (Command::OpenInSplit(url) | Command::OpenInLittle(url), _) if !web_may_open(&url) => {}
         (Command::OpenInSplit(url), _) => open_in_pane(&url),
         (Command::OpenInLittle(url), _) => open_little(Some(url)),
         (Command::AddPane(tab), _) => {

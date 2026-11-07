@@ -136,7 +136,7 @@ wrap_request_handler! {
             let anchored = STATE.with_borrow(|state| state.sidebar.is_pinned(tab) || state.sidebar.is_favorite(tab));
             let (url, current) = (CefString::from(&request.url()).to_string(), CefString::from(&frame.url()).to_string());
             let elsewhere = origin(&current).is_some() && origin(&url).is_some() && origin(&url) != origin(&current);
-            if !(anchored && elsewhere) {
+            if !(anchored && elsewhere && web_may_open(&url)) {
                 return 0;
             }
             post(Command::Peek(url));
@@ -166,6 +166,9 @@ wrap_request_handler! {
         /// shown, and one clicked with ⌘⇧ in a tab shown, like Arc's.
         fn on_open_urlfrom_tab(&self, _browser: Option<&mut Browser>, _frame: Option<&mut Frame>, target_url: Option<&CefString>, target_disposition: WindowOpenDisposition, user_gesture: i32) -> i32 {
             let Some(url) = target_url.map(CefString::to_string).filter(|_| user_gesture == 1) else { return 0 };
+            if !web_may_open(&url) {
+                return 1;
+            }
             if target_disposition == WindowOpenDisposition::NEW_WINDOW {
                 post(Command::Peek(url));
             } else if target_disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB {
@@ -415,6 +418,10 @@ wrap_context_menu_handler! {
             }
             let link = CefString::from(&params.link_url()).to_string();
             let image = CefString::from(&params.source_url()).to_string();
+            // A web page's link to an internal page goes nowhere, like a click on it.
+            if !web_may_open(&link) || !web_may_open(&image) {
+                return 1;
+            }
             let download = |url: String| {
                 SAVE_AS.with_borrow_mut(|urls| urls.insert(url.clone()));
                 if let Some(host) = browser.and_then(|browser| browser.host()) {
@@ -753,8 +760,8 @@ wrap_life_span_handler! {
             _extra_info: Option<&mut Option<DictionaryValue>>,
             _no_javascript_access: Option<&mut i32>,
         ) -> i32 {
-            if let Some(url) = target_url.filter(|_| popup_allowed(user_gesture)) {
-                open_tab(&url.to_string());
+            if let Some(url) = target_url.map(CefString::to_string).filter(|url| popup_allowed(user_gesture) && web_may_open(url)) {
+                open_tab(&url);
             }
             1
         }

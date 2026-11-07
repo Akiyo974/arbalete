@@ -46,6 +46,23 @@ pub(super) fn is_chrome_page(url: &str) -> bool {
     url.starts_with("chrome://")
 }
 
+/// Whether a web page may send the app to `url`, in a tab, Peek or a window: never to Chromium's
+/// own pages, the app's, DevTools or a page's source, which only the user and the app open.
+/// Spaces and controls inside a scheme are dropped first, like Chromium does.
+pub(super) fn web_may_open(url: &str) -> bool {
+    let url: String = url
+        .chars()
+        .filter(|c| !c.is_ascii_whitespace() && !c.is_ascii_control())
+        .collect();
+    let scheme = url
+        .split_once(':')
+        .map(|(scheme, _)| scheme.to_ascii_lowercase());
+    !matches!(
+        scheme.as_deref(),
+        Some("chrome" | "arbalete" | "devtools" | "view-source")
+    )
+}
+
 /// Whether the window of Chromium's own pages is the one in front.
 pub(super) fn chrome_page_focused() -> bool {
     CHROME_PAGE.with_borrow(|page| {
@@ -550,5 +567,25 @@ mod tests {
         );
         assert_eq!(origin("https://example.com"), Some("https://example.com"));
         assert_eq!(origin("about:blank"), None);
+    }
+
+    #[test]
+    fn web_pages_never_open_internal_pages() {
+        assert!(web_may_open("https://b.test/"));
+        assert!(web_may_open("chrome-extension://abc/welcome.html"));
+        assert!(web_may_open("about:blank"));
+        for url in [
+            "chrome://settings",
+            "CHROME://settings",
+            " chrome://settings",
+            "chr\tome://settings",
+            "chrome:settings",
+            "arbalete://settings",
+            "arbalete://ui/",
+            "devtools://devtools/bundled/inspector.html",
+            "view-source:chrome://settings",
+        ] {
+            assert!(!web_may_open(url), "{url}");
+        }
     }
 }
