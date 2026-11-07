@@ -35,7 +35,7 @@ fn main() {
 
     let root = data_dir();
     // The global context, under `Default`, serves only the app's own UI: each profile's pages use
-    // their own context (app/src/shell.rs).
+    // their own context (app/src/shell/profiles.rs).
     let settings = Settings {
         root_cache_path: CefString::from(root.to_str().unwrap()),
         cache_path: CefString::from(root.join("Default").to_str().unwrap()),
