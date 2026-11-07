@@ -252,6 +252,7 @@ struct BarStart: View {
                 barTool("xmark", "Stop") { model.run("stop") }
             } else {
                 barTool("arrow.clockwise", "Reload") { model.run("reload") }
+                    .disabled(model.activeTab == nil)
             }
         }
     }

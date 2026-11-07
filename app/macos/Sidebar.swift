@@ -169,6 +169,7 @@ struct NavButtons: View {
                 ) {
                     model.run(loading ? "stop" : "reload")
                 }
+                .disabled(model.activeTab == nil)
                 reloadOptions
             }
         }
@@ -222,11 +223,14 @@ struct MoreButton: View {
         .help("More")
         .popover(isPresented: _shown.projectedValue, arrowEdge: .bottom) {
             VStack(spacing: 0) {
-                row("arrow.clockwise", "Reload", "⌘R") { model.run("reload") }
-                row("arrow.clockwise.circle", "Force Reload", "⇧⌘R") { model.run("force-reload") }
-                row("arrow.triangle.2.circlepath", "Clear Cookies", nil) {
-                    model.run("choose-menu", "site", "clear-cookies")
+                Group {
+                    row("arrow.clockwise", "Reload", "⌘R") { model.run("reload") }
+                    row("arrow.clockwise.circle", "Force Reload", "⇧⌘R") { model.run("force-reload") }
+                    row("arrow.triangle.2.circlepath", "Clear Cookies", nil) {
+                        model.run("choose-menu", "site", "clear-cookies")
+                    }
                 }
+                .disabled(model.activeTab == nil)
                 row("sidebar.left", "Toggle Sidebar", "⌘S") { model.run("toggle-sidebar") }
             }
             .padding(8)
@@ -252,6 +256,7 @@ private struct MoreRow: View {
     let accent: Color
     let action: () -> Void
     private let _hovered = State<Bool>(initialValue: false)
+    @Environment(\.isEnabled) private var enabled
 
     var body: some View {
         Button(action: action) {
@@ -267,7 +272,7 @@ private struct MoreRow: View {
             .frame(height: 38)
             .background(
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(accent.opacity(_hovered.wrappedValue ? 0.18 : 0)))
+                    .fill(accent.opacity(_hovered.wrappedValue && enabled ? 0.18 : 0)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
