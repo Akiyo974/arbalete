@@ -88,11 +88,14 @@ struct FindView: View {
                     .fixedSize()
                     .padding(.horizontal, 6)
             }
-            IconButton(symbol: "chevron.up", label: "Previous match", size: 24) {
-                bar.find(forward: false)
-            }
-            IconButton(symbol: "chevron.down", label: "Next match", size: 24) {
-                bar.find(forward: true)
+            // Like Arc's, only once there are matches.
+            if let found = bar.found, found.count > 0 {
+                IconButton(symbol: "chevron.up", label: "Previous match", size: 24) {
+                    bar.find(forward: false)
+                }
+                IconButton(symbol: "chevron.down", label: "Next match", size: 24) {
+                    bar.find(forward: true)
+                }
             }
             IconButton(symbol: "xmark", label: "Close", size: 24) { bar.hide() }
         }
