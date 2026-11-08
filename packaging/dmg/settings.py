@@ -10,6 +10,8 @@ symlinks = {"Applications": "/Applications"}
 
 # From the repository's root, where mise runs it.
 background = "packaging/dmg/background.tiff"
+# The volume's icon on the desktop and in the Finder: the release app's.
+icon = "app/resources/mac/arbalete.icns"
 # The background's size, plus the title bar.
 window_rect = ((200, 200), (660, 428))
 show_status_bar = False
