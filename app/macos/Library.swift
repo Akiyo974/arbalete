@@ -819,7 +819,7 @@ struct ManageSpacesView: View {
 /// A Space's column among the Spaces, as Arc's, measured: 240 points wide; a Space with colors
 /// shows them at three quarters over a light gray, its titles dark, one without colors nothing
 /// under its titles; the name 33 points down, the tabs in 40-point rows from 70 points down,
-/// under the line that clears today's tabs of the displayed Space.
+/// under the line that clears today's tabs of the displayed Space, scrolling when they overflow.
 struct SpaceColumn: View {
     @ObservedObject var model: AppModel
     let space: Space
@@ -872,15 +872,22 @@ struct SpaceColumn: View {
                 .padding(.top, 10)
                 .padding(.bottom, 5)
             }
-            ForEach(tabs) { tab in
-                HStack(spacing: 10) {
-                    Favicon(url: tab.favicon, size: 16)
-                    Text(tab.label).font(.system(size: 14)).lineLimit(1)
+            // Like Arc's, whose column holds the Space's sidebar: the tabs scroll in it, between
+            // its header and its controls, however many they are.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(tabs) { tab in
+                        HStack(spacing: 10) {
+                            Favicon(url: tab.favicon, size: 16)
+                            Text(tab.label).font(.system(size: 14)).lineLimit(1)
+                        }
+                        .padding(.horizontal, 17)
+                        .frame(height: 40)
+                    }
                 }
-                .padding(.horizontal, 17)
-                .frame(height: 40)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Spacer(minLength: 0)
+            .scrollIndicators(.never)
             HStack {
                 Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
                     .font(.system(size: 12, weight: .medium))
