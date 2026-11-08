@@ -57,7 +57,9 @@ fn run_command(command: Command) {
             let has_tab = STATE.with_borrow(|state| state.sidebar.displayed().selected.is_some());
             set_sidebar(toggled(win().sidebar_mode.get(), has_tab));
         }
-        (Command::RevealSidebar, _) if win().sidebar_mode.get() == SidebarMode::Hidden => {
+        (Command::RevealSidebar, _)
+            if win().sidebar_mode.get() == SidebarMode::Hidden && !page_full_screen() =>
+        {
             set_sidebar(SidebarMode::Revealed);
         }
         (Command::ConcealSidebar, _) if win().sidebar_mode.get() == SidebarMode::Revealed => {

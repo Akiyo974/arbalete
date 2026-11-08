@@ -324,6 +324,7 @@ fn send_page_state() {
 /// Hides the shown page, which keeps running. Without one, the card shows its own color, an empty
 /// Space's panel.
 pub(super) fn hide_content() {
+    leave_page_full_screen();
     if let Some(shown) = win().shown.get() {
         show_page(shown, false);
     }

@@ -69,7 +69,8 @@ pub(super) fn show_split(focused: NodeId, tabs: &[NodeId], layout: SplitLayout) 
 /// index, and the empty page a tab dragged over it would open, without one.
 fn split_slots() -> Vec<(Option<usize>, Rect)> {
     let (tabs, layout) = win().split.borrow().clone();
-    let (Some(layout), Some(card)) = (layout, card_rect()) else {
+    // A page in full screen fills the card alone.
+    let (Some(layout), Some(card), false) = (layout, card_rect(), page_full_screen()) else {
         return Vec::new();
     };
     let room = if layout.stacked {
@@ -158,7 +159,12 @@ pub(super) fn preview_pane(index: Option<usize>) {
 pub(super) fn send_panes() {
     #[cfg(target_os = "macos")]
     {
-        let tabs = win().split.borrow().0.clone();
+        // A page in full screen shows alone.
+        let tabs = if page_full_screen() {
+            Vec::new()
+        } else {
+            win().split.borrow().0.clone()
+        };
         let focused = win().shown.get();
         let split = tabs
             .first()

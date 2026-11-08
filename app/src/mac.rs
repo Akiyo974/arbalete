@@ -1750,6 +1750,13 @@ pub fn full_screen(handle: *mut c_void) -> bool {
     })
 }
 
+/// Makes the window `handle` is, or is in, go full screen, or leave it.
+pub fn toggle_full_screen(handle: *mut c_void) {
+    if let Some(window) = ns_window(handle) {
+        window.toggleFullScreen(None);
+    }
+}
+
 /// Makes a window invisible and lets clicks through it, while a sheet it holds, like Chromium's
 /// folder picker, shows. `handle` is the window, or a view in it, as CEF gives it.
 pub fn hide_window(handle: *mut c_void) {

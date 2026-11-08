@@ -332,6 +332,16 @@ fn window_ready(window: MainWindow) {
 /// them on its next step.
 pub fn window_resized(id: u32) {
     focus(id);
+    // Leaving the window's full screen, as by its green button, the page leaves its own.
+    #[cfg(target_os = "macos")]
+    if page_full_screen()
+        && let Some(window) = win()
+            .window
+            .with_borrow(|w| w.as_ref().map(|w| w.window_handle()))
+        && !crate::mac::full_screen(window)
+    {
+        leave_page_full_screen();
+    }
     if win().slide.with_borrow(Option::is_none) {
         place_card();
         place_reveal();

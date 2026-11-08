@@ -5,12 +5,61 @@ use super::*;
 /// Whether the card is square, without margins: a page alone in full screen, like Arc's.
 pub(super) fn square_card() -> bool {
     #[cfg(target_os = "macos")]
-    return win().shown.get().is_some()
-        && win().split.borrow().0.is_empty()
-        && win()
+    return page_full_screen()
+        || win().shown.get().is_some()
+            && win().split.borrow().0.is_empty()
+            && win()
+                .window
+                .with_borrow(|window| window.as_ref().map(|w| w.window_handle()))
+                .is_some_and(crate::mac::full_screen);
+}
+
+/// Whether the shown page fills the window, gone full screen like a video.
+pub(super) fn page_full_screen() -> bool {
+    win().page_full_screen.get().is_some()
+}
+
+/// Like Arc's, a page going full screen, like a video, fills the screen: the window goes full
+/// screen with it, out of the sidebar's way and the card's margins, and back as the page leaves
+/// it. Chromium only fills the page's view with it.
+pub(super) fn fill_with_page(full: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        let window = win()
             .window
-            .with_borrow(|window| window.as_ref().map(|w| w.window_handle()))
-            .is_some_and(crate::mac::full_screen);
+            .with_borrow(|window| window.as_ref().map(|w| w.window_handle()));
+        let Some(window) = window else { return };
+        let window_full = crate::mac::full_screen(window);
+        if full {
+            if page_full_screen() {
+                return;
+            }
+            win().page_full_screen.set(Some(!window_full));
+            if !window_full {
+                crate::mac::toggle_full_screen(window);
+            }
+        } else {
+            let Some(entered) = win().page_full_screen.take() else {
+                return;
+            };
+            if entered && window_full {
+                crate::mac::toggle_full_screen(window);
+            }
+        }
+        place_card();
+        place_native_sidebar();
+    }
+}
+
+/// Takes the shown page out of full screen, as it hides or the window leaves full screen.
+pub(super) fn leave_page_full_screen() {
+    if !page_full_screen() {
+        return;
+    }
+    if let Some(host) = content().and_then(|page| page.host()) {
+        host.exit_fullscreen(1);
+    }
+    fill_with_page(false);
 }
 
 /// The width of the page's strip the library's Spaces leave at the window's right, like Arc's.
@@ -143,9 +192,10 @@ pub(super) fn toggle_toolbar() {
 }
 
 /// Whether the bar above the page shows: in toolbar mode, or over a site in developer mode, as
-/// Arc's developer bar.
+/// Arc's developer bar; never over a page in full screen.
 pub(super) fn page_toolbar() -> bool {
-    app_settings().show_toolbar || selected_url().is_some_and(|url| developer_mode(&url))
+    (app_settings().show_toolbar || selected_url().is_some_and(|url| developer_mode(&url)))
+        && !page_full_screen()
 }
 
 /// Shows or hides the bar above the page as `page_toolbar` says, but over a split, which shows
@@ -430,6 +480,7 @@ fn place_native_sidebar() {
     };
     let mode = win().sidebar_mode.get();
     let frame = match mode {
+        _ if page_full_screen() => None,
         SidebarMode::Shown => Some(Rect {
             x: 0,
             y: 0,

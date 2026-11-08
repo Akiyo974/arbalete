@@ -392,6 +392,9 @@ struct Win {
     site_closed: Cell<Option<Instant>>,
     extension_popup: RefCell<Option<ExtensionPopup>>,
     sidebar_mode: Cell<SidebarMode>,
+    /// The shown page fills the window, as it went full screen, like a video; and whether the
+    /// window went full screen with it, to leave it with it (fill_with_page).
+    page_full_screen: Cell<Option<bool>>,
     /// The Command Bar edits the address over the docked sidebar's url bar.
     over_url_bar: Cell<bool>,
     /// The window's least width while the Command Bar shows over the page (minimum_size).
@@ -464,6 +467,7 @@ impl Win {
             site_closed: Cell::new(None),
             extension_popup: RefCell::new(None),
             sidebar_mode: Cell::new(SidebarMode::Shown),
+            page_full_screen: Cell::new(None),
             over_url_bar: Cell::new(false),
             overlay_min_width: Cell::new(None),
             adding_pane: Cell::new(false),
@@ -574,6 +578,8 @@ impl SidebarMode {
         // Like Arc's, a page alone in full screen fills the room, without margins.
         let margin = if square_card() { 0 } else { CARD_MARGIN };
         let left = match self {
+            // A page in full screen fills the window, over the sidebar.
+            _ if page_full_screen() => 0,
             // Like Arc's, the docked sidebar's own margin parts its content from the page.
             SidebarMode::Shown => docked_width(),
             SidebarMode::Floating => sidebar_width(),
