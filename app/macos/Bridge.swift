@@ -266,6 +266,12 @@ final class AppModel: ObservableObject {
             swipe += dx
         default:
             let threshold = swipeThreshold
+            // Like Arc's, the library, which a swipe rightward opens, closes leftward.
+            if libraryShown {
+                if swipe < -threshold { closeLibrary() }
+                swipe = 0
+                return
+            }
             // Like Arc's, a new Space's form only goes back, rightward, which drops the Space:
             // only its button creates it.
             if let draft = draftSpace {

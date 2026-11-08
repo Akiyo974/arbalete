@@ -620,12 +620,14 @@ pub(super) fn send_window_width() {
 }
 
 /// Whether a point at `x` from the window's left edge is over the sidebar, shown or revealed,
-/// where swipes page between Spaces. The library's Spaces over the window scroll instead: they
-/// are left by their back arrow or a click on a Space.
+/// where swipes page between Spaces. The library's Spaces over the window scroll instead; like
+/// Arc's, a swipe over its sections' rail, left of them, closes it (LibraryView).
 #[cfg(target_os = "macos")]
 pub fn is_over_sidebar(x: f64) -> bool {
+    /// The library's rail of sections, as wide as LibraryView draws it.
+    const LIBRARY_RAIL: f64 = 112.0;
     if fills_window() {
-        return false;
+        return x < LIBRARY_RAIL;
     }
     let width = match win().sidebar_mode.get() {
         SidebarMode::Hidden => return false,
