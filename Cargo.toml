@@ -10,4 +10,4 @@ cef = "=156.0.0"
 # Which of amenophis/cef-codecs' builds of that CEF to take: its release cef-<CEF>-codecs.<revision>.
 # The revision goes up whenever the build changes for the same CEF, like a patch of cef-builds'.
 [workspace.metadata]
-cef-codecs-revision = 2
+cef-codecs-revision = 3
