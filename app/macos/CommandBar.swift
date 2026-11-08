@@ -202,8 +202,11 @@ final class CommandBar: ObservableObject {
     /// Whether a Little Arbalete window's bar shows.
     var littleShown = false
 
-    /// The tab switcher's picked tile, in its window's Space's color.
-    var tile: Color { app.switcherTile }
+    /// The tab switcher's picked tile on a light panel and on a dark one, from its window's
+    /// Space's colors.
+    var tiles: (light: Color, dark: Color) {
+        (app.switcherTile(dark: false), app.switcherTile(dark: true))
+    }
 
     /// Its panel shows above its window's page.
     var isShown: Bool {
@@ -418,7 +421,7 @@ struct CommandBarView: View {
     var body: some View {
         if let switching = bar.switching {
             TabSwitcher(
-                switching: switching, snapshots: bar.snapshots.mapValues(\.image), tile: bar.tile)
+                switching: switching, snapshots: bar.snapshots.mapValues(\.image), tiles: bar.tiles)
                 .background(lightVeil)
         } else {
             let rows = bar.rows
@@ -538,7 +541,7 @@ struct SuggestionsBanner: View {
 struct TabSwitcher: View {
     let switching: Switching
     let snapshots: [Int: NSImage]
-    let tile: Color
+    let tiles: (light: Color, dark: Color)
 
     var body: some View {
         ScrollViewReader { scroll in
@@ -546,7 +549,7 @@ struct TabSwitcher: View {
                 HStack(spacing: 0) {
                     ForEach(Array(switching.tabs.enumerated()), id: \.element.id) { index, tab in
                         SwitcherTab(
-                            tab: tab, snapshot: snapshots[tab.id], picked: index == switching.picked, tile: tile)
+                            tab: tab, snapshot: snapshots[tab.id], picked: index == switching.picked, tiles: tiles)
                             .id(index)
                     }
                 }
@@ -563,12 +566,12 @@ struct TabSwitcher: View {
 }
 
 /// A tab of the switcher, like Arc's: its page's last picture above its icon and title, 15
-/// points semibold, padded 12; the picked one on a tile rounded 8, in the Space's color.
+/// points semibold, padded 12; the picked one on a tile rounded 8, in the Space's colors.
 struct SwitcherTab: View {
     let tab: Switching.Card
     let snapshot: NSImage?
     let picked: Bool
-    let tile: Color
+    let tiles: (light: Color, dark: Color)
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
@@ -602,8 +605,7 @@ struct SwitcherTab: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                // Like Arc's: whole on a dark panel, at half on a light one.
-                .fill(tile.opacity(picked ? (scheme == .dark ? 1 : 0.5) : 0)))
+                .fill((scheme == .dark ? tiles.dark : tiles.light).opacity(picked ? 1 : 0)))
     }
 }
 

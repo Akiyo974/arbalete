@@ -53,6 +53,12 @@ struct ThemePalette {
         (mix(shadedDark, "#000000", 0.3), mix(shadedDark, "#ffffff", 0.15))
     }
 
+    /// A picked row's tile over a light background (SemanticColorPalette.focus), and a hovered
+    /// one's over a dark background (hover), as Arc derives them (themeSemanticColorPalette): the
+    /// dark shade at half over white; the dark shade at 35% over white at 20%.
+    var focus: Color { over(shadedDark, 0.5, "#ffffff") }
+    var hover: Color { over(shadedDark, 0.35, "#ffffff", 0.2) }
+
     /// The color that stands out most on the theme's background (maxContrastColor), which marks
     /// where a drop lands.
     func strongest(dark: Bool) -> String { dark ? tintedLight : shadedDark }
@@ -82,6 +88,16 @@ func mix(_ color: String, _ base: String, _ share: Double) -> String {
     let (from, to) = (channels(color), channels(base))
     let mixed = zip(from, to).map { Int((($0 * share + $1 * (1 - share)) * 255).rounded()) }
     return "#" + mixed.map { String(format: "%02x", $0) }.joined()
+}
+
+/// `top` at `alpha` over `bottom` at `under`, both #rrggbb, composited as Arc composites its
+/// palette's colors: in sRGB, the result as opaque as both together.
+func over(_ top: String, _ alpha: Double, _ bottom: String, _ under: Double = 1) -> Color {
+    let opacity = alpha + under * (1 - alpha)
+    let rgb = zip(channels(top), channels(bottom)).map {
+        ($0 * alpha + $1 * under * (1 - alpha)) / opacity
+    }
+    return Color(red: rgb[0], green: rgb[1], blue: rgb[2], opacity: opacity)
 }
 
 func color(_ hex: String) -> Color {

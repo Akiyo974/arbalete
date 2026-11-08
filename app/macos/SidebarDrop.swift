@@ -46,11 +46,12 @@ extension AppModel {
         return color(systemDark() ? "#2f38ff" : "#333ce8")
     }
 
-    /// The tab switcher's picked tile, like Arc's: the Space's own color; without colors, the
-    /// focused page's blue.
-    var switcherTile: Color {
-        guard let lead = space?.theme.colors.first else { return focusColor }
-        return color(lead)
+    /// The tab switcher's picked tile, like Arc's: its palette's focus color, at half, on a light
+    /// panel, its hover color on a dark one (ThemePalette.focus and .hover); without colors,
+    /// black's.
+    func switcherTile(dark: Bool) -> Color {
+        let palette = ThemePalette(space?.theme.colors.first ?? "#000000")
+        return dark ? palette.hover : palette.focus.opacity(0.5)
     }
 
     /// The color of a Space's main buttons, like Arc's: its theme's, or its blue without colors.
