@@ -126,6 +126,13 @@ wrap_task! {
 /// How far a new window opens from the one it opens from, down and right, like macOS cascades.
 const CASCADE: i32 = 22;
 
+/// Closes the focused window, as its close button does: the last one quits.
+pub(super) fn close_window() {
+    if let Some(window) = win().window.with_borrow(Clone::clone) {
+        window.close();
+    }
+}
+
 /// Moves the pages of the window `id`, which closes, into another window, hidden.
 fn hand_pages_over(id: u32) {
     // Their containers, out of the window closing with them.

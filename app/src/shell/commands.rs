@@ -137,6 +137,8 @@ fn run_command(command: Command) {
                 close_little(id);
             }
         }
+        // Like Arc's, ⌘W closes the window once its Space shows no tab.
+        (Command::Close(None), _) if selected().is_none() => close_window(),
         (Command::Close(tab), _) => close_tab(tab),
         (Command::CloseInspector(tab), _) => close_inspector(tab),
         (Command::ResizePane(index, point), _) => resize_panes(index, point),

@@ -107,7 +107,7 @@ private let shortcutDescriptions: [String: String] = [
     "newLittle": "Opens Little Arbalete, a small window for a quick look.",
     "openLittleInSpace": "Moves the Little Arbalete page or the Peek in front into a Space.",
     "openLocation": "Opens the Command Bar on the address of the page shown.",
-    "closeTab": "Closes the tab shown, or the Peek or Little Arbalete window in front.",
+    "closeTab": "Closes the tab shown, or the Peek or Little Arbalete window in front; without a tab, the window.",
     "performClose": "Closes the window in front.",
     "reopenTab": "Opens again the tab closed last.",
     "togglePin": "Pins the tab shown, or unpins it.",
