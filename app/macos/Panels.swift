@@ -38,7 +38,7 @@ final class FindBar: ObservableObject {
         }
     }
 
-    /// Gives the field the keyboard, its text selected, as ⌘F does in Arc's.
+    /// Gives the field the keyboard, its text selected, as ⌘F and the arrows do in Arc's.
     func focus() {
         guard let field, let window = field.window else { return }
         window.makeFirstResponder(field)
@@ -55,17 +55,22 @@ final class FindBar: ObservableObject {
     }
 }
 
+/// Like Arc's, measured from a recording: a 13-point magnifying glass 10 points in, the field 32
+/// points from the edge, then the count, the arrows once there are matches, and the close button:
+/// 24-point buttons, 4 points from the edge and not dimmed at rest.
 struct FindView: View {
     @ObservedObject var bar: FindBar
+    /// Measured on Arc's in a dark appearance, opaque; the blur shows in a light one.
+    private static let background = Color.ink((0xFFFFFF, 0), (0x101928, 1))
+    /// Arc's FindInPageError, in Display P3.
+    private static let error = Color(.displayP3, red: 0.788, green: 0.2, blue: 0.2)
 
     var body: some View {
-        // Like Arc's: a 15-point magnifying glass in a 26-point box, 3 points in, the field 32
-        // points from the edge, and the buttons 3 points from the other.
         HStack(spacing: 0) {
-            Image(systemName: "magnifyingglass").font(.system(size: 15))
+            Image(systemName: "magnifyingglass").font(.system(size: 13))
                 .foregroundStyle(.secondary)
-                .frame(width: 26, height: 26)
-                .padding(.trailing, 3)
+                .frame(width: 20)
+                .padding(.trailing, 6)
             KeyField(
                 placeholder: "Find in page", size: 13,
                 attach: { bar.field = $0 },
@@ -82,25 +87,37 @@ struct FindView: View {
                     return true
                 })
             if let found = bar.found {
-                Text(found.count > 0 ? "\(found.active > 0 ? "\(found.active)" : "–")/\(found.count)" : "No results")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
-                    .padding(.horizontal, 6)
-            }
-            // Like Arc's, only once there are matches.
-            if let found = bar.found, found.count > 0 {
-                IconButton(symbol: "chevron.up", label: "Previous match", size: 24) {
-                    bar.find(forward: false)
+                if found.count > 0 {
+                    Text("\(found.active)/\(found.count)")
+                        .font(.system(size: 12, weight: .medium))
+                        .fixedSize()
+                        .padding(.horizontal, 8)
+                    HStack(spacing: 2) {
+                        IconButton(symbol: "arrow.up", label: "Previous match", size: 24, symbolSize: 12, rest: 1) {
+                            bar.find(forward: false)
+                            bar.focus()
+                        }
+                        IconButton(symbol: "arrow.down", label: "Next match", size: 24, symbolSize: 12, rest: 1) {
+                            bar.find(forward: true)
+                            bar.focus()
+                        }
+                    }
+                    .padding(.trailing, 8)
+                } else {
+                    Text("No matches".uppercased())
+                        .font(.system(size: 10, weight: .semibold))
+                        .kerning(0.5)
+                        .foregroundStyle(Self.error)
+                        .fixedSize()
+                        .padding(.horizontal, 8)
                 }
-                IconButton(symbol: "chevron.down", label: "Next match", size: 24) {
-                    bar.find(forward: true)
-                }
             }
-            IconButton(symbol: "xmark", label: "Close", size: 24) { bar.hide() }
+            IconButton(symbol: "xmark", label: "Close", size: 24, symbolSize: 12, rest: 1) { bar.hide() }
         }
-        .padding(.horizontal, 3)
+        .padding(.leading, 6)
+        .padding(.trailing, 4)
         .frame(maxHeight: .infinity)
+        .background(Self.background, in: .rect(cornerRadius: 5))
     }
 }
 

@@ -158,6 +158,9 @@ final class Surface {
         inner.isHidden = false
     }
 
+    /// Takes its edge away, like Arc's find bar.
+    func edgeless() { border.isHidden = true }
+
     /// Casts its shadow `radius` points around it, `drop` points down, at `opacity`.
     func shadow(opacity: Float, radius: CGFloat, drop: CGFloat) {
         holder.layer?.shadowOpacity = opacity

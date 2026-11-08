@@ -663,7 +663,10 @@ final class NativeWindow {
         }
         let find = FindBar(app: app)
         findBar = find
-        let findSurface = Surface(in: window, radius: 10) { FindView(bar: find) }
+        // Like Arc's, measured from a recording: rounded 5, without an edge. A click out of it
+        // leaves it open.
+        let findSurface = Surface(in: window, radius: 5) { FindView(bar: find) }
+        findSurface.edgeless()
         findSurface.takesKeyboard = true
         findSurface.shown = { [weak find] in find?.focus() }
         surfaces["find"] = findSurface

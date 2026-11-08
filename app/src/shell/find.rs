@@ -2,9 +2,10 @@
 
 use super::*;
 
-/// The find bar's size, and its margin from the card's top right corner (app/macos/Panels.swift).
+/// The find bar's size, and its margin from the card's top right corner (app/macos/Panels.swift):
+/// Arc's, measured from a recording.
 const FIND_SIZE: Size = Size {
-    width: 380,
+    width: 300,
     height: 32,
 };
 const FIND_MARGIN: i32 = 10;

@@ -298,6 +298,8 @@ struct IconButton: View {
     var symbolSize: CGFloat = 13
     /// What it opens shows: it looks hovered, like Arc's.
     var active = false
+    /// Its opacity while not hovered.
+    var rest = 0.75
     let action: () -> Void
     private let _hovered = State<Bool>(initialValue: false)
     private var hovered: Bool {
@@ -316,7 +318,7 @@ struct IconButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .opacity(lit ? 1 : 0.75)
+        .opacity(lit ? 1 : rest)
         .onHover { hovered = $0 }
         .help(label)
         .accessibilityLabel(label)
