@@ -201,20 +201,24 @@ final class OnboardingModel: ObservableObject {
             guard let imported = try? JSONDecoder().decode(Imported.self, from: detail) else { return }
             self.imported = imported
             adding = Set(imported.extensions)
-            importing = false
             // Arc's Spaces skip the Spaces step: the first one's theme shows from the next.
             if let first = spaces.first { pick(first) }
             next()
+            // The import step slides away still showing the import running, not its list again.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                MainActor.assumeIsolated { self?.importing = false }
+            }
         default: break
         }
     }
 
     func runImport() {
         let picked = choices.filter(\.checked)
-        guard !picked.isEmpty, let sources else { return }
+        // The step still shows as it slides away after a quick import: a click then is not another.
+        guard !importing, step == .importing, !picked.isEmpty, let sources else { return }
         arcOnly = picked.allSatisfy { sources.browsers[$0.browser].arc }
         importing = true
-        app.run("import", jsonObject(picked))
+        runAfterShowing { $0.app.run("import", jsonObject(picked)) }
     }
 
     /// Adds the extensions picked once the flow ends, in the main window, where Chromium asks to
@@ -313,6 +317,19 @@ final class OnboardingModel: ObservableObject {
         guard let index = shortcuts.firstIndex(where: { $0.same(pressed) }) else { return false }
         withAnimation(.spring(duration: 0.2)) { _ = done.insert(index) }
         return true
+    }
+}
+
+extension ObservableObject {
+    /// Runs `action` once the change just made has shown: the import's last part, opening the
+    /// profiles imported, holds the main thread for a moment, which would freeze the window before
+    /// it shows the import running.
+    func runAfterShowing(_ action: @escaping @MainActor (Self) -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            MainActor.assumeIsolated {
+                if let self { action(self) }
+            }
+        }
     }
 }
 

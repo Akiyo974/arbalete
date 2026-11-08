@@ -122,9 +122,12 @@ pub(super) fn close_import() {
 /// long to read: the window keeps answering meanwhile, and the assistant shows the import
 /// running. A second import while one runs is ignored.
 pub(super) fn run_import(choices: Vec<Choice>) {
-    if IMPORTING.replace(true) {
+    // The browsers found are used by an import: asked again before they are found anew, it has
+    // nothing to import, and must not tell the welcome flow it imported nothing.
+    if IMPORTING.get() || SOURCES.with_borrow(Vec::is_empty) {
         return;
     }
+    IMPORTING.set(true);
     let browsers = SOURCES.take();
     thread::spawn(move || {
         let sources = import::read(&browsers, &choices);
@@ -232,8 +235,8 @@ fn apply_import(sources: Vec<import::Source>, found: &Found) {
         eprintln!("cannot import {error}");
     }
     let pages = imported.histories.iter().map(|(_, entries)| entries.len());
+    let pages: usize = pages.sum();
     let offered = offered_extensions(&imported.targets, found);
-    send_imported(&spaces, pages.sum(), &offered);
     let histories = imported.histories.into_iter();
     let histories: Vec<_> = histories
         .map(|(profile, entries)| (profile_dir(profile), entries))
@@ -257,6 +260,9 @@ fn apply_import(sources: Vec<import::Source>, found: &Found) {
     if shown.is_some() {
         show_selected();
     }
+    // Last: opening the first Space imported holds the main thread for a moment, which would
+    // freeze the welcome flow midway to its next step.
+    send_imported(&spaces, pages, &offered);
 }
 
 /// Merges entries into the history of the profile in `dir`, with a connection of its own: the

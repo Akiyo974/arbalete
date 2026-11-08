@@ -115,9 +115,9 @@ final class ImportModel: ObservableObject {
 
     func run() {
         let picked = choices.filter(\.checked)
-        guard !picked.isEmpty else { return }
+        guard !importing, !picked.isEmpty else { return }
         importing = true
-        app.run("import", jsonObject(picked))
+        runAfterShowing { $0.app.run("import", jsonObject(picked)) }
     }
 
     /// Adds the extensions picked, then closes: Chromium asks to confirm each one.
