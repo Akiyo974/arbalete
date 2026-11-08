@@ -106,7 +106,7 @@ pub(super) fn send_settings() {
 /// Gives the menu's shortcuts the keys the settings changed.
 pub fn apply_shortcuts() {
     #[cfg(target_os = "macos")]
-    crate::mac::apply_shortcuts(&app_settings().shortcuts);
+    crate::mac::apply_shortcuts(&app_settings());
 }
 
 /// Changes a shortcut from the settings, saves it, and applies it to the menu.
@@ -156,11 +156,17 @@ pub(super) fn set_setting(setting: Setting, on: bool) {
         Setting::RestoreSession => settings.restore_session = on,
         Setting::SuspendTabs => settings.suspend_tabs = on,
         Setting::PictureInPicture => settings.picture_in_picture = on,
+        Setting::NinthSidebarItem => settings.ninth_sidebar_item = on,
+        Setting::CountFavorites => settings.count_favorites = on,
     }
     SETTINGS.set(settings);
     save_settings();
     if setting == Setting::LittleHotkey {
         apply_little_hotkey();
+    }
+    // ⌘9's title says which item it goes to.
+    if setting == Setting::NinthSidebarItem {
+        apply_shortcuts();
     }
     send_settings();
     if !on && setting == Setting::SuspendTabs {

@@ -154,13 +154,17 @@ private let shortcutDescriptions: [String: String] = [
     "terminate": "Quits Arbalete.",
 ]
 
-private func description(_ shortcut: Shortcut) -> String {
+private func description(_ shortcut: Shortcut, _ settings: SettingsDetail.General) -> String {
     let base = shortcut.id.replacingOccurrences(of: "-alt", with: "")
     if let text = shortcutDescriptions[base] { return text }
     if base.hasPrefix("sidebarItem-") {
-        return base == "sidebarItem-9"
-            ? "Shows the last tab, at the bottom of the sidebar."
-            : "Shows the sidebar's item number \(base.dropFirst("sidebarItem-".count)), counting the favorites first."
+        if base == "sidebarItem-9" && !settings.ninthSidebarItem {
+            return "Shows the last tab, at the bottom of the sidebar."
+        }
+        let number = base.dropFirst("sidebarItem-".count)
+        return settings.countFavorites
+            ? "Shows the sidebar's item number \(number), counting the favorites first."
+            : "Shows the sidebar's item number \(number), counting from the first tab under the favorites."
     }
     if base.hasPrefix("space-") {
         return "Slides to the Space number \(base.dropFirst("space-".count))."
@@ -241,7 +245,7 @@ struct ShortcutsSettings: View {
                     settings: settings, model: model, all: all,
                     customized: found.filter(\.changed), defaults: found.filter { !$0.changed })
                 ShortcutDetail(
-                    settings: settings, model: model, all: all,
+                    settings: settings, model: model, all: all, general: detail.settings,
                     shortcut: all.first { $0.id == model.picked })
             }
             .padding(.top, 20)
@@ -519,11 +523,13 @@ private struct Halo: View {
 }
 
 /// Beside the list, like Arc's: the picked shortcut's keys as large tiles, its name, what it does
-/// and who takes it first; without one picked, what shortcuts are for.
+/// and who takes it first, then, for ⌘9, which item it goes to; without one picked, what
+/// shortcuts are for.
 private struct ShortcutDetail: View {
     @ObservedObject var settings: SettingsModel
     @ObservedObject var model: ShortcutsModel
     let all: [Shortcut]
+    let general: SettingsDetail.General
     let shortcut: Shortcut?
 
     var body: some View {
@@ -537,7 +543,7 @@ private struct ShortcutDetail: View {
                 KeyTiles(tiles: tiles, conflict: conflict && !recording)
                 Text(shortcut.title).font(.system(size: 15, weight: .bold))
                     .padding(.top, 22)
-                Text(description(shortcut)).font(.system(size: 12))
+                Text(description(shortcut, general)).font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -560,6 +566,19 @@ private struct ShortcutDetail: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 10)
+                }
+                // Like Arc's: ⌘9 goes to the last item or to the ninth, and only then may leave
+                // the favorites out of the count.
+                if shortcut.id == "sidebarItem-9" {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("Go to the ninth item.", isOn: binding(general.ninthSidebarItem, "ninth-sidebar-item"))
+                        if general.ninthSidebarItem {
+                            Toggle("Count the favorites first.", isOn: binding(general.countFavorites, "count-favorites"))
+                        }
+                    }
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: 12))
+                    .padding(.top, 14)
                 }
                 Spacer(minLength: 12)
                 HStack(spacing: 4) {
@@ -590,6 +609,10 @@ private struct ShortcutDetail: View {
             }
         }
         .frame(width: 200, height: 450, alignment: .topLeading)
+    }
+
+    private func binding(_ value: Bool, _ key: String) -> Binding<Bool> {
+        Binding(get: { value }, set: { settings.app.run("set-setting", key, $0) })
     }
 }
 

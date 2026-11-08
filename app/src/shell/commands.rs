@@ -39,7 +39,9 @@ fn run_command(command: Command) {
         (Command::NextTab, _) => select_found(|s| s.next_tab(s.displayed().id, true)),
         (Command::PreviousTab, _) => select_found(|s| s.next_tab(s.displayed().id, false)),
         (Command::SidebarItem(number), _) => {
-            select_found(|s| s.sidebar_item(s.displayed().id, number, true, false))
+            let settings = app_settings();
+            let (favorites, ninth) = (settings.count_favorites, settings.ninth_sidebar_item);
+            select_found(|s| s.sidebar_item(s.displayed().id, number, favorites, ninth))
         }
         (Command::ShowSpace(id), _) => show_space(id),
         (Command::SpaceNumber(number), _) => show_found_space(|s| s.space_at(number)),

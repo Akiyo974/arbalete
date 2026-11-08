@@ -90,6 +90,8 @@ pub enum Setting {
     RestoreSession,
     SuspendTabs,
     PictureInPicture,
+    NinthSidebarItem,
+    CountFavorites,
 }
 
 /// A panel of the page's developer tools (Command::DevToolsPanel).
@@ -229,8 +231,9 @@ pub enum Command {
     /// Shows the next tab in the sidebar, or the previous one.
     NextTab,
     PreviousTab,
-    /// Shows the sidebar's item at a number, from 1 to 9: the favorites, then the pinned and the
-    /// "Today" tabs.
+    /// Shows the sidebar's item at a number, from 1 to 9: the favorites, unless the settings leave
+    /// them out, then the pinned and the "Today" tabs; 9 is the last item, unless the settings
+    /// say the ninth.
     SidebarItem(usize),
     ShowOverlay,
     HideOverlay,
@@ -654,6 +657,10 @@ mod tests {
         assert_eq!(
             parse(r#"{"name":"set-setting","args":["warn-before-quit",true]}"#),
             Some(Command::SetSetting(Setting::WarnBeforeQuit, true))
+        );
+        assert_eq!(
+            parse(r#"{"name":"set-setting","args":["ninth-sidebar-item",true]}"#),
+            Some(Command::SetSetting(Setting::NinthSidebarItem, true))
         );
     }
 

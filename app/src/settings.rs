@@ -35,6 +35,10 @@ pub struct Settings {
     /// The sites turned in or out of developer mode, by host (and port), unlike their default
     /// (developer_mode in app/src/shell/settings_ui.rs).
     pub developer_sites: BTreeMap<String, bool>,
+    /// ⌘9 goes to the sidebar's ninth item rather than to its last, like Arc's choice on ⌘9.
+    pub ninth_sidebar_item: bool,
+    /// ⌘1 to ⌘9 count the favorites before the Space's tabs.
+    pub count_favorites: bool,
     /// The shortcuts changed in the settings, by menu action (mac::apply_shortcuts).
     pub shortcuts: BTreeMap<String, ShortcutOverride>,
     /// Where the recent items over the library's button come from, like Arc's "Show media from:":
@@ -95,6 +99,8 @@ impl Default for Settings {
             sidebar_width: 260,
             sidebar_hint_shown: false,
             developer_sites: BTreeMap::new(),
+            ninth_sidebar_item: false,
+            count_favorites: true,
             shortcuts: BTreeMap::new(),
             media_sources: vec!["captures".into(), "downloads".into()],
             onboarded: false,
@@ -145,6 +151,8 @@ mod tests {
             sidebar_width: 320,
             sidebar_hint_shown: true,
             developer_sites: BTreeMap::from([("example.com".into(), true)]),
+            ninth_sidebar_item: true,
+            count_favorites: false,
             media_sources: vec!["desktop".into()],
             onboarded: true,
             shortcuts: BTreeMap::from([(
@@ -164,6 +172,7 @@ mod tests {
         assert!(load(&path).restore_session && load(&path).suspend_tabs);
         assert!(load(&path).picture_in_picture);
         assert_eq!(load(&path).sidebar_width, 260);
+        assert!(!load(&path).ninth_sidebar_item && load(&path).count_favorites);
         fs::write(&path, "not json").unwrap();
         assert_eq!(load(&path), Settings::default());
         // The unreadable file is kept aside, so the next save does not overwrite it.

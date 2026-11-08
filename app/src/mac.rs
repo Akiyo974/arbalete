@@ -2,7 +2,7 @@
 
 use crate::command::{Command, Zoom};
 use crate::menu::{Action, Entry};
-use crate::settings::{Keys, Priority, ShortcutOverride};
+use crate::settings::{Keys, Priority, Settings};
 use crate::swipe::{Phase, Scroll};
 use block2::RcBlock;
 use cef::application_mac::{CefAppProtocol, CrAppControlProtocol, CrAppProtocol};
@@ -985,8 +985,10 @@ fn shortcut_id(item: &NSMenuItem) -> Option<String> {
 }
 
 /// Gives the menu's changeable shortcuts the keys the settings changed, or their defaults, and
-/// names each, which the settings' Shortcuts pane reads from the menu.
-pub fn apply_shortcuts(overrides: &BTreeMap<String, ShortcutOverride>) {
+/// names each, which the settings' Shortcuts pane reads from the menu; ⌘9's title says which item
+/// it goes to.
+pub fn apply_shortcuts(settings: &Settings) {
+    let overrides = &settings.shortcuts;
     let mtm = MainThreadMarker::new().expect("main thread");
     let Some(menu) = NSApp(mtm).mainMenu() else {
         return;
@@ -1001,6 +1003,12 @@ pub fn apply_shortcuts(overrides: &BTreeMap<String, ShortcutOverride>) {
             continue;
         };
         item.setIdentifier(Some(&NSString::from_str(&id)));
+        if id == "sidebarItem-9" {
+            item.setTitle(&NSString::from_str(&sidebar_item_title(
+                9,
+                settings.ninth_sidebar_item,
+            )));
+        }
         let default = DEFAULT_SHORTCUTS.with_borrow_mut(|defaults| {
             defaults
                 .entry(id.clone())
@@ -1324,14 +1332,9 @@ fn tabs_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
         NSMenuItem::separatorItem(mtm),
     ];
     for number in 1..=9 {
-        let title = if number == 9 {
-            "Last Sidebar Item".to_string()
-        } else {
-            format!("Sidebar Item {number}")
-        };
         let item = item(
             mtm,
-            &NSString::from_str(&title),
+            &NSString::from_str(&sidebar_item_title(number, false)),
             sel!(arbaleteSidebarItem:),
             &NSString::from_str(&number.to_string()),
         );
@@ -1339,6 +1342,16 @@ fn tabs_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
         items.push(item);
     }
     items
+}
+
+/// The title of the menu item going to the sidebar's item at `number`: ⌘9 goes to the last one,
+/// unless to the `ninth`.
+fn sidebar_item_title(number: isize, ninth: bool) -> String {
+    if number == 9 && !ninth {
+        "Last Sidebar Item".to_string()
+    } else {
+        format!("Sidebar Item {number}")
+    }
 }
 
 /// Next and previous Space with ⌘⌥→ and ⌘⌥←, as Spaces sit side by side, then the Spaces by

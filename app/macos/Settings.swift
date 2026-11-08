@@ -15,6 +15,8 @@ struct SettingsDetail: Decodable {
         var suspendTabs: Bool
         var pictureInPicture: Bool
         var awakeSites: [String]
+        var ninthSidebarItem: Bool
+        var countFavorites: Bool
     }
     struct Choice: Decodable, Identifiable, Hashable {
         var id: String
