@@ -229,8 +229,9 @@ pub enum Command {
     /// Shows the next tab in the sidebar, or the previous one.
     NextTab,
     PreviousTab,
-    /// Shows a favorite by its number, from 1 to 9.
-    Favorite(usize),
+    /// Shows the sidebar's item at a number, from 1 to 9: the favorites, then the pinned and the
+    /// "Today" tabs.
+    SidebarItem(usize),
     ShowOverlay,
     HideOverlay,
     /// Shows the Command Bar holding the selected tab's address, to edit it.

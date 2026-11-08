@@ -157,10 +157,10 @@ private let shortcutDescriptions: [String: String] = [
 private func description(_ shortcut: Shortcut) -> String {
     let base = shortcut.id.replacingOccurrences(of: "-alt", with: "")
     if let text = shortcutDescriptions[base] { return text }
-    if base.hasPrefix("favorite-") {
-        return base == "favorite-9"
-            ? "Shows the last of the Space's favorites."
-            : "Shows the Space's favorite number \(base.dropFirst("favorite-".count))."
+    if base.hasPrefix("sidebarItem-") {
+        return base == "sidebarItem-9"
+            ? "Shows the last tab, at the bottom of the sidebar."
+            : "Shows the sidebar's item number \(base.dropFirst("sidebarItem-".count)), counting the favorites first."
     }
     if base.hasPrefix("space-") {
         return "Slides to the Space number \(base.dropFirst("space-".count))."

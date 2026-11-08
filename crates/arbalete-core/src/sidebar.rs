@@ -1422,20 +1422,28 @@ impl Sidebar {
         tabs.get(next).or(tabs.first()).copied()
     }
 
-    /// The favorite at `number`, counted from 1, of the Space's profile; 9 is the last one, as
-    /// ⌘9 is in browsers.
-    pub fn favorite(&self, space: SpaceId, number: usize) -> Option<NodeId> {
-        let favorites = &self.nodes[&self.favorites_of(space)?].children;
-        let favorite = if number == 9 {
-            favorites.last().copied()
-        } else {
-            favorites.get(number.checked_sub(1)?).copied()
-        }?;
-        // A split favorite shows with its first tab, the others alongside.
-        if self.is_split(favorite) {
-            return self.nodes[&favorite].children.first().copied();
+    /// The tab of the item at `number`, counted from 1 in the order the sidebar shows its items,
+    /// as ⌘1 to ⌘9 go to them: the favorites of the Space's profile when `favorites`, then its
+    /// pinned tabs, those of expanded folders included, then its "Today" tabs. A split counts as
+    /// one item, shown with its first tab. 9 is the last item, unless `ninth`.
+    pub fn sidebar_item(
+        &self,
+        space: SpaceId,
+        number: usize,
+        favorites: bool,
+        ninth: bool,
+    ) -> Option<NodeId> {
+        let mut items = Vec::new();
+        if favorites {
+            self.push_items(self.favorites_of(space)?, &mut items);
         }
-        Some(favorite)
+        let space = self.space(space).ok()?;
+        self.push_items(space.pinned, &mut items);
+        self.push_items(space.today, &mut items);
+        if number == 9 && !ninth {
+            return items.last().copied();
+        }
+        items.get(number.checked_sub(1)?).copied()
     }
 
     /// The favorites of the Space's profile, which its Space shows.
@@ -1943,6 +1951,19 @@ impl Sidebar {
                 NodeKind::Folder { expanded: true, .. } | NodeKind::Split => {
                     self.push_visible_tabs(id, tabs)
                 }
+                _ => {}
+            }
+        }
+    }
+
+    /// The sidebar's items under `parent` as ⌘1 to ⌘9 count them: each tab, a split by its first
+    /// tab, and the items of an expanded folder.
+    fn push_items(&self, parent: NodeId, items: &mut Vec<NodeId>) {
+        for &id in &self.nodes[&parent].children {
+            match &self.nodes[&id].kind {
+                NodeKind::Tab(_) => items.push(id),
+                NodeKind::Split => items.extend(self.nodes[&id].children.first()),
+                NodeKind::Folder { expanded: true, .. } => self.push_items(id, items),
                 _ => {}
             }
         }
@@ -3367,27 +3388,55 @@ mod tests {
     }
 
     #[test]
-    fn finds_a_favorite_by_number_and_the_last_one_with_9() {
+    fn numbers_the_favorites_then_the_pinned_then_the_today_tabs() {
         let mut sidebar = Sidebar::default();
         let home = home(&sidebar);
         let favorites = sidebar.profiles()[0].favorites;
-        assert_eq!(sidebar.favorite(home.id, 1), None);
-        assert_eq!(sidebar.favorite(home.id, 9), None);
-        let tabs: Vec<_> = (0..3)
-            .map(|i| sidebar.open_tab(home.id, &i.to_string()).unwrap())
-            .collect();
-        for &tab in &tabs {
-            sidebar.move_node(tab, favorites, usize::MAX).unwrap();
-        }
-        assert_eq!(sidebar.favorite(home.id, 1), Some(tabs[0]));
-        assert_eq!(sidebar.favorite(home.id, 3), Some(tabs[2]));
-        assert_eq!(sidebar.favorite(home.id, 4), None);
-        assert_eq!(sidebar.favorite(home.id, 9), Some(tabs[2]));
-        assert_eq!(sidebar.favorite(home.id, 0), None);
+        let item = |sidebar: &Sidebar, number| sidebar.sidebar_item(home.id, number, true, false);
+        assert_eq!(item(&sidebar, 1), None);
+        assert_eq!(item(&sidebar, 9), None);
+        let favorite = sidebar.open_tab(home.id, "favorite").unwrap();
+        sidebar.move_node(favorite, favorites, 0).unwrap();
+        let open = folder_with_tab(&mut sidebar, &home, "open");
+        let shut = folder_with_tab(&mut sidebar, &home, "shut");
+        sidebar.toggle_folder(shut.0).unwrap();
+        let pinned = sidebar.open_tab(home.id, "pinned").unwrap();
+        sidebar.move_node(pinned, home.pinned, usize::MAX).unwrap();
+        let today = sidebar.open_tab(home.id, "today").unwrap();
+        sidebar.move_node(today, home.today, usize::MAX).unwrap();
+        // The folders themselves and the tabs of a collapsed one are not counted.
+        assert_eq!(item(&sidebar, 1), Some(favorite));
+        assert_eq!(item(&sidebar, 2), Some(open.1));
+        assert_eq!(item(&sidebar, 3), Some(pinned));
+        assert_eq!(item(&sidebar, 4), Some(today));
+        assert_eq!(item(&sidebar, 5), None);
+        assert_eq!(item(&sidebar, 0), None);
+        // Without the favorites, the pinned tabs come first.
+        assert_eq!(sidebar.sidebar_item(home.id, 1, false, false), Some(open.1));
+        assert_eq!(sidebar.sidebar_item(home.id, 3, false, false), Some(today));
+        assert_eq!(sidebar.sidebar_item(SpaceId(999), 1, true, false), None);
     }
 
     #[test]
-    fn finds_a_split_favorite_by_its_first_tab() {
+    fn goes_to_the_last_item_with_9_or_to_the_ninth() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let tabs: Vec<_> = (0..10)
+            .map(|i| sidebar.open_tab(home.id, &i.to_string()).unwrap())
+            .collect();
+        for &tab in &tabs {
+            sidebar.move_node(tab, home.today, usize::MAX).unwrap();
+        }
+        assert_eq!(sidebar.sidebar_item(home.id, 9, true, false), Some(tabs[9]));
+        assert_eq!(sidebar.sidebar_item(home.id, 9, true, true), Some(tabs[8]));
+        sidebar.remove(tabs[9]).unwrap();
+        sidebar.remove(tabs[8]).unwrap();
+        assert_eq!(sidebar.sidebar_item(home.id, 9, true, false), Some(tabs[7]));
+        assert_eq!(sidebar.sidebar_item(home.id, 9, true, true), None);
+    }
+
+    #[test]
+    fn counts_a_split_once_by_its_first_tab() {
         let mut sidebar = Sidebar::default();
         let home = home(&sidebar);
         let favorites = sidebar.profiles()[0].favorites;
@@ -3395,9 +3444,11 @@ mod tests {
         let right = sidebar.open_tab(home.id, "right").unwrap();
         let split = sidebar.split(right, left).unwrap();
         sidebar.move_node(split, favorites, usize::MAX).unwrap();
+        let today = sidebar.open_tab(home.id, "today").unwrap();
         let first = sidebar.nodes[&split].children[0];
-        assert_eq!(sidebar.favorite(home.id, 1), Some(first));
-        assert_eq!(sidebar.favorite(home.id, 9), Some(first));
+        assert_eq!(sidebar.sidebar_item(home.id, 1, true, false), Some(first));
+        assert_eq!(sidebar.sidebar_item(home.id, 2, true, false), Some(today));
+        assert_eq!(sidebar.sidebar_item(home.id, 9, true, false), Some(today));
     }
 
     #[test]
@@ -3414,8 +3465,11 @@ mod tests {
         assert_eq!(work_favorites, sidebar.profiles()[1].favorites);
         sidebar.move_node(personal, favorites, 0).unwrap();
         sidebar.move_node(job, work_favorites, 0).unwrap();
-        assert_eq!(sidebar.favorite(home.id, 1), Some(personal));
-        assert_eq!(sidebar.favorite(office, 1), Some(job));
+        assert_eq!(
+            sidebar.sidebar_item(home.id, 1, true, false),
+            Some(personal)
+        );
+        assert_eq!(sidebar.sidebar_item(office, 1, true, false), Some(job));
         assert_eq!(sidebar.profile_of(job), Some(work));
         assert_eq!(sidebar.favorites_of(SpaceId(999)), None);
     }

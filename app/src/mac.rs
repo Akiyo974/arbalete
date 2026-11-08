@@ -155,11 +155,11 @@ define_class!(
             crate::shell::run(Command::PreviousTab);
         }
 
-        // The item's tag is the favorite's number.
-        #[unsafe(method(arbaleteFavorite:))]
-        fn favorite(&self, sender: Option<&NSMenuItem>) {
+        // The item's tag is the sidebar item's number.
+        #[unsafe(method(arbaleteSidebarItem:))]
+        fn sidebar_item(&self, sender: Option<&NSMenuItem>) {
             if let Some(item) = sender {
-                crate::shell::run(Command::Favorite(item.tag() as usize));
+                crate::shell::run(Command::SidebarItem(item.tag() as usize));
             }
         }
 
@@ -1288,7 +1288,7 @@ pub fn sidebar_shown(view: *mut c_void, shown: bool) {
 }
 
 /// Next and previous tab with ⌘⌥↓ and ⌘⌥↑, or ⌘} and ⌘{, Clear Today with ⇧⌘K, then the
-/// favorites with ⌘1 to ⌘9.
+/// sidebar's items with ⌘1 to ⌘9, the last one with ⌘9.
 fn tabs_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
     let mut items = vec![
         arrow_item(
@@ -1325,14 +1325,14 @@ fn tabs_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
     ];
     for number in 1..=9 {
         let title = if number == 9 {
-            "Last Favorite".to_string()
+            "Last Sidebar Item".to_string()
         } else {
-            format!("Favorite {number}")
+            format!("Sidebar Item {number}")
         };
         let item = item(
             mtm,
             &NSString::from_str(&title),
-            sel!(arbaleteFavorite:),
+            sel!(arbaleteSidebarItem:),
             &NSString::from_str(&number.to_string()),
         );
         item.setTag(number);
