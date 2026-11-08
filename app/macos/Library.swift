@@ -831,14 +831,17 @@ struct ManageSpacesView: View {
 }
 
 /// A Space's column among the Spaces, as Arc's, measured: 240 points wide; a Space with colors
-/// shows them at three quarters over a light gray, one without colors nothing
-/// under its titles; the name 25 points down, then its rows, which scroll when they overflow.
+/// shows them at three quarters over a light gray, or over a near black when dark, one without
+/// colors nothing under its titles; the name 25 points down, then its rows, which scroll when
+/// they overflow.
 struct SpaceColumn: View {
     @ObservedObject var model: AppModel
     let space: Space
     let index: Int
 
     private var colored: Bool { !space.theme.colors.isEmpty }
+    /// Like Arc's, a dark theme's column is dark, its text light.
+    private var dark: Bool { colored && isDark(space.theme) }
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 9) }
     /// Its frame, from the top left corner of the window it shows in.
     private let _frame = State<CGRect>(initialValue: .zero)
@@ -854,14 +857,15 @@ struct SpaceColumn: View {
         let today = displayed ? (model.state?.pages.first { $0.space == space.id }?.today ?? []) : []
         // Like Arc's, measured: the rows in the theme's titles' color, whole; the header and the
         // controls in it at 55%.
-        let ink = space.theme.colors.first.map { color(ThemePalette($0).titles.light) } ?? Ink.primary
+        let titles = space.theme.colors.first.map { ThemePalette($0).titles }
+        let ink = titles.map { color(dark ? $0.dark : $0.light) } ?? Ink.primary
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 9) {
                 if let emoji = space.emoji { SpaceGlyph(icon: emoji, size: 16) }
                 Text(space.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                 Spacer(minLength: 0)
                 // Like Arc's, the profile's name in full: the title gives way.
-                ProfileChip(name: profileName) { model.run("menu", ["space-profile": space.id]) }
+                ProfileChip(name: profileName, dark: dark) { model.run("menu", ["space-profile": space.id]) }
                     .fixedSize()
                 IconButton(symbol: "paintbrush.pointed.fill", label: "Edit Theme Color", size: 24) {
                     // Like Arc's, beside the column.
@@ -926,7 +930,7 @@ struct SpaceColumn: View {
         .background {
             if colored {
                 ZStack {
-                    Color(white: 0.765)
+                    Color(white: dark ? 0.06 : 0.765)
                     Tint.colors(space.theme.colors).opacity(0.75)
                 }
                 .clipShape(shape)
@@ -980,6 +984,7 @@ private struct SpaceColumnRow: View {
 /// creates one.
 private struct ProfileChip: View {
     let name: String
+    var dark = false
     let action: () -> Void
 
     var body: some View {
@@ -991,7 +996,7 @@ private struct ProfileChip: View {
             .padding(.leading, 4)
             .padding(.trailing, 7)
             .frame(height: 22)
-            .background(Capsule().fill(.white.opacity(0.35)))
+            .background(Capsule().fill(.white.opacity(dark ? 0.08 : 0.35)))
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
