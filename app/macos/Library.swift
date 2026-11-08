@@ -831,7 +831,7 @@ struct ManageSpacesView: View {
 }
 
 /// A Space's column among the Spaces, as Arc's, measured: 240 points wide; a Space with colors
-/// shows them at three quarters over a light gray, its titles dark, one without colors nothing
+/// shows them at three quarters over a light gray, one without colors nothing
 /// under its titles; the name 25 points down, then its rows, which scroll when they overflow.
 struct SpaceColumn: View {
     @ObservedObject var model: AppModel
@@ -852,7 +852,9 @@ struct SpaceColumn: View {
         // one, under the line that clears them.
         let displayed = space.id == model.state?.space
         let today = displayed ? (model.state?.pages.first { $0.space == space.id }?.today ?? []) : []
-        let ink: Color = colored ? .black.opacity(0.4) : Ink.primary
+        // Like Arc's, measured: the rows in the theme's titles' color, whole; the header and the
+        // controls in it at 55%.
+        let ink = space.theme.colors.first.map { color(ThemePalette($0).titles.light) } ?? Ink.primary
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 9) {
                 if let emoji = space.emoji { SpaceGlyph(icon: emoji, size: 16) }
@@ -870,6 +872,7 @@ struct SpaceColumn: View {
                 }
                 .opacity(0.75)
             }
+            .foregroundStyle(ink.opacity(0.55))
             .padding(.leading, 17)
             .padding(.trailing, 14)
             // Every column's at the same height, whatever its icon.
@@ -913,6 +916,7 @@ struct SpaceColumn: View {
                     model.run("menu", ["space": space.id])
                 }
             }
+            .foregroundStyle(ink.opacity(0.55))
             .padding(.horizontal, 10)
             .padding(.bottom, 10)
         }
