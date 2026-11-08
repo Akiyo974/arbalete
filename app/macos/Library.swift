@@ -832,7 +832,7 @@ struct ManageSpacesView: View {
 
 /// A Space's column among the Spaces, as Arc's, measured: 240 points wide; a Space with colors
 /// shows them at three quarters over a light gray, its titles dark, one without colors nothing
-/// under its titles; the name 33 points down, the tabs in 40-point rows from 70 points down,
+/// under its titles; the name 25 points down, the tabs in 40-point rows from 70 points down,
 /// under the line that clears today's tabs of the displayed Space, scrolling when they overflow.
 struct SpaceColumn: View {
     @ObservedObject var model: AppModel
@@ -856,8 +856,10 @@ struct SpaceColumn: View {
             HStack(spacing: 9) {
                 if let emoji = space.emoji { SpaceGlyph(icon: emoji, size: 16) }
                 Text(space.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                Spacer()
+                Spacer(minLength: 0)
+                // Like Arc's, the profile's name in full: the title gives way.
                 ProfileChip(name: profileName) { model.run("menu", ["space-profile": space.id]) }
+                    .fixedSize()
                 IconButton(symbol: "paintbrush.pointed.fill", label: "Edit Theme Color", size: 24) {
                     // Like Arc's, beside the column.
                     let column = inMainWindow(_frame.wrappedValue)
@@ -869,8 +871,10 @@ struct SpaceColumn: View {
             }
             .padding(.leading, 17)
             .padding(.trailing, 14)
+            // Every column's at the same height, whatever its icon.
             .frame(height: 24)
-            .padding(.top, 21)
+            .padding(.top, 13)
+            .padding(.bottom, 8)
             if !tabs.isEmpty {
                 HStack(spacing: 6) {
                     Rectangle().fill(ink.opacity(0.15)).frame(height: 1)
@@ -947,19 +951,21 @@ struct SpaceColumn: View {
     }
 }
 
-/// A Space's profile in its column's header, like Arc's chip: a face and the profile's name, whose
-/// menu picks another profile or creates one.
+/// A Space's profile in its column's header, like Arc's chip, measured: a 14-point face and the
+/// profile's name in full, 11 points, in a 22-point capsule, whose menu picks another profile or
+/// creates one.
 private struct ProfileChip: View {
     let name: String
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: "face.smiling.inverse").font(.system(size: 12))
-                Text(name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+            HStack(spacing: 3) {
+                Image(systemName: "face.smiling.inverse").font(.system(size: 14))
+                Text(name).font(.system(size: 11, weight: .semibold)).lineLimit(1)
             }
-            .padding(.horizontal, 8)
+            .padding(.leading, 4)
+            .padding(.trailing, 7)
             .frame(height: 22)
             .background(Capsule().fill(.white.opacity(0.35)))
             .contentShape(Capsule())
