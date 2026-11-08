@@ -7,6 +7,7 @@ import AppKit
 private let pillHeight: CGFloat = 24
 /// How far the pill keeps from the page's edges.
 private let pillInset: CGFloat = 10
+/// How far its text field keeps from its sides, like Arc's: the field's own 2 points add to it.
 private let pillPadding: CGFloat = 9
 /// Its widest until it has shown the same address a while.
 private let compactWidth: CGFloat = 400
@@ -248,17 +249,17 @@ final class StatusPill: NSView {
         let widest = compact ? min(compactWidth, room) : room
         // Measured as drawn, the field's own size following its frame once it truncates.
         let text = label.attributedStringValue.size()
-        let width = min(ceil(text.width) + 2 * pillPadding, widest)
+        // The field keeps its text 2 points from its edges.
+        let width = min(ceil(text.width) + 4 + 2 * pillPadding, widest)
         let x = trailing ? page.bounds.maxX - pillInset - width : pillInset
         let y = page.isFlipped ? page.bounds.maxY - pillInset - pillHeight : pillInset
         frame = NSRect(x: x, y: y, width: width, height: pillHeight)
         effect.frame = bounds
         tint.frame = bounds
-        // The field keeps its text 2 points from its edges.
         let height = ceil(text.height)
         label.frame = NSRect(
-            x: pillPadding - 2, y: (pillHeight - height) / 2,
-            width: max(0, width - 2 * pillPadding + 4), height: height)
+            x: pillPadding, y: (pillHeight - height) / 2,
+            width: max(0, width - 2 * pillPadding), height: height)
         layer?.shadowPath = CGPath(
             roundedRect: bounds, cornerWidth: pillHeight / 2, cornerHeight: pillHeight / 2,
             transform: nil)
