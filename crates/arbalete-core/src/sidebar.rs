@@ -131,6 +131,19 @@ impl Default for Theme {
     }
 }
 
+impl Theme {
+    /// A new Space's theme until one is picked: the logo's colors (assets/icon.svg) at one
+    /// saturation and lightness, which the theme picker's pad shows as they are.
+    pub fn logo() -> Self {
+        Theme {
+            colors: vec!["#a352ff".into(), "#5289ff".into(), "#ff5252".into()],
+            mode: Mode::Auto,
+            intensity: 0.8,
+            noise: 0.4,
+        }
+    }
+}
+
 /// A palette color shows faintly, as Spaces showed their color before themes.
 impl From<Color> for Theme {
     fn from(color: Color) -> Self {
@@ -929,7 +942,7 @@ impl Sidebar {
                 id,
                 title: title.to_string(),
                 emoji: None,
-                theme: Theme::default(),
+                theme: Theme::logo(),
                 profile,
                 pinned,
                 today,
@@ -2803,7 +2816,7 @@ mod tests {
         assert_eq!((created.title.as_str(), created.profile), ("Mail", work));
         assert_eq!(
             (created.emoji.as_deref(), &created.theme),
-            (None, &Theme::from(Color::Purple))
+            (None, &Theme::logo())
         );
         assert_eq!(sidebar.spaces().last().unwrap().id, space);
         assert_eq!(sidebar.create_space(" ", work), Err(Error::EmptyTitle));

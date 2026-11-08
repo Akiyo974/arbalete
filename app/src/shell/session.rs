@@ -83,24 +83,23 @@ pub fn keep_broken(path: &Path) {
 }
 
 /// Loads the sidebar saved by the previous session; a file that cannot be read is set aside, so the
-/// next save does not overwrite it. The first launch offers to import the browsers found, if any, before the start page.
+/// next save does not overwrite it. Until the welcome flow ran, a sidebar as it first is shows it
+/// instead of the start page.
 pub(super) fn restore(path: PathBuf) {
-    let first_launch = match store::load(&path) {
+    match store::load(&path) {
         Ok(Some((sidebar, windows))) => {
             STATE.with_borrow_mut(|state| state.sidebar = sidebar);
             // The other windows open again with the first one.
             if app_settings().restore_session {
                 RESTORED_WINDOWS.set(windows);
             }
-            false
         }
-        Ok(None) => true,
+        Ok(None) => {}
         Err(error) => {
             eprintln!("cannot restore the session: {error:?}");
             keep_broken(&path);
-            false
         }
-    };
+    }
     SESSION_FILE.set(Some(path));
     // Without restoring the session, every Space starts without "Today" tabs.
     if !app_settings().restore_session {
@@ -112,8 +111,10 @@ pub(super) fn restore(path: PathBuf) {
         });
     }
     STATE.with_borrow_mut(|state| favicon::sweep(&mut state.sidebar, profile_dir));
-    if first_launch && !browsers::detect(&crate::user_home()).is_empty() {
-        IMPORT_AT_LAUNCH.set(true);
+    // Users of an earlier version have changed their sidebar: they never get it at launch.
+    let untouched = STATE.with_borrow(|state| is_untouched(&state.sidebar));
+    if !app_settings().onboarded && untouched {
+        ONBOARD_AT_LAUNCH.set(true);
     } else if STATE.with_borrow_mut(|state| active_tab(&mut state.sidebar).is_none()) {
         open_tab(START_URL);
     }

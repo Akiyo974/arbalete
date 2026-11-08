@@ -463,6 +463,16 @@ pub enum Command {
     MoveSpace(SpaceId, usize),
     /// Attaches a Space to another profile.
     SetSpaceProfile(SpaceId, ProfileId),
+    /// Shows the welcome flow, from the Help menu or the Command Bar.
+    ShowOnboarding,
+    /// The welcome flow is listening, or came back to the front: send it the browsers found.
+    OnboardingReady,
+    /// Adds a Space for work in a profile of its own, from the welcome flow.
+    AddWorkSpace,
+    /// The welcome flow ran to its end or was skipped: it no longer shows at launch.
+    FinishOnboarding,
+    /// The welcome flow's window closed before its end: it shows again at the next launch.
+    CloseOnboarding,
     /// Opens the import assistant.
     ShowImport,
     /// The import assistant is listening: send it the browsers found.

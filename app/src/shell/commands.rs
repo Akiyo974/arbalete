@@ -346,6 +346,11 @@ fn run_command(command: Command) {
         (Command::MoveSpace(id, index), _) => {
             let _ = update_sidebar(|sidebar| sidebar.move_space(id, index));
         }
+        (Command::ShowOnboarding, _) => show_onboarding(),
+        (Command::OnboardingReady, _) => send_onboarding(),
+        (Command::AddWorkSpace, _) => add_work_space(),
+        (Command::FinishOnboarding, _) => finish_onboarding(),
+        (Command::CloseOnboarding, _) => close_onboarding(),
         (Command::ShowImport, _) => show_import(),
         (Command::ImportReady, _) => send_sources(),
         (Command::CloseImport, _) => close_import(),

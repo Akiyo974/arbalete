@@ -781,6 +781,8 @@ public func event(
         switch surface {
         case "settings":
             settingsModel?.handle(name, detail)
+        case "onboarding":
+            onboardingModel?.handle(name, detail)
         case "little":
             littleCommandBar?.handle(name, detail)
         case let surface where surface.hasPrefix("little/"):

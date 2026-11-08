@@ -407,6 +407,11 @@ define_class!(
             crate::shell::run(Command::FlipPanes(None));
         }
 
+        #[unsafe(method(arbaleteWelcome:))]
+        fn welcome(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::ShowOnboarding);
+        }
+
         #[unsafe(method(arbaleteMakeDefaultBrowser:))]
         fn make_default_browser(&self, _sender: Option<&AnyObject>) {
             crate::native::make_default_browser();
@@ -911,6 +916,15 @@ pub fn setup_menu() {
             ],
         ),
         (ns_string!("Window"), window_menu(mtm)),
+        (
+            ns_string!("Help"),
+            vec![item(
+                mtm,
+                ns_string!("Welcome to Arbalete…"),
+                sel!(arbaleteWelcome:),
+                ns_string!(""),
+            )],
+        ),
     ] {
         let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), title);
         for item in items {
@@ -922,6 +936,10 @@ pub fn setup_menu() {
         // AppKit lists the open windows in it.
         if title == ns_string!("Window") {
             NSApp(mtm).setWindowsMenu(Some(&menu));
+        }
+        // AppKit adds its search field to it.
+        if title == ns_string!("Help") {
+            NSApp(mtm).setHelpMenu(Some(&menu));
         }
     }
     NSApp(mtm).setMainMenu(Some(&menu_bar));

@@ -13,7 +13,7 @@ const FULL_DISK_ACCESS: &str =
     "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
 
 /// The first launch's sidebar, which nothing has changed yet: an import replaces it.
-fn is_untouched(sidebar: &Sidebar) -> bool {
+pub(super) fn is_untouched(sidebar: &Sidebar) -> bool {
     *sidebar == Sidebar::default()
 }
 
@@ -50,9 +50,15 @@ pub(super) fn show_import() {
     sync_native_surfaces();
 }
 
-/// Sends the import assistant the browsers to list, and the profiles to merge them into: none
-/// on the first launch, whose sidebar the import replaces.
+/// Sends the import assistant the browsers to list and the profiles to merge them into.
 pub(super) fn send_sources() {
+    let detail = sources();
+    IMPORT_VIEW.with(|view| dispatch(view, "arbalete:sources", &detail.to_string()));
+}
+
+/// The browsers found, as the import assistant and the welcome flow list them, and the profiles
+/// to merge them into: none on the first launch, whose sidebar the import replaces.
+pub(super) fn sources() -> serde_json::Value {
     let profiles = STATE.with_borrow(|state| {
         if is_untouched(&state.sidebar) {
             return Vec::new();
@@ -77,8 +83,7 @@ pub(super) fn send_sources() {
         });
         browsers.collect::<Vec<_>>()
     });
-    let detail = json!({ "browsers": browsers, "profiles": profiles });
-    IMPORT_VIEW.with(|view| dispatch(view, "arbalete:sources", &detail.to_string()));
+    json!({ "browsers": browsers, "profiles": profiles })
 }
 
 /// Makes the import assistant's place, once.
@@ -146,7 +151,7 @@ wrap_task! {
 /// a thread of their own.
 fn apply_import(sources: Vec<import::Source>) {
     IMPORTING.set(false);
-    let (imported, shown) = update_sidebar(|sidebar| {
+    let (imported, shown, spaces) = update_sidebar(|sidebar| {
         let mut new = if is_untouched(sidebar) {
             Sidebar::empty()
         } else {
@@ -169,15 +174,18 @@ fn apply_import(sources: Vec<import::Source>) {
                 new.select(space, tab).expect("a tab of the Space");
             }
         }
+        let spaces: Vec<_> = new.spaces()[before..].iter().map(|s| s.id).collect();
         // Nothing was imported into an empty sidebar: it keeps the default one.
         if !new.spaces().is_empty() {
             *sidebar = new;
         }
-        (imported, shown)
+        (imported, shown, spaces)
     });
     for error in &imported.errors {
         eprintln!("cannot import {error}");
     }
+    let pages = imported.histories.iter().map(|(_, entries)| entries.len());
+    send_imported(&spaces, pages.sum());
     let histories = imported.histories.into_iter();
     let histories: Vec<_> = histories
         .map(|(profile, entries)| (profile_dir(profile), entries))

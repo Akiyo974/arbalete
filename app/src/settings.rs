@@ -41,6 +41,8 @@ pub struct Settings {
     /// "documents", "desktop", "screenshots", "captures" and "downloads". The folders ask macOS
     /// for access, so only the app's own are on at first.
     pub media_sources: Vec<String>,
+    /// The welcome flow ran to its end or was skipped: it no longer shows at launch.
+    pub onboarded: bool,
 }
 
 /// A shortcut changed from its default, like Arc's: other keys, none, or who takes them first.
@@ -95,6 +97,7 @@ impl Default for Settings {
             developer_sites: BTreeMap::new(),
             shortcuts: BTreeMap::new(),
             media_sources: vec!["captures".into(), "downloads".into()],
+            onboarded: false,
         }
     }
 }
@@ -143,6 +146,7 @@ mod tests {
             sidebar_hint_shown: true,
             developer_sites: BTreeMap::from([("example.com".into(), true)]),
             media_sources: vec!["desktop".into()],
+            onboarded: true,
             shortcuts: BTreeMap::from([(
                 "newTab".into(),
                 ShortcutOverride {

@@ -88,6 +88,7 @@ public func openWindow(
         let app = AppModel(window: id, send: send)
         nativeWindows[id] = NativeWindow(window: main.window, content: content, app: app)
         if settingsModel == nil { settingsModel = SettingsModel(app: app) }
+        if onboardingModel == nil { onboardingModel = OnboardingModel(app: app) }
     }
 }
 

@@ -44,6 +44,7 @@ let actions: [(title: String, command: String)] = [
     ("Manage Extensions", command("manage-extensions")),
     ("Add Extensions", command("show-store")),
     ("Import Browser Data", command("show-import")),
+    ("Show Welcome", command("show-onboarding")),
     ("Settings", command("show-settings")),
     ("View Page Source", command("view-source")),
     ("Developer Tools", command("dev-tools")),

@@ -300,7 +300,11 @@ fn window_ready(window: MainWindow) {
     let theme = place_view(no_width, 1);
     win().theme_view.set(Some(theme));
     win().theme.set(Some(Spot::default()));
-    window.show();
+    // The welcome flow shows alone: the window comes once it ends.
+    let onboarding = ONBOARD_AT_LAUNCH.take();
+    if !onboarding {
+        window.show();
+    }
     #[cfg(target_os = "macos")]
     {
         // What the web sidebar asks for once ready (Command::Ready).
@@ -312,8 +316,8 @@ fn window_ready(window: MainWindow) {
     place_reveal();
     // Only the selected tab loads: the others wait until they are selected.
     show_selected();
-    if IMPORT_AT_LAUNCH.take() {
-        show_import();
+    if onboarding {
+        show_onboarding();
     }
     for link in PENDING_LINKS.take() {
         open_link(Some(link));

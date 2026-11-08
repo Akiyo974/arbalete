@@ -276,7 +276,7 @@ extension NSView {
 /// or a swipe, from three fingers on a trackpad when System Settings swipes between pages so, or
 /// from a mouse whose software turns its buttons into swipes, like Logi Options+. As in Chrome,
 /// a swipe whose deltaX is positive goes back.
-private func historyCommand(_ event: NSEvent) -> String? {
+func historyCommand(_ event: NSEvent) -> String? {
     switch event.type {
     case .otherMouseDown where event.buttonNumber == 3: "back"
     case .otherMouseDown where event.buttonNumber == 4: "forward"

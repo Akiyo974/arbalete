@@ -49,6 +49,7 @@ mod inspector;
 mod layout;
 mod little;
 mod menus;
+mod onboarding;
 mod overlay;
 mod pages;
 mod peek;
@@ -79,6 +80,7 @@ use inspector::*;
 pub use layout::*;
 pub use little::*;
 pub use menus::*;
+use onboarding::*;
 use overlay::*;
 pub use pages::*;
 pub use peek::*;
@@ -208,8 +210,8 @@ thread_local! {
     static SOURCES: RefCell<Vec<browsers::Browser>> = const { RefCell::new(Vec::new()) };
     /// An import is reading the browsers' data, on a thread of its own.
     static IMPORTING: Cell<bool> = const { Cell::new(false) };
-    /// The first launch shows the import assistant with the window, instead of the start page.
-    static IMPORT_AT_LAUNCH: Cell<bool> = const { Cell::new(false) };
+    /// The first launch shows the welcome flow with the window, instead of the start page.
+    static ONBOARD_AT_LAUNCH: Cell<bool> = const { Cell::new(false) };
     static STATE: RefCell<UiState> = RefCell::default();
     /// Where the sidebar is saved, once the previous session is restored.
     static SESSION_FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
@@ -1412,7 +1414,7 @@ mod tests {
         assert_eq!(json["space"], serde_json::json!(work));
         let theme = |color: &str| serde_json::json!({ "colors": [color], "mode": "auto", "intensity": 0.25, "noise": 0.0 });
         let spaces = serde_json::json!([
-            { "id": home, "title": "Home", "emoji": null, "theme": theme("#6e56cf"), "profile": profile, "pinned": [] },
+            { "id": home, "title": "Home", "emoji": null, "theme": { "colors": ["#a352ff", "#5289ff", "#ff5252"], "mode": "auto", "intensity": 0.8, "noise": 0.4 }, "profile": profile, "pinned": [] },
             { "id": work, "title": "Work", "emoji": "💼", "theme": theme("#3e7bfa"), "profile": profile, "pinned": [
                 { "id": folder, "title": "Docs", "folder": true },
                 { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false, "asleep": false, "open": false, "developer": false },
