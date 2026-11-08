@@ -207,6 +207,11 @@ a:focus-visible, summary:focus-visible {
 .tiles dd { margin: 4px 0 0; font-weight: 650; }
 .compact { padding-bottom: 48px; }
 
+/* Not supported yet */
+
+.gaps { margin: 0; padding-left: 20px; max-width: 760px; display: flex; flex-direction: column; gap: 10px; color: var(--muted); }
+.gaps strong { color: var(--text); font-weight: 650; }
+
 /* Roadmap */
 
 .roadmap { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px; }
