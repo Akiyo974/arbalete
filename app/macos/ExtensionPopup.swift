@@ -8,6 +8,9 @@ import AppKit
 /// How far the popup stands under the site controls' button (PANEL_GAP in
 /// app/src/shell/site_controls.rs).
 private let buttonGap: CGFloat = 6
+/// How far the popup stays from the main window's edges, as the page card does (CARD_MARGIN in
+/// app/src/shell.rs).
+private let windowMargin: CGFloat = 10
 
 /// The window an extension's popup shows in: closing it closes the popup.
 private final class ExtensionPopupWindow: NSWindow, NSWindowDelegate {
@@ -49,7 +52,9 @@ public func extensionPopupView(_ id: UInt32) -> UnsafeMutableRawPointer? {
 
 /// Shows the extension popup at its page's size, `width` by `height`: under the site controls'
 /// button, in the window `id`'s points from its top left corner, if it has one, else over the
-/// window's middle; with the keyboard.
+/// window's middle; with the keyboard. Like Arc's, it stays inside the window: under a button
+/// near the window's right edge, it ends at that edge rather than centered on the button; and
+/// on the screen.
 @_cdecl("arbalete_ui_extension_popup_show")
 public func showExtensionPopup(
     _ id: UInt32, _ button: Bool, _ x: Double, _ y: Double, _ buttonWidth: Double,
@@ -64,16 +69,27 @@ public func showExtensionPopup(
         let origin: NSPoint
         if button {
             let top = parent.frame.maxY - (y + buttonHeight + buttonGap)
+            let centered = parent.frame.minX + x + buttonWidth / 2 - size.width / 2
+            let right = parent.frame.maxX - windowMargin - size.width
             origin = NSPoint(
-                x: parent.frame.minX + x + buttonWidth / 2 - size.width / 2, y: top - size.height)
+                x: max(min(centered, right), parent.frame.minX + windowMargin),
+                y: top - size.height)
         } else {
             origin = NSPoint(
                 x: parent.frame.midX - size.width / 2,
                 y: parent.frame.maxY - (parent.frame.height - size.height) / 3 - size.height)
         }
-        popup.setFrameOrigin(origin)
+        popup.setFrameOrigin(onScreen(origin, size, parent.screen?.visibleFrame))
         popup.makeKeyAndOrderFront(nil)
     }
+}
+
+/// `origin` moved so that a window `size` large there stays within `screen`, its top first.
+private func onScreen(_ origin: NSPoint, _ size: NSSize, _ screen: NSRect?) -> NSPoint {
+    guard let screen else { return origin }
+    return NSPoint(
+        x: max(min(origin.x, screen.maxX - size.width), screen.minX),
+        y: min(max(origin.y, screen.minY), screen.maxY - size.height))
 }
 
 /// Takes away the extension popup whose page's view is at `view`, its page's view with it, which
