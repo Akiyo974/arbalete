@@ -62,6 +62,8 @@ final class StatusPill: NSView {
         effect.layer?.cornerCurve = .circular
         effect.layer?.masksToBounds = true
         effect.layer?.borderWidth = 1
+        // Arc's outline, white at 20% over its dark fill.
+        effect.layer?.borderColor = NSColor.white.withAlphaComponent(0.2).cgColor
         label.usesSingleLineMode = true
         tint.wantsLayer = true
         effect.addSubview(tint)
@@ -185,14 +187,13 @@ final class StatusPill: NSView {
         return true
     }
 
-    /// The window's theme's color, like Arc's: a very dark shade under the text, a mid one
-    /// around, and a light one for the text but the address it explains; gray without one.
+    /// The window's theme's color, like Arc's: a very dark shade under the text and a light one
+    /// for the text but the address it explains; gray without one.
     private func takeTheme() {
         let theme = nativeWindows.values.first { $0.window === window }?.model.space?.theme
         let lead = theme?.colors.first ?? "#808080"
         tint.layer?.backgroundColor =
             NSColor(color(mix(lead, "#000000", 0.18))).withAlphaComponent(0.85).cgColor
-        effect.layer?.borderColor = NSColor(color(lead)).withAlphaComponent(0.7).cgColor
         quietColor = NSColor(color(mix(lead, "#ffffff", 0.25))).withAlphaComponent(0.7)
     }
 
