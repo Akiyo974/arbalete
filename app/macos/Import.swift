@@ -26,6 +26,29 @@ struct Sources: Decodable {
     var profiles: [Target]
 }
 
+/// A Chrome Web Store extension an import found in another browser's profile, to add to the
+/// profile it went into (offered_extensions in app/src/shell/import_ui.rs).
+struct FoundExtension: Codable, Hashable {
+    var profile: Int
+    var id: String
+    var name: String
+    /// Its icon, in the other browser's folder.
+    var icon: String?
+}
+
+/// An extension's icon, from its file, or a puzzle piece.
+struct FoundExtensionIcon: View {
+    let path: String?
+
+    var body: some View {
+        if let path, let image = NSImage(contentsOfFile: path) {
+            Image(nsImage: image).resizable().interpolation(.high)
+        } else {
+            Image(systemName: "puzzlepiece.extension").resizable().scaledToFit().opacity(0.7)
+        }
+    }
+}
+
 /// What to do with a browser profile.
 struct ImportChoice: Encodable {
     var browser: Int
@@ -52,18 +75,31 @@ final class ImportModel: ObservableObject {
     @Published var sources: Sources?
     @Published var choices: [ImportChoice] = []
     @Published var importing = false
+    /// Once imported, the extensions found, and those to add.
+    @Published var found: [FoundExtension] = []
+    @Published var adding: Set<FoundExtension> = []
     let app: AppModel
 
     init(app: AppModel) {
         self.app = app
     }
 
+    private struct Found: Decodable {
+        var extensions: [FoundExtension]
+    }
+
     func handle(_ name: String, _ detail: Data) {
+        if name == "arbalete:extensions", let found = try? JSONDecoder().decode(Found.self, from: detail) {
+            self.found = found.extensions
+            adding = Set(found.extensions)
+            importing = false
+            return
+        }
         guard name == "arbalete:sources",
             let sources = try? JSONDecoder().decode(Sources.self, from: detail)
         else { return }
         self.sources = sources
-        importing = false
+        (importing, found, adding) = (false, [], [])
         choices = sources.browsers.enumerated().flatMap { b, browser in
             browser.profiles.enumerated().map { p, profile in
                 ImportChoice(
@@ -83,13 +119,22 @@ final class ImportModel: ObservableObject {
         importing = true
         app.run("import", jsonObject(picked))
     }
+
+    /// Adds the extensions picked, then closes: Chromium asks to confirm each one.
+    func addExtensions() {
+        let picked = found.filter(adding.contains)
+        if !picked.isEmpty { app.run("install-extensions", jsonObject(picked)) }
+        app.run("close-import")
+    }
 }
 
 struct ImportView: View {
     @ObservedObject var model: ImportModel
 
     var body: some View {
-        if let sources = model.sources {
+        if !model.found.isEmpty {
+            ImportExtensionsView(model: model)
+        } else if let sources = model.sources {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Import from another browser").font(.title2.bold())
                 Text("From Arc: its Spaces, favorites, tabs and history. From other browsers: bookmarks and history.")
@@ -159,5 +204,44 @@ struct ImportRow: View {
                 .fixedSize()
             }
         }
+    }
+}
+
+/// After an import, the extensions found, to add from the Chrome Web Store (decision 0008).
+struct ImportExtensionsView: View {
+    @ObservedObject var model: ImportModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Add your extensions").font(.title2.bold())
+            Text("Arbalete adds them from the Chrome Web Store, one at a time: confirm each one as it asks.")
+                .foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(model.found, id: \.self) { found in
+                        Toggle(isOn: Binding(
+                            get: { model.adding.contains(found) },
+                            set: { if $0 { model.adding.insert(found) } else { model.adding.remove(found) } })
+                        ) {
+                            HStack(spacing: 8) {
+                                FoundExtensionIcon(path: found.icon).frame(width: 16, height: 16)
+                                Text(found.name)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack {
+                Spacer()
+                Button("Not now") { model.app.run("close-import") }
+                    .keyboardShortcut(.cancelAction)
+                Button(model.adding.count > 1 ? "Add \(model.adding.count)" : "Add") { model.addExtensions() }
+                    .disabled(model.adding.isEmpty)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }

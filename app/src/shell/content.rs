@@ -880,6 +880,9 @@ wrap_load_handler! {
             cover_revived(browser.as_deref(), is_loading == 1);
             if let Some(tab) = browser.as_deref().and_then(page_tab) {
                 pane_changed(tab);
+                if is_loading == 0 && let Some(browser) = browser.as_deref() {
+                    extensions::store_page_loaded(tab, browser);
+                }
             }
             if is_loading == 0 {
                 ask_top_color(browser.as_deref());

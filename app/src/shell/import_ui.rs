@@ -128,28 +128,75 @@ pub(super) fn run_import(choices: Vec<Choice>) {
     let browsers = SOURCES.take();
     thread::spawn(move || {
         let sources = import::read(&browsers, &choices);
-        let sources = Arc::new(Mutex::new(Some(sources)));
-        post_task(ThreadId::UI, Some(&mut ApplyImport::new(sources)));
+        let found = importable_extensions(&browsers, &choices);
+        let read = Arc::new(Mutex::new(Some((sources, found))));
+        post_task(ThreadId::UI, Some(&mut ApplyImport::new(read)));
     });
 }
 
+/// The Chrome Web Store extensions of each chosen profile of a Chromium browser, Arc included,
+/// by its browser's and its own index (decision 0008).
+type Found = HashMap<(usize, usize), Vec<extensions::Installed>>;
+
+fn importable_extensions(browsers: &[browsers::Browser], choices: &[Choice]) -> Found {
+    let found = choices.iter().filter_map(|choice| {
+        let browser = browsers.get(choice.browser)?;
+        let profile = browser.profiles.get(choice.profile)?;
+        matches!(browser.family, Family::Chromium | Family::Arc).then(|| {
+            let list = extensions::importable(&profile.path);
+            ((choice.browser, choice.profile), list)
+        })
+    });
+    found.collect()
+}
+
+/// The chosen profiles read, and their extensions, handed to the UI thread.
+type Read = Arc<Mutex<Option<(Vec<import::Source>, Found)>>>;
+
 wrap_task! {
     struct ApplyImport {
-        sources: Arc<Mutex<Option<Vec<import::Source>>>>,
+        read: Read,
     }
 
     impl Task {
         fn execute(&self) {
-            let sources = self.sources.lock().ok().and_then(|mut sources| sources.take());
-            apply_import(sources.unwrap_or_default());
+            let read = self.read.lock().ok().and_then(|mut read| read.take());
+            let (sources, found) = read.unwrap_or_default();
+            apply_import(sources, &found);
         }
     }
+}
+
+/// The extensions to offer once an import is done: those found in each browser profile imported,
+/// but not yet in the profile it went into, with the icon in the other browser's folder.
+fn offered_extensions(targets: &[(Choice, ProfileId)], found: &Found) -> Vec<serde_json::Value> {
+    let mut seen = HashSet::new();
+    let mut offered = Vec::new();
+    for (choice, profile) in targets {
+        let installed = extensions::list(*profile);
+        let list = found
+            .get(&(choice.browser, choice.profile))
+            .into_iter()
+            .flatten();
+        for extension in list {
+            let new = !installed.iter().any(|e| e.id == extension.id);
+            if new && seen.insert((*profile, extension.id.clone())) {
+                offered.push(json!({
+                    "profile": profile,
+                    "id": extension.id,
+                    "name": extension.name,
+                    "icon": extension.icon,
+                }));
+            }
+        }
+    }
+    offered
 }
 
 /// Adds the browser profiles read to the sidebar as it is now, then shows the first Space
 /// imported with its first tab, or a blank page when it has none. Their histories are merged on
 /// a thread of their own.
-fn apply_import(sources: Vec<import::Source>) {
+fn apply_import(sources: Vec<import::Source>, found: &Found) {
     IMPORTING.set(false);
     let (imported, shown, spaces) = update_sidebar(|sidebar| {
         let mut new = if is_untouched(sidebar) {
@@ -185,7 +232,8 @@ fn apply_import(sources: Vec<import::Source>) {
         eprintln!("cannot import {error}");
     }
     let pages = imported.histories.iter().map(|(_, entries)| entries.len());
-    send_imported(&spaces, pages.sum());
+    let offered = offered_extensions(&imported.targets, found);
+    send_imported(&spaces, pages.sum(), &offered);
     let histories = imported.histories.into_iter();
     let histories: Vec<_> = histories
         .map(|(profile, entries)| (profile_dir(profile), entries))
@@ -197,7 +245,15 @@ fn apply_import(sources: Vec<import::Source>) {
             }
         }
     });
-    close_import();
+    // The assistant goes on with the extensions found, to add or not.
+    let assistant =
+        IMPORT.with_borrow(|import| import.as_ref().is_some_and(|i| i.is_visible() == 1));
+    if assistant && !offered.is_empty() {
+        let detail = json!({ "extensions": offered });
+        IMPORT_VIEW.with(|view| dispatch(view, "arbalete:extensions", &detail.to_string()));
+    } else {
+        close_import();
+    }
     if shown.is_some() {
         show_selected();
     }

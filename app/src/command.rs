@@ -485,6 +485,9 @@ pub enum Command {
     CloseImport,
     /// Imports browser profiles.
     Import(Vec<Choice>),
+    /// Installs from the Chrome Web Store extensions an import found, each in the profile it
+    /// went into.
+    InstallExtensions(Vec<ExtensionToAdd>),
     /// Opens the System Settings pane where the user gives Arbalete Full Disk Access.
     OpenFullDiskAccess,
     /// Paints the window around the sidebar and the card like the sidebar, and an empty Space's
@@ -495,6 +498,13 @@ pub enum Command {
         grain: f64,
         colors: Vec<u32>,
     },
+}
+
+/// An extension an import found, to install in a profile (Command::InstallExtensions).
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct ExtensionToAdd {
+    pub profile: ProfileId,
+    pub id: String,
 }
 
 /// What to do with a download (Command::Download).
@@ -697,6 +707,10 @@ mod tests {
                 height: 28
             }))
         );
+        assert!(matches!(
+            parse(r#"{"name":"install-extensions","args":[{"profile":2,"id":"abc"}]}"#),
+            Some(Command::InstallExtensions(list)) if list[0].id == "abc"
+        ));
         assert_eq!(
             parse(r#"{"name":"little","args":[3,"focused"]}"#),
             Some(Command::Little(3, LittleAction::Focused))

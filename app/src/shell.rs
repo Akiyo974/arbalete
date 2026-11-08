@@ -81,18 +81,21 @@ use inspector::*;
 pub use layout::*;
 pub use little::*;
 pub use menus::*;
+pub use onboarding::onboarding_shown;
 use onboarding::*;
 use overlay::*;
 pub use pages::*;
 pub use peek::*;
 use permission_prompt::*;
 use picture::*;
+pub use profiles::opened_web_data;
 use profiles::*;
 pub use session::*;
 pub use settings_ui::*;
 pub use site_controls::*;
 pub use split::*;
 use tabs::*;
+pub use tabs::{close_store_tab, open_store_tab};
 use theme_picker::*;
 use toasts::*;
 use views::*;
@@ -185,6 +188,11 @@ thread_local! {
     static PERMISSION_WINDOW_HIDDEN: Cell<bool> = const { Cell::new(false) };
     /// The browsers Chromium opened by itself (StrayClient), until an install closes them.
     static STRAYS: RefCell<Vec<Browser>> = const { RefCell::new(Vec::new()) };
+    /// The welcome flow shows: extensions to add from the Web Store wait for it to end.
+    static ONBOARDING_SHOWN: Cell<bool> = const { Cell::new(false) };
+    /// Extensions are being added from the Web Store (extensions::install_from_store): the
+    /// windows Chromium opens by itself meanwhile stay invisible until they close.
+    static HIDE_STRAYS: Cell<bool> = const { Cell::new(false) };
     /// The app's settings, loaded when the context is initialized.
     static SETTINGS: RefCell<Settings> = RefCell::new(Settings::default());
     /// The tabs whose page is frozen or was unloaded, which the sidebar dims.

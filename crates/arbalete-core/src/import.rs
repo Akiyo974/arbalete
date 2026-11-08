@@ -65,6 +65,8 @@ pub struct Imported {
     pub favicons: Vec<(ProfileId, Favicons)>,
     /// One message per browser profile that could not be read, fully or in part.
     pub errors: Vec<String>,
+    /// Each browser profile imported, as chosen, and the profile it went into.
+    pub targets: Vec<(Choice, ProfileId)>,
 }
 
 /// Reads each chosen browser profile. Choices that name no known browser profile are skipped.
@@ -95,6 +97,7 @@ pub fn apply(sidebar: &mut Sidebar, sources: Vec<Source>) -> Imported {
             Some(id) if sidebar.profiles().iter().any(|p| p.id == id) => id,
             Some(_) => continue,
         };
+        imported.targets.push((source.choice.clone(), profile));
         let target = Target {
             profile,
             name: &source.name,
@@ -449,6 +452,12 @@ mod tests {
         let favorites = urls(&sidebar, sidebar.profiles()[0].favorites);
         assert_eq!(favorites, ["https://tracker.example.com/"]);
         assert_eq!(imported.histories[0].0, default);
+        let targets: Vec<_> = imported
+            .targets
+            .iter()
+            .map(|(c, p)| (c.browser, *p))
+            .collect();
+        assert_eq!(targets, [(1, default), (0, default)]);
     }
 
     #[test]

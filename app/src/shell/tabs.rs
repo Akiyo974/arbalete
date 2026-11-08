@@ -8,6 +8,26 @@ pub(super) fn active_tab(sidebar: &mut Sidebar) -> Option<&mut Tab> {
 }
 
 /// Opens a tab in the displayed Space and shows it, in place of the site controls.
+/// Opens a Chrome Web Store page in a new tab of a profile's first Space, displayed, for
+/// extensions::install_from_store: the tab, unless the profile has no Space.
+pub fn open_store_tab(profile: ProfileId, url: &str) -> Option<NodeId> {
+    hide_site_controls();
+    let tab = update_sidebar(|sidebar| {
+        let space = sidebar.spaces().iter().find(|s| s.profile == profile)?.id;
+        sidebar.display(space).ok()?;
+        let tab = sidebar.open_tab(space, url).ok()?;
+        sidebar.select(space, tab).ok()?;
+        Some(tab)
+    });
+    show_selected();
+    tab
+}
+
+/// Closes the tab extensions::install_from_store opened.
+pub fn close_store_tab(tab: NodeId) {
+    close_tab(Some(tab));
+}
+
 pub(super) fn open_tab(url: &str) {
     if is_chrome_page(url) {
         return open_chrome_page(url);

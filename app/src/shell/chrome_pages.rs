@@ -540,11 +540,46 @@ pub fn extension_installed() {
     post_task(ThreadId::UI, Some(&mut CloseStrays::new()));
 }
 
+/// Keeps the windows Chromium opens by itself invisible while extensions are added from the
+/// Web Store, one after the other: each extension's welcome page, which opens in a tab instead.
+/// Once the last is added, they close a moment later, after the extensions that open them late.
+pub fn hide_strays(hide: bool) {
+    if hide {
+        HIDE_STRAYS.set(true);
+        for host in STRAYS
+            .with_borrow(Clone::clone)
+            .iter()
+            .filter_map(Browser::host)
+        {
+            #[cfg(target_os = "macos")]
+            crate::mac::hide_window(host.window_handle());
+        }
+    } else {
+        post_delayed_task(ThreadId::UI, Some(&mut CloseStrays::new()), 2000);
+    }
+}
+
+wrap_task! {
+    struct HideStray {
+        browser: Browser,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            #[cfg(target_os = "macos")]
+            if let Some(host) = self.browser.host().filter(|_| HIDE_STRAYS.get()) {
+                crate::mac::hide_window(host.window_handle());
+            }
+        }
+    }
+}
+
 wrap_task! {
     struct CloseStrays {}
 
     impl Task {
         fn execute(&self) {
+            HIDE_STRAYS.set(crate::extensions::installing_from_store());
             // An extension may have opened its welcome page there: it opens in a tab instead.
             for stray in STRAYS.take() {
                 let url = stray.main_frame().map(|frame| CefString::from(&frame.url()).to_string());
@@ -581,6 +616,12 @@ wrap_life_span_handler! {
             OPEN_BROWSERS.set(OPEN_BROWSERS.get() + 1);
             if let Some(browser) = browser {
                 STRAYS.with_borrow_mut(|strays| strays.push(browser.clone()));
+                // Its window only comes a moment later: hidden then, and again after.
+                if HIDE_STRAYS.get() {
+                    for delay in [0, 50, 150, 400, 1000] {
+                        post_delayed_task(ThreadId::UI, Some(&mut HideStray::new(browser.clone())), delay);
+                    }
+                }
             }
         }
 

@@ -25,13 +25,15 @@ private let tried: [(action: String, label: String)] = [
 @MainActor
 final class OnboardingModel: ObservableObject {
     enum Step {
-        case welcome, importing, imported, spaces, browser, keys
+        case welcome, importing, imported, extensions, spaces, browser, keys
     }
 
     /// What an import made (send_imported in app/src/shell/onboarding.rs).
     struct Imported: Decodable {
         var spaces: [Int]
         var pages: Int
+        /// The Chrome Web Store extensions found, to add.
+        var extensions: [FoundExtension]
     }
 
     @Published var step = Step.welcome
@@ -41,6 +43,8 @@ final class OnboardingModel: ObservableObject {
     @Published var choices: [ImportChoice] = []
     @Published var importing = false
     @Published var imported: Imported?
+    /// The extensions found to add.
+    @Published var adding: Set<FoundExtension> = []
     /// Only Arc's profiles were imported: they bring their Spaces' colors, so no Spaces step.
     private var arcOnly = false
     /// The Space the Spaces step shows, among those it sets up.
@@ -71,6 +75,7 @@ final class OnboardingModel: ObservableObject {
         var steps: [Step] = [.welcome]
         if !(sources?.browsers.isEmpty ?? true) || imported != nil { steps.append(.importing) }
         if imported != nil { steps.append(.imported) }
+        if !(imported?.extensions.isEmpty ?? true) { steps.append(.extensions) }
         if imported == nil || !arcOnly { steps.append(.spaces) }
         if !wasDefault { steps.append(.browser) }
         steps.append(.keys)
@@ -195,6 +200,7 @@ final class OnboardingModel: ObservableObject {
         case "arbalete:imported":
             guard let imported = try? JSONDecoder().decode(Imported.self, from: detail) else { return }
             self.imported = imported
+            adding = Set(imported.extensions)
             importing = false
             // Arc's Spaces skip the Spaces step: the first one's theme shows from the next.
             if let first = spaces.first { pick(first) }
@@ -209,6 +215,14 @@ final class OnboardingModel: ObservableObject {
         arcOnly = picked.allSatisfy { sources.browsers[$0.browser].arc }
         importing = true
         app.run("import", jsonObject(picked))
+    }
+
+    /// Adds the extensions picked once the flow ends, in the main window, where Chromium asks to
+    /// confirm each one; moves on meanwhile.
+    func addExtensions() {
+        let picked = imported?.extensions.filter(adding.contains) ?? []
+        if !picked.isEmpty { app.run("install-extensions", jsonObject(picked)) }
+        next()
     }
 
     /// Shows a Space in the Spaces step, its theme in the picker.
@@ -339,6 +353,7 @@ struct OnboardingView: View {
                 case .welcome: WelcomeStep(model: model)
                 case .importing: ImportStep(model: model)
                 case .imported: ImportedStep(model: model)
+                case .extensions: ExtensionsStep(model: model)
                 case .spaces: SpacesStep(model: model, app: app)
                 case .browser: BrowserStep(model: model)
                 case .keys: KeysStep(model: model)
@@ -743,6 +758,57 @@ private struct ImportedStep: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(Glass())
+    }
+}
+
+/// The extensions the browsers imported had, from the Chrome Web Store, to tick and add.
+private struct ExtensionsStep: View {
+    @ObservedObject var model: OnboardingModel
+
+    var body: some View {
+        let found = model.imported?.extensions ?? []
+        let ticked = model.adding.count
+        VStack(alignment: .leading, spacing: 16) {
+            StepHeading(
+                title: "Bring your extensions",
+                text: "Once you’re in, they come fresh from the Chrome Web Store, one at a time: say yes to each as it asks.")
+            let list = VStack(spacing: 4) {
+                ForEach(found, id: \.self) { row($0) }
+            }
+            .padding(5)
+            ViewThatFits(in: .vertical) {
+                list
+                ScrollView { list }.frame(height: 330)
+            }
+            .frame(maxHeight: 330)
+            .modifier(Glass())
+            HStack(spacing: 12) {
+                OnboardingButton(title: ticked > 1 ? "Add \(ticked)" : "Add", enabled: ticked > 0) {
+                    model.addExtensions()
+                }
+                OnboardingButton(title: "Not now", primary: false) { model.next() }
+            }
+        }
+        .frame(width: 480)
+    }
+
+    private func row(_ found: FoundExtension) -> some View {
+        let ticked = model.adding.contains(found)
+        return HStack(spacing: 12) {
+            TickBox(ticked: ticked)
+            FoundExtensionIcon(path: found.icon).frame(width: 24, height: 24)
+            Text(found.name).font(.system(size: 14)).lineLimit(1)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 44)
+        .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(ticked ? 0.2 : 0)))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if ticked { model.adding.remove(found) } else { model.adding.insert(found) }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(ticked ? [.isButton, .isSelected] : .isButton)
     }
 }
 

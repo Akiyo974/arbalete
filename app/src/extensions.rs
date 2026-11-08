@@ -6,12 +6,12 @@
 //! update tabs. A helper extension (app/extension), loaded in every profile, tells each page's tab
 //! id, which extensions know pages by.
 
-use arbalete_core::sidebar::ProfileId;
+use arbalete_core::sidebar::{NodeId, ProfileId};
 use cef::*;
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -63,6 +63,8 @@ pub struct Details {
     pub manifest_version: u64,
     /// Installed from the Chrome Web Store.
     pub from_store: bool,
+    /// Installed by the browser itself, or by the computer's maker, not by the user.
+    pub by_default: bool,
     /// Loaded from a folder of the user's, in developer mode: its path.
     pub unpacked: Option<PathBuf>,
     /// When it was installed and last updated, in milliseconds since the Unix epoch.
@@ -112,6 +114,8 @@ pub fn installed(profile_dir: &Path) -> Vec<Installed> {
             let extension = read_manifest(id, &dir)?;
             let details = Details {
                 from_store: setting["from_webstore"].as_bool().unwrap_or_default(),
+                by_default: setting["was_installed_by_default"] == true
+                    || setting["was_installed_by_oem"] == true,
                 unpacked: (setting["location"] == 4).then(|| dir.clone()),
                 installed_at: preference_time(&setting["first_install_time"]),
                 updated_at: preference_time(&setting["last_update_time"]),
@@ -125,6 +129,15 @@ pub fn installed(profile_dir: &Path) -> Vec<Installed> {
         })
         .collect();
     list.sort_by_key(|extension| extension.name.to_lowercase());
+    list
+}
+
+/// The extensions of another Chromium browser's profile, in its directory, that an import brings
+/// along, like Arc's: those the user installed from the Chrome Web Store, which installs them in
+/// Arbalete again. The browser's own, and those from elsewhere, are left.
+pub fn importable(profile_dir: &Path) -> Vec<Installed> {
+    let mut list = installed(profile_dir);
+    list.retain(|extension| extension.details.from_store && !extension.details.by_default);
     list
 }
 
@@ -600,6 +613,10 @@ pub fn popup_closed() {
 /// Reads a profile's extensions from its directory, once its web data is ready.
 pub fn profile_ready(profile: ProfileId, dir: &Path) {
     refresh(profile, dir);
+    // Extensions to install there silently waited for it.
+    if SILENT.with_borrow(|queue| queue.front().is_some_and(|(first, _)| *first == profile)) {
+        install_silently();
+    }
 }
 
 /// Starts watching the extensions from the bridge's browser, which outlives the pages, with the
@@ -634,6 +651,7 @@ pub fn page_created(profile: ProfileId, browser: &Browser) {
 
 /// Forgets a page as its browser closes.
 pub fn page_closed(page: i32) {
+    store_page_closed(page);
     let registration = BRIDGE.with_borrow_mut(|bridge| {
         bridge.contents.remove(&page);
         bridge.page_registrations.remove(&page)
@@ -1002,6 +1020,362 @@ fn extension_id(url: &str) -> Option<&str> {
 fn extension_may_open(url: &str) -> bool {
     let url = url.trim().to_ascii_lowercase();
     url.starts_with("http:") || url.starts_with("https:") || url == "about:blank"
+}
+
+/// An extension's page in the Chrome Web Store.
+const STORE_DETAIL: &str = "https://chromewebstore.google.com/detail/";
+
+/// The DevTools message pressing a store page's button: the page's own messages count from 1.
+const STORE_PRESS: i64 = 90_001;
+
+/// Presses the "Add to Chrome" button of the Web Store page of the extension `$ID` once it shows,
+/// unless the extension is installed already, then answers once Chromium installed it ("done")
+/// or did not ("skip"): the user said no, or the store shows no button for it.
+const STORE_INSTALL_SCRIPT: &str = r#"new Promise(async resolve => {
+  const store = chrome.webstorePrivate;
+  const status = store && await new Promise(answer => store.getExtensionStatus($ID, answer));
+  if (status !== "installable") return resolve("skip");
+  const watch = (name, done) => {
+    const original = store[name].bind(store);
+    store[name] = (first, callback) => original(first, (...answer) => {
+      done(...answer);
+      callback?.(...answer);
+    });
+  };
+  watch("beginInstallWithManifest3", result => result && resolve("skip"));
+  watch("completeInstall", () => resolve("done"));
+  // The store's offer to switch to Chrome would cover the page.
+  document.querySelector("button[jsname=gQ2Xie]")?.click();
+  let tries = 0;
+  const press = () => {
+    const button = document.querySelector("button[jsname=wQO0od]");
+    if (button && !button.disabled) return button.click();
+    if (++tries > 40) return resolve("skip");
+    setTimeout(press, 250);
+  };
+  press();
+})"#;
+
+/// Extensions being added from the Chrome Web Store, one after the other, each in its profile
+/// (decision 0008): a tab of the main window shows the first one's store page.
+struct StoreInstall {
+    queue: VecDeque<(ProfileId, String)>,
+    tab: Option<NodeId>,
+    /// The tab's page, once loaded, which moves on to the next store page.
+    page: Option<Browser>,
+    /// The store's button was pressed for the first one: Chromium is asking.
+    pressed: bool,
+}
+
+thread_local! {
+    static STORE_INSTALL: RefCell<Option<StoreInstall>> = const { RefCell::new(None) };
+    /// The store page's observer, kept until the next: dropped from its own callback, where the
+    /// answer comes, it would free itself while running.
+    static STORE_OBSERVER: RefCell<Option<Registration>> = const { RefCell::new(None) };
+    /// Extensions installed without asking, with the patched CEF, one after the other.
+    static SILENT: RefCell<VecDeque<(ProfileId, String)>> = const { RefCell::new(VecDeque::new()) };
+    /// Chromium is installing the first of them.
+    static SILENT_RUNNING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Extensions asked for while the welcome flow shows, which wait for it to end.
+    static DEFERRED: RefCell<Vec<(ProfileId, String)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Installs extensions from the Chrome Web Store, each in its profile, one after the other, as
+/// an import found them (decision 0008). Chromium only installs from the store's page, after the
+/// user confirms: the app opens it in a tab of the profile's first Space, presses its "Add to
+/// Chrome" button, and Chromium asks (store_page_loaded). A new profile shows Google's cookie
+/// consent page first, for the user to answer. Asked while the welcome flow shows, they wait for
+/// it to end (start_deferred_installs); asked during other installs, they follow them.
+pub fn install_from_store(extensions: Vec<(ProfileId, String)>) {
+    if extensions.is_empty() {
+        return;
+    }
+    if silent_install().is_some() {
+        let start = SILENT.with_borrow_mut(|queue| {
+            let start = queue.is_empty();
+            queue.extend(extensions);
+            start
+        });
+        if start {
+            crate::shell::hide_strays(true);
+            install_silently();
+        }
+        return;
+    }
+    if crate::shell::onboarding_shown() {
+        DEFERRED.with_borrow_mut(|deferred| deferred.extend(extensions));
+        return;
+    }
+    let start = STORE_INSTALL.with_borrow_mut(|install| match install {
+        Some(install) => {
+            install.queue.extend(extensions);
+            false
+        }
+        None => {
+            *install = Some(StoreInstall {
+                queue: extensions.into(),
+                tab: None,
+                page: None,
+                pressed: false,
+            });
+            true
+        }
+    });
+    if start {
+        crate::shell::hide_strays(true);
+        open_store_tab();
+    }
+}
+
+/// The welcome flow ended: the extensions picked in it are installed now, in the main window.
+pub fn start_deferred_installs() {
+    install_from_store(DEFERRED.take());
+}
+
+/// Whether extensions are being added from the Web Store.
+pub fn installing_from_store() -> bool {
+    STORE_INSTALL.with_borrow(Option::is_some) || SILENT.with_borrow(|queue| !queue.is_empty())
+}
+
+/// The patched CEF's install from the Chrome Web Store without asking (amenophis/cef-builds,
+/// `silent-webstore-install.patch`): of the profile whose web data is in `cache_path`, the
+/// extension `extension_id`; `done` then runs once on the UI thread with `context` and 0 for
+/// success. It returns 0 if it cannot start.
+type SilentInstall = unsafe extern "C" fn(
+    cache_path: *const std::ffi::c_char,
+    extension_id: *const std::ffi::c_char,
+    done: extern "C" fn(context: *mut std::ffi::c_void, result: std::ffi::c_int),
+    context: *mut std::ffi::c_void,
+) -> std::ffi::c_int;
+
+/// The patched CEF's silent install, if the app runs on it: the official CEF has none.
+fn silent_install() -> Option<SilentInstall> {
+    static FOUND: std::sync::OnceLock<Option<SilentInstall>> = std::sync::OnceLock::new();
+    *FOUND.get_or_init(find_silent_install)
+}
+
+#[cfg(target_os = "macos")]
+fn find_silent_install() -> Option<SilentInstall> {
+    use std::ffi::{CString, c_char, c_int, c_void};
+    use std::os::unix::ffi::OsStrExt;
+    unsafe extern "C" {
+        fn dlopen(path: *const c_char, mode: c_int) -> *mut c_void;
+        fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+    }
+    const RTLD_LAZY: c_int = 0x1;
+    const RTLD_NOLOAD: c_int = 0x10;
+    // The framework main loaded, by the same path (cef::library_loader).
+    let exe = std::env::current_exe().ok()?;
+    let framework = exe
+        .parent()?
+        .join("../Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework")
+        .canonicalize()
+        .ok()?;
+    let path = CString::new(framework.as_os_str().as_bytes()).ok()?;
+    // SAFETY: NOLOAD only finds the framework already loaded, which stays loaded until the app ends.
+    let framework = unsafe { dlopen(path.as_ptr(), RTLD_LAZY | RTLD_NOLOAD) };
+    if framework.is_null() {
+        return None;
+    }
+    // SAFETY: a symbol of a loaded image, looked up by a NUL-terminated name.
+    let symbol = unsafe { dlsym(framework, c"arbalete_install_webstore_extension".as_ptr()) };
+    // SAFETY: the patch exports it with this signature.
+    (!symbol.is_null())
+        .then(|| unsafe { std::mem::transmute::<*mut c_void, SilentInstall>(symbol) })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn find_silent_install() -> Option<SilentInstall> {
+    None
+}
+
+/// Installs the first extension of the silent queue, once its profile's web data is open (a
+/// profile just imported opens it first: profile_ready goes on), then the next from its answer.
+fn install_silently() {
+    let Some(install) = silent_install() else {
+        return;
+    };
+    if SILENT_RUNNING.get() {
+        return;
+    }
+    loop {
+        let Some((profile, id)) = SILENT.with_borrow(|queue| queue.front().cloned()) else {
+            // The last one's welcome page, if any, moves to a tab.
+            crate::shell::hide_strays(false);
+            return;
+        };
+        let Some(dir) = crate::shell::opened_web_data(profile) else {
+            return;
+        };
+        let (Some(dir), Ok(id_text)) = (
+            dir.to_str()
+                .and_then(|dir| std::ffi::CString::new(dir).ok()),
+            std::ffi::CString::new(id.as_str()),
+        ) else {
+            SILENT.with_borrow_mut(VecDeque::pop_front);
+            continue;
+        };
+        // SAFETY: NUL-terminated strings that outlive the call, which copies them.
+        let started = unsafe {
+            install(
+                dir.as_ptr(),
+                id_text.as_ptr(),
+                silent_done,
+                std::ptr::null_mut(),
+            )
+        };
+        if started == 1 {
+            SILENT_RUNNING.set(true);
+            return;
+        }
+        eprintln!("cannot install the extension {id}");
+        SILENT.with_borrow_mut(VecDeque::pop_front);
+    }
+}
+
+/// Chromium installed the first extension of the silent queue, or could not: the next one goes,
+/// out of Chromium's callback.
+extern "C" fn silent_done(_context: *mut std::ffi::c_void, result: std::ffi::c_int) {
+    SILENT_RUNNING.set(false);
+    if let Some((_, id)) = SILENT.with_borrow_mut(VecDeque::pop_front)
+        && result != 0
+    {
+        eprintln!("cannot install the extension {id}: Chromium's result {result}");
+    }
+    post_task(ThreadId::UI, Some(&mut InstallSilently::new()));
+}
+
+wrap_task! {
+    struct InstallSilently {}
+
+    impl Task {
+        fn execute(&self) {
+            install_silently();
+        }
+    }
+}
+
+/// Opens the first extension's store page in a tab of its profile, or ends with none left.
+fn open_store_tab() {
+    let first = STORE_INSTALL.with_borrow(|install| install.as_ref()?.queue.front().cloned());
+    let Some((profile, id)) = first else {
+        STORE_INSTALL.set(None);
+        crate::shell::hide_strays(false);
+        return;
+    };
+    let tab = crate::shell::open_store_tab(profile, &format!("{STORE_DETAIL}{id}"));
+    STORE_INSTALL.with_borrow_mut(|install| {
+        if let Some(install) = install {
+            (install.tab, install.page, install.pressed) = (tab, None, false);
+        }
+    });
+    // A profile without a Space has nowhere to show it.
+    if tab.is_none() {
+        install_next();
+    }
+}
+
+/// A tab's page loaded: the store page of the extension to install, its "Add to Chrome" button
+/// is pressed, with a user gesture for Chromium to ask. Google's consent page, which comes first
+/// in a new profile, is the user's to answer.
+pub fn store_page_loaded(tab: NodeId, browser: &Browser) {
+    let Some(host) = browser.host() else { return };
+    let id = STORE_INSTALL.with_borrow_mut(|install| {
+        let install = install
+            .as_mut()
+            .filter(|install| install.tab == Some(tab))?;
+        install.page = Some(browser.clone());
+        let url = browser.main_frame().map(|frame| frame.url());
+        let url = url.map(|url| CefString::from(&url).to_string())?;
+        if install.pressed || !url.starts_with(STORE_DETAIL) {
+            return None;
+        }
+        install.pressed = true;
+        install.queue.front().map(|(_, id)| id.clone())
+    });
+    let Some(id) = id else { return };
+    let registration = host.add_dev_tools_message_observer(Some(&mut StoreObserver::new()));
+    STORE_OBSERVER.set(registration);
+    let id = serde_json::to_string(&id).expect("a string");
+    let expression = STORE_INSTALL_SCRIPT.replace("$ID", &id);
+    let params = json!({ "expression": expression, "awaitPromise": true, "userGesture": true, "returnByValue": true });
+    let message = json!({ "id": STORE_PRESS, "method": "Runtime.evaluate", "params": params });
+    host.send_dev_tools_message(Some(message.to_string().as_bytes()));
+}
+
+/// The first extension is installed, or not: the tab moves on to the next one's store page, a
+/// tab of another profile opening for one of it, or closes after the last.
+fn install_next() {
+    let next = STORE_INSTALL.with_borrow_mut(|install| {
+        let install = install.as_mut()?;
+        let (done, _) = install.queue.pop_front()?;
+        let next = install.queue.front().cloned();
+        install.pressed = false;
+        Some((done, next, install.tab, install.page.clone()))
+    });
+    let Some((done, next, tab, page)) = next else {
+        return;
+    };
+    let frame = page.as_ref().and_then(Browser::main_frame);
+    match (next, frame) {
+        (Some((profile, id)), Some(frame)) if profile == done && tab.is_some() => {
+            let url = format!("{STORE_DETAIL}{id}");
+            frame.load_url(Some(&CefString::from(url.as_str())));
+        }
+        (next, _) => {
+            // Forgotten first: the tab closing is not the user stopping the installs.
+            STORE_INSTALL.with_borrow_mut(|install| {
+                if let Some(install) = install {
+                    (install.tab, install.page) = (None, None);
+                }
+            });
+            if let Some(tab) = tab {
+                crate::shell::close_store_tab(tab);
+            }
+            if next.is_some() {
+                open_store_tab();
+            } else {
+                STORE_INSTALL.set(None);
+                crate::shell::hide_strays(false);
+            }
+        }
+    }
+}
+
+/// The user closed the store's tab: the extensions left are not installed.
+fn store_page_closed(page: i32) {
+    let closed = STORE_INSTALL.with_borrow(|install| {
+        let page = install.as_ref()?.page.as_ref()?.identifier() == page;
+        Some(page)
+    });
+    if closed == Some(true) {
+        STORE_INSTALL.set(None);
+        crate::shell::hide_strays(false);
+    }
+}
+
+wrap_dev_tools_message_observer! {
+    struct StoreObserver {}
+
+    impl DevToolsMessageObserver {
+        fn on_dev_tools_message(&self, _browser: Option<&mut Browser>, message: Option<&[u8]>) -> i32 {
+            // Later: moving on may close the tab, and this observer with it.
+            if parse(message).is_some_and(|m| m["id"] == STORE_PRESS) {
+                post_task(ThreadId::UI, Some(&mut InstallNext::new()));
+            }
+            0
+        }
+    }
+}
+
+wrap_task! {
+    struct InstallNext {}
+
+    impl Task {
+        fn execute(&self) {
+            install_next();
+        }
+    }
 }
 
 /// What Chromium asks the user about in the app's Chrome-style window, where only it can: an
@@ -1428,6 +1802,26 @@ mod tests {
             Some(profile.0.join("Extensions/block/2.0_0/i128.png"))
         );
         assert!(installed(&profile.0.join("missing")).is_empty());
+    }
+
+    #[test]
+    fn imports_only_the_extensions_the_user_added_from_the_web_store() {
+        let profile = TestDir::new("importable");
+        let preferences = json!({ "extensions": { "settings": {
+            "store": { "location": 1, "path": "store/1.0_0", "from_webstore": true },
+            "off": { "location": 1, "path": "off/1.0_0", "from_webstore": true, "disable_reasons": [1] },
+            "default": { "location": 1, "path": "default/1.0_0", "from_webstore": true, "was_installed_by_default": true },
+            "oem": { "location": 1, "path": "oem/1.0_0", "from_webstore": true, "was_installed_by_oem": true },
+            "unpacked": { "location": 4, "path": "/Users/me/dev/ext" },
+            "pdf": { "location": 5, "path": "/framework/pdf", "from_webstore": true },
+        } } });
+        profile.write("Secure Preferences", &preferences.to_string());
+        for id in ["store", "off", "default", "oem"] {
+            let manifest = format!(r#"{{ "name": "{id}" }}"#);
+            profile.write(&format!("Extensions/{id}/1.0_0/manifest.json"), &manifest);
+        }
+        let ids: Vec<_> = importable(&profile.0).into_iter().map(|e| e.id).collect();
+        assert_eq!(ids, ["off", "store"]);
     }
 
     #[test]

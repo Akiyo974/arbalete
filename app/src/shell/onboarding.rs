@@ -6,6 +6,7 @@ use super::*;
 /// Opens the welcome flow's window, alone at the first launch. Its page asks for the browsers to
 /// import from once it listens (Command::OnboardingReady).
 pub(super) fn show_onboarding() {
+    ONBOARDING_SHOWN.set(true);
     #[cfg(target_os = "macos")]
     crate::native::onboarding(true);
     send_onboarding();
@@ -22,10 +23,10 @@ pub(super) fn send_onboarding() {
 }
 
 /// Tells the welcome flow what an import made: its Spaces, and how many pages of history came.
-pub(super) fn send_imported(spaces: &[SpaceId], pages: usize) {
+pub(super) fn send_imported(spaces: &[SpaceId], pages: usize, extensions: &[serde_json::Value]) {
     event(
         "arbalete:imported",
-        &json!({ "spaces": spaces, "pages": pages }),
+        &json!({ "spaces": spaces, "pages": pages, "extensions": extensions }),
     );
 }
 
@@ -71,4 +72,12 @@ pub(super) fn close_onboarding() {
     if let Some(window) = win().window.with_borrow(Clone::clone) {
         window.show();
     }
+    ONBOARDING_SHOWN.set(false);
+    // The extensions picked in the flow are added in the main window, now in front.
+    extensions::start_deferred_installs();
+}
+
+/// Whether the welcome flow shows.
+pub fn onboarding_shown() -> bool {
+    ONBOARDING_SHOWN.get()
 }

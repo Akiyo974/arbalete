@@ -361,6 +361,10 @@ fn run_command(command: Command) {
         (Command::ImportReady, _) => send_sources(),
         (Command::CloseImport, _) => close_import(),
         (Command::Import(choices), _) => run_import(choices),
+        (Command::InstallExtensions(list), _) => {
+            let list = list.into_iter().map(|e| (e.profile, e.id)).collect();
+            extensions::install_from_store(list);
+        }
         (Command::OpenFullDiskAccess, _) => open_full_disk_access(),
         (
             Command::WindowColors {

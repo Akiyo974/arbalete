@@ -150,6 +150,19 @@ pub(super) fn update_spaces(
     }
 }
 
+/// A profile's web data directory, once CEF has it open. None before, as for a profile just
+/// imported: it is opened then, and extensions::profile_ready tells once it is.
+pub fn opened_web_data(profile: ProfileId) -> Option<PathBuf> {
+    match CONTEXTS.with_borrow(|contexts| contexts.get(&profile).map(Option::is_some)) {
+        Some(true) => Some(profile_dir(profile)),
+        Some(false) => None,
+        None => {
+            create_profile_context(profile);
+            None
+        }
+    }
+}
+
 /// Opens a profile's web data in its own directory, `Profile <id>`: Chromium only accepts profile
 /// directories directly in the root cache path. CEF needs it initialized before a browser can
 /// use it (ProfileContextHandler).
