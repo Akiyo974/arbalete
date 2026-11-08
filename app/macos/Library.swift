@@ -832,8 +832,7 @@ struct ManageSpacesView: View {
 
 /// A Space's column among the Spaces, as Arc's, measured: 240 points wide; a Space with colors
 /// shows them at three quarters over a light gray, its titles dark, one without colors nothing
-/// under its titles; the name 25 points down, the tabs in 40-point rows from 70 points down,
-/// under the line that clears today's tabs of the displayed Space, scrolling when they overflow.
+/// under its titles; the name 25 points down, then its rows, which scroll when they overflow.
 struct SpaceColumn: View {
     @ObservedObject var model: AppModel
     let space: Space
@@ -849,8 +848,10 @@ struct SpaceColumn: View {
     }
 
     var body: some View {
-        let page = model.state?.pages.first { $0.space == space.id }
-        let tabs = page.map { ($0.pinned + $0.today).flatMap(\.tabs) } ?? []
+        // Like Arc's, every Space's pinned tabs and folders, then today's tabs of the displayed
+        // one, under the line that clears them.
+        let displayed = space.id == model.state?.space
+        let today = displayed ? (model.state?.pages.first { $0.space == space.id }?.today ?? []) : []
         let ink: Color = colored ? .black.opacity(0.4) : Ink.primary
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 9) {
@@ -875,32 +876,28 @@ struct SpaceColumn: View {
             .frame(height: 24)
             .padding(.top, 13)
             .padding(.bottom, 8)
-            if !tabs.isEmpty {
-                HStack(spacing: 6) {
-                    Rectangle().fill(ink.opacity(0.15)).frame(height: 1)
-                    if space.id == model.state?.space {
-                        Button("↓ Clear") { model.run("clear-today") }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Ink.secondary)
-                    }
-                }
-                .padding(.horizontal, 17)
-                .frame(height: 10)
-                .padding(.top, 10)
-                .padding(.bottom, 5)
-            }
             // Like Arc's, whose column holds the Space's sidebar: the tabs scroll in it, between
             // its header and its controls, however many they are.
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(tabs) { tab in
-                        HStack(spacing: 10) {
-                            Favicon(url: tab.favicon, size: 16)
-                            Text(tab.label).font(.system(size: 14)).lineLimit(1)
+                    ForEach(space.pinned) { item in
+                        SpaceColumnRow(
+                            icon: item.favicon, title: item.title, folder: item.folder == true)
+                    }
+                    if !today.isEmpty {
+                        HStack(spacing: 6) {
+                            Rectangle().fill(ink.opacity(0.15)).frame(height: 1)
+                            Button("↓ Clear") { model.run("clear-today") }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Ink.secondary)
                         }
                         .padding(.horizontal, 17)
-                        .frame(height: 40)
+                        .frame(height: 10)
+                        .padding(.vertical, 10)
+                        ForEach(today.flatMap(\.tabs)) { tab in
+                            SpaceColumnRow(icon: tab.favicon, title: tab.label, folder: false)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -948,6 +945,29 @@ struct SpaceColumn: View {
             model.run("move-space", id, index)
             return true
         }
+    }
+}
+
+/// A row of a Space's column, like Arc's sidebar's, measured: 41 points high, a 16-point icon, or a
+/// folder's, then the title, a folder's bold.
+private struct SpaceColumnRow: View {
+    let icon: String?
+    let title: String
+    let folder: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if folder {
+                Image(systemName: "folder").font(.system(size: 14, weight: .medium))
+                    .frame(width: 16, height: 16)
+            } else {
+                Favicon(url: icon, size: 16)
+            }
+            Text(title).font(.system(size: 14, weight: folder ? .semibold : .regular))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 17)
+        .frame(height: Measure.row)
     }
 }
 

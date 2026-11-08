@@ -36,6 +36,16 @@ struct Space: Decodable, Identifiable {
     var emoji: String?
     var theme: Theme
     var profile: Int
+    /// A glance at its pinned tabs, which the library shows of every Space.
+    var pinned: [Glance]
+}
+
+/// A pinned tab, or a folder without its content (overview in app/src/shell.rs).
+struct Glance: Decodable, Identifiable {
+    var id: Int
+    var title: String
+    var favicon: String?
+    var folder: Bool?
 }
 
 /// How a Space colors the window (Theme in crates/arbalete-core/src/sidebar.rs).
