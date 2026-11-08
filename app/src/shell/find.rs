@@ -9,6 +9,11 @@ const FIND_SIZE: Size = Size {
 };
 const FIND_MARGIN: i32 = 10;
 
+thread_local! {
+    /// Whether the search last sent is a new one, which CEF ends without an active match.
+    static NEW_SEARCH: Cell<bool> = const { Cell::new(false) };
+}
+
 /// Shows the find bar with the keyboard, the text last searched for selected and, like Arc's,
 /// searched for again.
 pub(super) fn show_find() {
@@ -24,6 +29,7 @@ pub(super) fn show_find() {
     if !text.is_empty()
         && let Some(host) = find_page().and_then(|browser| browser.host())
     {
+        NEW_SEARCH.set(true);
         host.find(Some(&CefString::from(text.as_str())), 1, 0, 0);
     }
 }
@@ -89,6 +95,7 @@ pub(super) fn find(browser: &Browser, text: Option<String>, forward: bool) {
     }
     let next = win().find_text.replace(text.clone()) == text;
     if let Some(host) = browser.host() {
+        NEW_SEARCH.set(!next);
         host.find(
             Some(&CefString::from(text.as_str())),
             forward.into(),
@@ -96,6 +103,21 @@ pub(super) fn find(browser: &Browser, text: Option<String>, forward: bool) {
             next.into(),
         );
     }
+}
+
+/// Tells the find bar how many matches the search that ended found, and which one is active; a
+/// new search goes to its first match first, like Arc's, rather than leaving none active.
+pub(super) fn found(browser: &Browser, count: i32, active: i32) {
+    if NEW_SEARCH.replace(false)
+        && count > 0
+        && active == 0
+        && let Some(host) = browser.host()
+    {
+        let text = win().find_text.with_borrow(Clone::clone);
+        return host.find(Some(&CefString::from(text.as_str())), 1, 0, 1);
+    }
+    let found = json!({ "count": count, "active": active });
+    dispatch(&win().find_view, "arbalete:found", &found.to_string());
 }
 
 /// From ⌘G with nothing to search again.

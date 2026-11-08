@@ -5,8 +5,8 @@ import AppKit
 import SecurityInterface
 import SwiftUI
 
-/// Finds text in the page. Each keystroke searches; Enter goes to the next match, Shift-Enter to
-/// the previous one. A new search has no active match until Enter.
+/// Finds text in the page, like Arc's: each keystroke searches and goes to the first match; Enter
+/// goes to the next one, Shift-Enter to the previous one.
 @MainActor
 final class FindBar: ObservableObject {
     @Published var text = ""
@@ -30,7 +30,7 @@ final class FindBar: ObservableObject {
                 var count: Int
                 var active: Int
             }
-            if let detail = try? JSONDecoder().decode(Found.self, from: detail) {
+            if let detail = try? JSONDecoder().decode(Found.self, from: detail), !text.isEmpty {
                 found = (detail.count, detail.active)
             }
         default:

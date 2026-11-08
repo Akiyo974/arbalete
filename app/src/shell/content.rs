@@ -544,22 +544,18 @@ wrap_context_menu_handler! {
     }
 }
 
-// Tells the find bar how many matches the page it searches has, and which one is active, once the
-// search ends: the updates before it count matches without an active one.
+// Tells the find bar the matches of the page it searches once the search ends: the updates before
+// it count matches without an active one.
 wrap_find_handler! {
     struct ContentFindHandler {}
 
     impl FindHandler {
         fn on_find_result(&self, browser: Option<&mut Browser>, _identifier: i32, count: i32, _selection_rect: Option<&Rect>, active_match_ordinal: i32, final_update: i32) {
-            let searched = find_page().is_some_and(|mut page| {
-                browser.is_some_and(|browser| browser.is_same(Some(&mut page)) == 1)
-            });
-            if final_update == 1 && searched {
-                dispatch(
-                    &win().find_view,
-                    "arbalete:found",
-                    &json!({ "count": count, "active": active_match_ordinal }).to_string(),
-                );
+            let Some(browser) = browser.filter(|_| final_update == 1) else {
+                return;
+            };
+            if find_page().is_some_and(|mut page| browser.is_same(Some(&mut page)) == 1) {
+                found(browser, count, active_match_ordinal);
             }
         }
     }
