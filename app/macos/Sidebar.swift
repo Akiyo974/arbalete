@@ -24,39 +24,47 @@ struct SidebarView: View {
         } else {
             VStack(spacing: 0) {
                 SidebarToolbar(model: model)
-                // Like Arc's, a new Space's form slides in from the right over the tabs' room,
-                // which slides out to the left.
-                ZStack {
-                    if let space = model.space, model.draftSpace == space.id {
-                        // Like Arc's, a new Space's form takes the address's and the tabs' room.
-                        SpaceDraft(model: model, space: space)
-                            // A swipe back, rightward, carries it along, like Arc's.
-                            .offset(x: max(0, model.swipe))
-                            .transition(.move(edge: .trailing))
-                    } else {
-                        VStack(spacing: 0) {
-                            if !(model.state?.toolbar ?? false) {
-                                AddressRow(model: model, sidebarHovered: hovered)
+                VStack(spacing: 0) {
+                    // Like Arc's, a new Space's form slides in from the right over the tabs' room,
+                    // which slides out to the left.
+                    ZStack {
+                        if let space = model.space, model.draftSpace == space.id {
+                            // Like Arc's, a new Space's form takes the address's and the tabs' room.
+                            SpaceDraft(model: model, space: space)
+                                // A swipe back, rightward, carries it along, like Arc's.
+                                .offset(x: max(0, model.swipe))
+                                .transition(.move(edge: .trailing))
+                        } else {
+                            VStack(spacing: 0) {
+                                if !(model.state?.toolbar ?? false) {
+                                    AddressRow(model: model, sidebarHovered: hovered)
+                                }
+                                if model.state?.incognito == true, let page = model.page {
+                                    IncognitoSections(model: model, page: page)
+                                } else if let page = model.page, model.space != nil {
+                                    // Like Arc's, the profile's favorites stay while the Spaces slide
+                                    // below.
+                                    Favorites(model: model, page: page)
+                                        // Past the first or the last Space, like Arc's, the
+                                        // favorites go along with the tabs.
+                                        .offset(x: model.edgeShift)
+                                    SpacePager(model: model)
+                                } else {
+                                    Spacer()
+                                }
                             }
-                            if model.state?.incognito == true, let page = model.page {
-                                IncognitoSections(model: model, page: page)
-                            } else if let page = model.page, model.space != nil {
-                                // Like Arc's, the profile's favorites stay while the Spaces slide
-                                // below.
-                                Favorites(model: model, page: page)
-                                    // Past the first or the last Space, like Arc's, the
-                                    // favorites go along with the tabs.
-                                    .offset(x: model.edgeShift)
-                                SpacePager(model: model)
-                            } else {
-                                Spacer()
-                            }
+                            .transition(.move(edge: .leading))
                         }
-                        .transition(.move(edge: .leading))
+                    }
+                    .clipped()
+                    .animation(.easeInOut(duration: spaceSlide), value: model.draftSpace != nil)
+                    if model.state?.incognito != true {
+                        UpdateBanner(model: model)
                     }
                 }
-                .clipped()
-                .animation(.easeInOut(duration: spaceSlide), value: model.draftSpace != nil)
+                // Like Arc's, the tabs fade out behind the library's recent items; past them, the
+                // toolbar and the footer, 40 points each.
+                .modifier(FlyoutMask(recent: model.recent, outside: 80))
                 // Hidden until it shows on hover, like Arc's.
                 if model.state?.incognito == true {
                     // Like Arc's, only a button for a new tab.
@@ -66,7 +74,6 @@ struct SidebarView: View {
                     }
                     .frame(height: 40)
                 } else {
-                    UpdateBanner(model: model)
                     Footer(model: model)
                 }
             }

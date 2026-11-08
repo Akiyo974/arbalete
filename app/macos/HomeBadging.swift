@@ -49,6 +49,8 @@ final class RecentItems: ObservableObject {
     private var dismissal: DispatchWorkItem?
     /// The library's button, which a new download flies to.
     weak var button: NSView?
+    /// Whether the button's hover unfolds the items, which the sidebar fades its tabs behind.
+    @Published var expanded = false
 
     /// Gathers the items again, from the downloads and the sources turned on.
     func refresh(downloads: [Download], sources: [String]) {
@@ -168,7 +170,6 @@ struct LibraryEntry: View {
     let width: CGFloat
     private let hoveredButton = State(initialValue: false)
     private let hoveredFlyout = State(initialValue: false)
-    private let open = State(initialValue: false)
     private let closing = State<DispatchWorkItem?>(initialValue: nil)
 
     var body: some View {
@@ -178,7 +179,7 @@ struct LibraryEntry: View {
             model.openLibrary(nil)
         }
         .overlay(alignment: .topTrailing) {
-            if let item = recent.items.first(where: { $0.id == recent.badge }), !open.wrappedValue {
+            if let item = recent.items.first(where: { $0.id == recent.badge }), !recent.expanded {
                 Badge(item: item)
                     .offset(x: 9, y: -9)
                     .allowsHitTesting(false)
@@ -195,7 +196,7 @@ struct LibraryEntry: View {
         // shows its own, of the sources, like Arc's.
         .rightClick { showSourcesMenu(sources) }
         .overlay(alignment: .bottomLeading) {
-            if open.wrappedValue && !recent.items.isEmpty {
+            if recent.expanded && !recent.items.isEmpty {
                 Flyout(model: model, recent: recent, width: width)
                     // Measured on Arc's: its last row 2 points over the button.
                     .padding(.bottom, 30)
@@ -207,7 +208,7 @@ struct LibraryEntry: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.easeOut(duration: 0.14), value: open.wrappedValue)
+        .animation(.easeOut(duration: 0.14), value: recent.expanded)
     }
 
     /// The menu of the sources, like Arc's: a header, then each source, checked when on.
@@ -237,7 +238,9 @@ struct LibraryEntry: View {
     private func hover() {
         closing.wrappedValue?.cancel()
         let over = hoveredButton.wrappedValue || hoveredFlyout.wrappedValue
-        let change = DispatchWorkItem { open.wrappedValue = over }
+        let change = DispatchWorkItem { [recent] in
+            if recent.expanded != over { recent.expanded = over }
+        }
         closing.wrappedValue = change
         DispatchQueue.main.asyncAfter(deadline: .now() + (over ? 0.12 : 0.08), execute: change)
     }
@@ -340,6 +343,38 @@ private struct Badge: View {
             ProgressRing(download: download, size: 20)
         } else {
             Thumbnail(item: item, size: 24)
+        }
+    }
+}
+
+/// The mask over the sidebar's tabs while the recent items show, like Arc's, from its binary: the
+/// tabs fade out behind the items, which have no backing of their own. Over the sidebar's height
+/// H, from the footer up, a clear band as tall as 56 points an item and 32 more, less 4% of H,
+/// then the tabs back in over 15% of H, in 0.1 second from a band 10% of H shorter.
+struct FlyoutMask: ViewModifier {
+    @ObservedObject var recent: RecentItems
+    /// The sidebar's height past the view masked: the toolbar's and the footer's.
+    let outside: CGFloat
+
+    func body(content: Content) -> some View {
+        let shown = recent.expanded && !recent.items.isEmpty
+        content.mask {
+            GeometryReader { size in
+                let height = size.size.height + outside
+                let items = CGFloat(recent.items.count) * 56 + 32
+                let band = min(size.size.height, max(0, items - (shown ? 0.04 : 0.14) * height))
+                ZStack {
+                    // Whole while the items are folded.
+                    Color.black.opacity(shown ? 0 : 1)
+                    VStack(spacing: 0) {
+                        Color.black
+                        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                            .frame(height: min(0.15 * height, size.size.height - band))
+                        Color.clear.frame(height: band)
+                    }
+                }
+            }
+            .animation(.linear(duration: 0.1), value: shown)
         }
     }
 }
