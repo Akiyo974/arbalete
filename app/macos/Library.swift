@@ -187,8 +187,9 @@ struct LibraryView: View {
                     .scrollIndicators(.never)
                 }
             }
-            // Every section's top on the page's card's, 10 points from the window's.
-            .padding(.top, 10)
+            // Every section's top on the page's card's, 10 points from the window's; the Spaces
+            // keep their own margins.
+            .padding(.top, model.section == .spaces ? 0 : 10)
             .padding(.leading, model.section == .spaces ? 0 : 7)
             .padding(.trailing, 8)
         }
@@ -809,8 +810,9 @@ struct ManageSpacesView: View {
                 .help("New Space")
                 .padding(.horizontal, 12)
             }
+            // Like Arc's, measured: the columns the view's height less 96 points, centered.
             .padding(.horizontal, 24)
-            .padding(.bottom, 16)
+            .padding(.vertical, 48)
         }
         .scrollIndicators(.never)
     }
