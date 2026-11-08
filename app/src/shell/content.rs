@@ -62,9 +62,20 @@ wrap_keyboard_handler! {
     struct ContentKeyboard {}
 
     impl KeyboardHandler {
-        fn on_pre_key_event(&self, _browser: Option<&mut Browser>, event: Option<&KeyEvent>, os_event: *mut u8, _is_keyboard_shortcut: Option<&mut i32>) -> i32 {
+        fn on_pre_key_event(&self, browser: Option<&mut Browser>, event: Option<&KeyEvent>, os_event: *mut u8, _is_keyboard_shortcut: Option<&mut i32>) -> i32 {
             let Some(event) = event else { return 0 };
-            if event.type_ != KeyEventType::RAWKEYDOWN || os_event.is_null() {
+            if event.type_ != KeyEventType::RAWKEYDOWN {
+                return 0;
+            }
+            // Like Chrome's, Escape takes a page out of full screen, which Alloy leaves to the app.
+            if event.windows_key_code == ESCAPE
+                && let Some(host) = browser.and_then(|browser| browser.host())
+                && host.is_fullscreen() == 1
+            {
+                host.exit_fullscreen(1);
+                return 1;
+            }
+            if os_event.is_null() {
                 return 0;
             }
             #[cfg(target_os = "macos")]
@@ -80,6 +91,9 @@ wrap_keyboard_handler! {
         }
     }
 }
+
+/// The Escape key's Windows key code, which CEF gives on every platform.
+const ESCAPE: i32 = 0x1B;
 
 /// How long the page has to leave a shortcut offered first before a toast says it kept it, in
 /// milliseconds: it answers within a few frames.
