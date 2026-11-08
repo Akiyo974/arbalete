@@ -45,13 +45,13 @@ final class StatusPill: NSView {
 
     init() {
         super.init(frame: .zero)
-        // AppKit sets the layer's shadow from the view's.
-        let casts = NSShadow()
-        casts.shadowColor = NSColor.black.withAlphaComponent(0.12)
-        casts.shadowBlurRadius = 5
-        shadow = casts
         wantsLayer = true
         layer?.masksToBounds = false
+        // Arc's: black at 12%, 5 points of radius, centered.
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.12
+        layer?.shadowRadius = 5
+        layer?.shadowOffset = .zero
         // Dark whatever the window's theme, like Arc's.
         appearance = NSAppearance(named: .darkAqua)
         effect.material = .popover
