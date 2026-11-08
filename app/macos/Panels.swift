@@ -466,6 +466,9 @@ final class SiteControls: ObservableObject {
         /// Its site is in developer mode.
         var developer: Bool
         var suspends: Bool
+        /// Its videos go on in Picture in Picture as its tabs are left, while the setting allows.
+        var picture: Bool
+        var pictures: Bool
         var extensions: [SiteExtension]
         /// What the site was allowed or blocked, by the content setting that keeps it.
         struct SitePermission: Decodable, Identifiable {
@@ -557,6 +560,16 @@ struct SiteView: View {
                                 help: "Keep this site's tabs from being suspended"
                             ) {
                                 app.run("keep-awake", site.site, !site.awake)
+                            }
+                        }
+                        if site.pictures {
+                            SiteSetting(
+                                symbol: "pip.fill", title: "Picture in Picture", on: site.picture,
+                                states: ("Allowed", "Blocked"),
+                                help: "\(site.picture ? "Block" : "Allow") Picture in Picture "
+                                    + "for this site's videos when you leave their tab"
+                            ) {
+                                app.run("site-picture-in-picture", site.site, !site.picture)
                             }
                         }
                     }
@@ -810,6 +823,8 @@ struct SiteSetting: View {
     let symbol: String
     let title: String
     let on: Bool
+    /// What it reads on and off.
+    var states = ("On", "Off")
     let help: String
     let action: () -> Void
     @Environment(\.colorScheme) private var scheme
@@ -824,7 +839,7 @@ struct SiteSetting: View {
                     .background(Circle().fill(.primary.opacity(on ? 0.88 : 0.25)))
                 VStack(alignment: .leading, spacing: 0) {
                     Text(title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                    Text(on ? "On" : "Off")
+                    Text(on ? states.0 : states.1)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }

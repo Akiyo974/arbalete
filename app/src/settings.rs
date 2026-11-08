@@ -26,6 +26,8 @@ pub struct Settings {
     pub picture_in_picture: bool,
     /// The sites never suspended, by host (and port), like `mail.google.com`.
     pub awake_sites: Vec<String>,
+    /// The sites whose videos never go on in Picture in Picture, by host (and port).
+    pub no_picture_sites: Vec<String>,
     /// The sidebar's width, in points, which dragging its edge changes.
     pub sidebar_width: i32,
     /// The toast telling that ⌘S shows and hides the sidebar showed, after a drag hid it.
@@ -87,6 +89,7 @@ impl Default for Settings {
             suspend_tabs: true,
             picture_in_picture: true,
             awake_sites: Vec::new(),
+            no_picture_sites: Vec::new(),
             sidebar_width: 260,
             sidebar_hint_shown: false,
             developer_sites: BTreeMap::new(),
@@ -135,6 +138,7 @@ mod tests {
             suspend_tabs: false,
             picture_in_picture: false,
             awake_sites: vec!["mail.google.com".into()],
+            no_picture_sites: vec!["www.youtube.com".into()],
             sidebar_width: 320,
             sidebar_hint_shown: true,
             developer_sites: BTreeMap::from([("example.com".into(), true)]),

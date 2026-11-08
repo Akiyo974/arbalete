@@ -226,7 +226,7 @@ pub fn page_snapshot(page: i32, jpeg: &str) {
 }
 
 /// A tab's url, if it is still a tab.
-fn tab_url(tab: NodeId) -> Option<String> {
+pub(super) fn tab_url(tab: NodeId) -> Option<String> {
     STATE.with_borrow(|state| match &state.sidebar.node(tab)?.kind {
         NodeKind::Tab(tab) => Some(tab.url.clone()),
         _ => None,

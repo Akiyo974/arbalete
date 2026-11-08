@@ -424,6 +424,8 @@ pub enum Command {
     SettingsReady,
     /// Keeps a site's pages from being suspended, or no longer: its host, and whether.
     KeepAwake(String, bool),
+    /// Lets a site's videos go on in Picture in Picture, or no longer: its host, and whether.
+    SitePictureInPicture(String, bool),
     /// Turns a site's developer mode on or off: its host, and whether.
     DeveloperMode(String, bool),
     /// Turns a setting on or off.

@@ -309,6 +309,7 @@ fn run_command(command: Command) {
         (Command::SettingsReady, _) => send_settings(),
         (Command::SetSetting(setting, on), _) => set_setting(setting, on),
         (Command::KeepAwake(site, on), _) => keep_awake(site, on),
+        (Command::SitePictureInPicture(site, on), _) => allow_picture(site, on),
         (Command::DeveloperMode(site, on), _) => set_developer_mode(site, on),
         (
             Command::CreateSpace {

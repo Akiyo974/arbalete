@@ -27,6 +27,22 @@ const ENTER_PICTURE: &str = r#"(async () => {
     document.addEventListener("visibilitychange", shown);
 })().catch(() => {})"#;
 
+/// Lets a site's videos go on in Picture in Picture as its tabs are left, or no longer, from its
+/// site controls.
+pub(super) fn allow_picture(site: String, on: bool) {
+    SETTINGS.with_borrow_mut(|settings| {
+        settings.no_picture_sites.retain(|blocked| *blocked != site);
+        if !on {
+            settings.no_picture_sites.push(site);
+            settings.no_picture_sites.sort();
+        }
+    });
+    save_settings();
+    if let Some(url) = selected_url() {
+        send_site_controls(&url);
+    }
+}
+
 wrap_task! {
     struct EnterPicture {
         tab: NodeId,
@@ -34,7 +50,11 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            if !app_settings().picture_in_picture {
+            let settings = app_settings();
+            let blocked = tab_url(self.tab).is_some_and(|url| {
+                settings.no_picture_sites.iter().any(|blocked| *blocked == site(&url))
+            });
+            if !settings.picture_in_picture || blocked {
                 return;
             }
             let host = PAGES.with_borrow(|pages| {
