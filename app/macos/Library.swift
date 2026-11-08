@@ -128,21 +128,33 @@ struct LibraryView: View {
     var body: some View {
         HStack(spacing: 0) {
             // Like Arc's, measured: the sections in a rail 111 points wide, a little lighter than
-            // the window, centered on it, each a large icon over its name, 100 points apart; the
-            // one shown filled and tinted.
+            // the window, centered on it, each a large icon over its name, 100 points apart, in
+            // black inks the theme tints; the one shown darker, its icon filled with white.
             VStack(spacing: 21) {
                 ForEach(LibrarySection.allCases) { section in
                     let shown = model.section == section
                     Button {
                         model.pick(section)
                     } label: {
-                        VStack(spacing: 9) {
-                            Image(systemName: shown ? section.filledSymbol : section.symbol)
-                                .font(.system(size: 22, weight: .medium))
-                                .foregroundStyle(shown ? model.accent : Ink.secondary)
-                                .frame(height: 26)
+                        VStack(spacing: 6) {
+                            ZStack {
+                                if shown {
+                                    Image(systemName: section.filledSymbol)
+                                        .foregroundStyle(Color.ink((0xFFFFFF, 0.7), (0xFFFFFF, 0.25)))
+                                }
+                                Image(systemName: section.symbol)
+                                    .foregroundStyle(
+                                        shown
+                                            ? Color.ink((0x000000, 0.75), (0xFFFFFF, 0.85))
+                                            : Color.ink((0x000000, 0.5), (0xFFFFFF, 0.45)))
+                            }
+                            .font(.system(size: 22, weight: .medium))
+                            .frame(height: 26)
                             Text(section.label).font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(shown ? Ink.primary : Ink.secondary)
+                                .foregroundStyle(
+                                    shown
+                                        ? Color.ink((0x000000, 0.8), (0xFFFFFF, 0.85))
+                                        : Color.ink((0x000000, 0.65), (0xFFFFFF, 0.55)))
                                 .multilineTextAlignment(.center)
                         }
                         .frame(width: 97, height: 79)
