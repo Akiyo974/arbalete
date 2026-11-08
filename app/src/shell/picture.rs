@@ -34,6 +34,9 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
+            if !app_settings().picture_in_picture {
+                return;
+            }
             let host = PAGES.with_borrow(|pages| {
                 let live = pages.get(&self.tab).filter(|live| live.hidden_since.is_some())?;
                 live.browser.host()

@@ -89,6 +89,7 @@ pub enum Setting {
     LittleHotkey,
     RestoreSession,
     SuspendTabs,
+    PictureInPicture,
 }
 
 /// A panel of the page's developer tools (Command::DevToolsPanel).

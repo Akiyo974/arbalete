@@ -155,6 +155,7 @@ pub(super) fn set_setting(setting: Setting, on: bool) {
         Setting::LittleHotkey => settings.little_hotkey = on,
         Setting::RestoreSession => settings.restore_session = on,
         Setting::SuspendTabs => settings.suspend_tabs = on,
+        Setting::PictureInPicture => settings.picture_in_picture = on,
     }
     SETTINGS.set(settings);
     save_settings();

@@ -22,6 +22,8 @@ pub struct Settings {
     pub show_toolbar: bool,
     /// The pages hidden for long are frozen, then unloaded, to save memory and energy.
     pub suspend_tabs: bool,
+    /// A tab left while its video plays with sound goes on in Picture in Picture.
+    pub picture_in_picture: bool,
     /// The sites never suspended, by host (and port), like `mail.google.com`.
     pub awake_sites: Vec<String>,
     /// The sidebar's width, in points, which dragging its edge changes.
@@ -83,6 +85,7 @@ impl Default for Settings {
             restore_session: true,
             show_toolbar: false,
             suspend_tabs: true,
+            picture_in_picture: true,
             awake_sites: Vec::new(),
             sidebar_width: 260,
             sidebar_hint_shown: false,
@@ -130,6 +133,7 @@ mod tests {
             restore_session: false,
             show_toolbar: true,
             suspend_tabs: false,
+            picture_in_picture: false,
             awake_sites: vec!["mail.google.com".into()],
             sidebar_width: 320,
             sidebar_hint_shown: true,
@@ -150,6 +154,7 @@ mod tests {
         assert_eq!(load(&path), settings);
         fs::write(&path, r#"{ "warnBeforeQuit": true }"#).unwrap();
         assert!(load(&path).restore_session && load(&path).suspend_tabs);
+        assert!(load(&path).picture_in_picture);
         assert_eq!(load(&path).sidebar_width, 260);
         fs::write(&path, "not json").unwrap();
         assert_eq!(load(&path), Settings::default());

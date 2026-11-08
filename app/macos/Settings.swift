@@ -13,6 +13,7 @@ struct SettingsDetail: Decodable {
         var shortcuts: [String: ShortcutOverride]
         var restoreSession: Bool
         var suspendTabs: Bool
+        var pictureInPicture: Bool
         var awakeSites: [String]
     }
     struct Choice: Decodable, Identifiable, Hashable {
@@ -435,6 +436,12 @@ private struct AdvancedSettings: View {
                             .padding(.leading, 28)
                         }
                     }
+                }
+                SettingsCard {
+                    TileSwitch(
+                        tile: ("pip", Color(red: 0.69, green: 0.32, blue: 0.87)),
+                        label: "Keep videos playing in Picture in Picture when you switch tabs",
+                        isOn: binding(general.pictureInPicture, "picture-in-picture"))
                 }
             }
         }
