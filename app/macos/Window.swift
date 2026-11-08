@@ -267,7 +267,9 @@ final class SidebarHost {
                 let root = self.window.contentView?.superview,
                 let catcher = root.hitTest(event.locationInWindow) as? RightClick.Catcher
             else { return event }
-            catcher.action()
+            // Not inside the monitor: the menu the action opens runs its own event loop, which
+            // crashes AppKit from there.
+            DispatchQueue.main.async { catcher.action() }
             return nil
         }
         // Once the state changed, the displayed Space's: its publisher tells before.
