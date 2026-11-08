@@ -24,6 +24,7 @@ final class FindBar: ObservableObject {
             text = (try? JSONDecoder().decode(String.self, from: detail)) ?? ""
             field?.stringValue = text
             found = nil
+            focus()
         case "arbalete:found":
             struct Found: Decodable {
                 var count: Int
@@ -35,6 +36,13 @@ final class FindBar: ObservableObject {
         default:
             break
         }
+    }
+
+    /// Gives the field the keyboard, its text selected, as ⌘F does in Arc's.
+    func focus() {
+        guard let field, let window = field.window else { return }
+        window.makeFirstResponder(field)
+        field.selectText(nil)
     }
 
     func find(forward: Bool) {

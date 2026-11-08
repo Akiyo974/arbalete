@@ -9,7 +9,8 @@ const FIND_SIZE: Size = Size {
 };
 const FIND_MARGIN: i32 = 10;
 
-/// Shows the find bar, with the text last searched for selected.
+/// Shows the find bar with the keyboard, the text last searched for selected and, like Arc's,
+/// searched for again.
 pub(super) fn show_find() {
     make_find();
     place_find();
@@ -17,10 +18,14 @@ pub(super) fn show_find() {
         return;
     };
     controller.set_visible(1);
-    let text = win()
-        .find_text
-        .with_borrow(|text| serde_json::to_string(text).expect("a string"));
-    dispatch(&win().find_view, "arbalete:show", &text.to_string());
+    let text = win().find_text.with_borrow(Clone::clone);
+    let json = serde_json::to_string(&text).expect("a string");
+    dispatch(&win().find_view, "arbalete:show", &json);
+    if !text.is_empty()
+        && let Some(host) = find_page().and_then(|browser| browser.host())
+    {
+        host.find(Some(&CefString::from(text.as_str())), 1, 0, 0);
+    }
 }
 
 /// Makes the find bar's place, once.

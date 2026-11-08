@@ -665,11 +665,7 @@ final class NativeWindow {
         findBar = find
         let findSurface = Surface(in: window, radius: 10) { FindView(bar: find) }
         findSurface.takesKeyboard = true
-        findSurface.shown = { [weak find] in
-            guard let field = find?.field else { return }
-            field.window?.makeFirstResponder(field)
-            field.selectText(nil)
-        }
+        findSurface.shown = { [weak find] in find?.focus() }
         surfaces["find"] = findSurface
         let site = SiteControls(app: app)
         siteControls = site
