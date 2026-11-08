@@ -202,6 +202,9 @@ final class CommandBar: ObservableObject {
     /// Whether a Little Arbalete window's bar shows.
     var littleShown = false
 
+    /// The tab switcher's picked tile, in its window's Space's color.
+    var tile: Color { app.switcherTile }
+
     /// Its panel shows above its window's page.
     var isShown: Bool {
         little == nil
@@ -414,7 +417,8 @@ struct CommandBarView: View {
 
     var body: some View {
         if let switching = bar.switching {
-            TabSwitcher(switching: switching, snapshots: bar.snapshots.mapValues(\.image))
+            TabSwitcher(
+                switching: switching, snapshots: bar.snapshots.mapValues(\.image), tile: bar.tile)
                 .background(lightVeil)
         } else {
             let rows = bar.rows
@@ -534,13 +538,15 @@ struct SuggestionsBanner: View {
 struct TabSwitcher: View {
     let switching: Switching
     let snapshots: [Int: NSImage]
+    let tile: Color
 
     var body: some View {
         ScrollViewReader { scroll in
             ScrollView(.horizontal) {
                 HStack(spacing: 0) {
                     ForEach(Array(switching.tabs.enumerated()), id: \.element.id) { index, tab in
-                        SwitcherTab(tab: tab, snapshot: snapshots[tab.id], picked: index == switching.picked)
+                        SwitcherTab(
+                            tab: tab, snapshot: snapshots[tab.id], picked: index == switching.picked, tile: tile)
                             .id(index)
                     }
                 }
@@ -557,11 +563,13 @@ struct TabSwitcher: View {
 }
 
 /// A tab of the switcher, like Arc's: its page's last picture above its icon and title, 15
-/// points semibold, padded 12; the picked one on a tile rounded 8.
+/// points semibold, padded 12; the picked one on a tile rounded 8, in the Space's color.
 struct SwitcherTab: View {
     let tab: Switching.Card
     let snapshot: NSImage?
     let picked: Bool
+    let tile: Color
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         VStack(spacing: 12) {
@@ -594,7 +602,8 @@ struct SwitcherTab: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.ink((0x000000, 0.08), (0xFFFFFF, 0.14)).opacity(picked ? 1 : 0)))
+                // Like Arc's: whole on a dark panel, at half on a light one.
+                .fill(tile.opacity(picked ? (scheme == .dark ? 1 : 0.5) : 0)))
     }
 }
 
