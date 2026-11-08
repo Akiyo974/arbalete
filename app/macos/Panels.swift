@@ -211,7 +211,9 @@ struct PageToolbar: View {
                 Spacer()
                 if tab != nil {
                     ForEach(model.state?.extensions ?? []) { ext in
+                        // 37 wide like the bar's other buttons, so all stand 37 apart.
                         PinnedExtension(model: model, extension: ext, view: "toolbar")
+                            .frame(width: 37)
                     }
                     BarEnd(model: model)
                 }
