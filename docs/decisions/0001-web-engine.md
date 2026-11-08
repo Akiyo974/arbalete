@@ -197,7 +197,7 @@ To answer before the compatibility layer is built, in this order:
 - **Proprietary codecs (2026-11-07).** The official CEF builds leave out H.264 and AAC, which sites like Twitch
   stream. [amenophis/cef-codecs](https://github.com/amenophis/cef-codecs) builds the same CEF from source with
   Chromium's proprietary codecs; FFmpeg decodes them under the LGPL 2.1, and macOS decodes HEVC. `mise run cef`
-  downloads the build named by the `cef` version and `cef-codecs-revision` in the workspace's `Cargo.toml`,
+  downloads the release named by `cef-codecs` in the workspace's `Cargo.toml`, which Renovate updates,
   checked against its SHA-256, for development, CI and releases alike. Widevine is not in it: it needs an
   agreement with Google.
 - **Chromium's own pages in Alloy style (2026-11-07).** Build 2 of that CEF carries a patch letting Alloy-style

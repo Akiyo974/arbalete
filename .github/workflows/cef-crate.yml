@@ -1,0 +1,38 @@
+name: CEF crate
+
+# Renovate moves Cargo.toml to a new release of amenophis/cef-codecs; this moves the cef crate,
+# in Cargo.toml and Cargo.lock, to the one taking that release's CEF, on Renovate's branch, then
+# checks it: a push with this workflow's token starts no workflow of its own.
+on:
+  push:
+    branches: ["renovate/**"]
+    paths: [Cargo.toml]
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  crate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release=$(sed -n 's/^cef-codecs = "\(.*\)"$/\1/p' Cargo.toml)
+          cef=$(echo "$release" | sed -n 's/^cef-\(.*\)-codecs\..*$/\1/p')
+          current=$(sed -n 's/^cef = "=\(.*\)"$/\1/p' Cargo.toml)
+          # The crate names its CEF after `+` in its version: 156.0.0+156.0.7.
+          crate=$(curl -fsSL -A "arbalete (https://github.com/amenophis/arbalete)" \
+            "https://crates.io/api/v1/crates/cef/versions?per_page=100" |
+            grep -o "\"num\":\"[^\"]*+$cef\"" | head -1 | sed 's/^"num":"//; s/"$//')
+          [ -n "$crate" ] || { echo "no cef crate takes CEF $cef" >&2; exit 1; }
+          [ "${crate%%+*}" != "$current" ] || exit 0
+          sed -i "s/^cef = \"=$current\"$/cef = \"=${crate%%+*}\"/" Cargo.toml
+          cargo update --package cef --precise "$crate"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "build(deps): take the cef crate ${crate%%+*}, for CEF $cef"
+          git push
+          gh workflow run ci.yml --ref "$GITHUB_REF_NAME"

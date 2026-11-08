@@ -7,7 +7,7 @@ members = ["app", "crates/arbalete-core"]
 [workspace.dependencies]
 cef = "=156.0.0"
 
-# Which of amenophis/cef-codecs' builds of that CEF to take: its release cef-<CEF>-codecs.<revision>.
-# The revision goes up whenever the build changes for the same CEF, like a patch of cef-builds'.
+# Which of amenophis/cef-codecs' builds of that CEF to take: its release, cef-<CEF>-codecs.<revision>.
+# Renovate proposes each new one, and .github/workflows/cef-crate.yml moves the crate above along.
 [workspace.metadata]
-cef-codecs-revision = 3
+cef-codecs = "cef-156.0.7-codecs.3"

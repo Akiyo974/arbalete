@@ -28,11 +28,12 @@ cargo install --locked export-cef-dir --version "=$version"
 cef=$(sed -n '/^name = "cef"$/{n;s/^version = ".*+\\(.*\\)"/\\1/p;}' Cargo.lock)
 name=$(curl -fsSL https://cef-builds.spotifycdn.com/index.json | grep -o "cef_binary_$cef+[^\\"]*_macosarm64_minimal.tar.bz2" | head -1)
 [ -n "$name" ] || { echo "CEF $cef is not in CEF's index" >&2; exit 1; }
-revision=$(sed -n 's/^cef-codecs-revision = \\([0-9]*\\)$/\\1/p' Cargo.toml)
-url="https://github.com/amenophis/cef-codecs/releases/download/cef-$cef-codecs.$revision/$(echo "$name" | sed 's/+/%2B/g')"
+release=$(sed -n 's/^cef-codecs = "\\(.*\\)"$/\\1/p' Cargo.toml)
+case $release in cef-$cef-codecs.*) ;; *) echo "amenophis/cef-codecs' $release is not a build of CEF $cef, which the cef crate takes" >&2; exit 1 ;; esac
+url="https://github.com/amenophis/cef-codecs/releases/download/$release/$(echo "$name" | sed 's/+/%2B/g')"
 download=$(mktemp -d)
 curl -fsSL -o "$download/$name" "$url" && curl -fsSL -o "$download/$name.sha256" "$url.sha256" ||
-  { echo "amenophis/cef-codecs has no build $revision of CEF $cef: build it there first (its README)." >&2; exit 1; }
+  { echo "amenophis/cef-codecs has no release $release: build it there first (its README)." >&2; exit 1; }
 (cd "$download" && shasum -a 256 -c "$name.sha256")
 export-cef-dir --force --archive "$download/$name" "$CEF_PATH"
 rm -rf "$download"

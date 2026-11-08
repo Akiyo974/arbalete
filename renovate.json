@@ -30,17 +30,42 @@
       "semanticCommitScope": null
     },
     {
-      "description": "Chromium itself: one pull request of its own, never merged automatically, to try by hand before merging. The workspace's Cargo.toml is CEF's one version.",
+      "description": "The cef crate follows amenophis/cef-codecs' release (above), never on its own.",
+      "matchManagers": [
+        "cargo"
+      ],
       "matchPackageNames": [
         "cef"
       ],
+      "enabled": false
+    },
+    {
+      "description": "A new Chromium is for users to see: in the release notes, as a pull request of its own, never merged automatically.",
+      "matchPackageNames": [
+        "amenophis/cef-codecs"
+      ],
+      "semanticCommitType": "feat",
+      "semanticCommitScope": "app",
+      "commitMessageTopic": "Chromium",
       "labels": [
         "chromium"
       ],
-      "prBodyNotes": [
-        "CEF comes with Chromium's proprietary codecs from amenophis/cef-codecs: build this version there first, or `mise run cef` fails."
-      ],
       "automerge": false
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "The CEF build Arbalete takes: a release of amenophis/cef-codecs, named in Cargo.toml. Proposed only once released there; .github/workflows/cef-crate.yml then moves the cef crate along.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Cargo\\.toml$/"
+      ],
+      "matchStrings": [
+        "cef-codecs = \"(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "amenophis/cef-codecs",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "regex:^cef-(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-codecs\\.(?<build>\\d+)$"
     }
   ]
 }

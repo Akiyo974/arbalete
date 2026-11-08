@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Started by cef-crate.yml once it moved the cef crate on Renovate's branch.
+  workflow_dispatch:
 
 permissions:
   contents: read
