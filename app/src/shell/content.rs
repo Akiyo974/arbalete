@@ -927,6 +927,27 @@ wrap_focus_handler! {
                 select_tab(tab);
             }
         }
+
+        /// A hidden page asked to come forward, like Picture in Picture's back to tab button does
+        /// (the ActivateContents patch, in amenophis/cef-codecs): its tab shows, in front. The
+        /// app's own focus only goes to shown pages.
+        fn on_set_focus(&self, browser: Option<&mut Browser>, source: FocusSource) -> i32 {
+            let Some(tab) = browser.and_then(|browser| page_tab(browser)) else {
+                return 0;
+            };
+            let hidden = PAGES.with_borrow(|pages| {
+                pages.get(&tab).is_some_and(|live| live.hidden_since.is_some())
+            });
+            let selected = STATE.with_borrow(|state| state.sidebar.displayed().selected == Some(tab));
+            if source != FocusSource::SYSTEM || !hidden || selected {
+                return 0;
+            }
+            #[cfg(target_os = "macos")]
+            crate::mac::activate();
+            select_tab(tab);
+            focus_page(tab);
+            1
+        }
     }
 }
 
