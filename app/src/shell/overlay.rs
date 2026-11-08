@@ -25,6 +25,9 @@ const SWITCHER_HEIGHT: i32 = 190;
 const SWITCHER_PADDING: i32 = 16;
 const SWITCHER_TAB: i32 = 190;
 const SWITCHER_MARGIN: i32 = 40;
+/// How long ⌃ is held after ⌃⇥ before the switcher shows, like Arc's: a quick ⌃⇥ shows the tab
+/// before without it.
+const SWITCHER_DELAY_MS: i64 = 100;
 
 /// The open tabs and history pages the Command Bar shows for a text, at most.
 const OVERLAY_TABS: usize = 3;
@@ -47,9 +50,9 @@ fn step(index: usize, count: usize, forward: bool) -> usize {
 }
 
 /// ⌃⇥ shows the tabs selected last, still open, the most recent first, side by side in the
-/// Command Bar's panel, each with the last picture of its page, and picks the one before the shown
-/// tab; each ⌃⇥ more picks the next one, ⌃⇧⇥ the one before. Releasing ⌃ shows the picked tab
-/// (end_tab_switch).
+/// Command Bar's panel once ⌃ is held a moment, each with the last picture of its page, and picks
+/// the one before the shown tab; each ⌃⇥ more picks the next one, ⌃⇧⇥ the one before. Releasing
+/// ⌃ shows the picked tab (end_tab_switch).
 pub(super) fn switch_tab(forward: bool) {
     let opening = win().switch.with_borrow(Option::is_none);
     let switch = win().switch.take().or_else(|| {
@@ -84,13 +87,40 @@ pub(super) fn switch_tab(forward: bool) {
     let count = rows.len();
     let detail = json!({ "tabs": rows, "picked": index });
     dispatch(&win().overlay_view, "arbalete:switch", &detail.to_string());
-    if opening && let Some(overlay) = win().overlay.with_borrow(Clone::clone) {
-        win().over_url_bar.set(false);
-        place_switcher(count);
-        overlay.set_visible(1);
-        round_overlay();
-    }
     win().switch.set(Some((tabs, index)));
+    if opening {
+        post_delayed_task(
+            ThreadId::UI,
+            Some(&mut ShowSwitcher::new(count)),
+            SWITCHER_DELAY_MS,
+        );
+    }
+}
+
+wrap_task! {
+    struct ShowSwitcher {
+        count: usize,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            show_switcher(self.count);
+        }
+    }
+}
+
+/// Shows the tab switcher with its `count` tabs, unless ⌃ was released since.
+fn show_switcher(count: usize) {
+    if win().switch.with_borrow(Option::is_none) {
+        return;
+    }
+    let Some(overlay) = win().overlay.with_borrow(Clone::clone) else {
+        return;
+    };
+    win().over_url_bar.set(false);
+    place_switcher(count);
+    overlay.set_visible(1);
+    round_overlay();
 }
 
 /// Centers the tab switcher on the window, as wide as its `count` tabs, or as the window allows.
