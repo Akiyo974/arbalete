@@ -646,6 +646,8 @@ final class NativeWindow {
         let overlay = Surface(in: window, radius: 12) { CommandBarView(bar: bar) }
         overlay.panelEdge()
         overlay.shadow(opacity: 0.5, radius: 45, drop: 18)
+        // Like Arc's tab switcher, rounded 24.
+        bar.switched = { [weak overlay] in overlay?.radius = $0 ? 24 : 12 }
         overlay.takesKeyboard = true
         overlay.shown = { [weak bar] in
             guard let field = bar?.field, field.currentEditor() == nil else { return }

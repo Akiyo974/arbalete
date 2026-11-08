@@ -19,6 +19,13 @@ const URL_BAR_TOP: i32 = 44;
 /// How many tabs selected last the tab switcher lists, at most.
 const RECENT_TABS: usize = 10;
 
+/// The tab switcher's height and the space around its tabs, like Arc's, each tab's width, and
+/// the room it leaves on the window's sides: the tabs it cannot hold scroll.
+const SWITCHER_HEIGHT: i32 = 190;
+const SWITCHER_PADDING: i32 = 16;
+const SWITCHER_TAB: i32 = 190;
+const SWITCHER_MARGIN: i32 = 40;
+
 /// The open tabs and history pages the Command Bar shows for a text, at most.
 const OVERLAY_TABS: usize = 3;
 const OVERLAY_PAGES: usize = 5;
@@ -39,10 +46,12 @@ fn step(index: usize, count: usize, forward: bool) -> usize {
     }
 }
 
-/// ⌃⇥ shows the tabs selected last, still open, the most recent first, in the Command Bar's panel,
-/// and picks the one before the shown tab; each ⌃⇥ more picks the next one, ⌃⇧⇥ the one before.
-/// Releasing ⌃ shows the picked tab (end_tab_switch).
+/// ⌃⇥ shows the tabs selected last, still open, the most recent first, side by side in the
+/// Command Bar's panel, each with the last picture of its page, and picks the one before the shown
+/// tab; each ⌃⇥ more picks the next one, ⌃⇧⇥ the one before. Releasing ⌃ shows the picked tab
+/// (end_tab_switch).
 pub(super) fn switch_tab(forward: bool) {
+    let opening = win().switch.with_borrow(Option::is_none);
     let switch = win().switch.take().or_else(|| {
         let tabs: Vec<_> = STATE.with_borrow_mut(|state| {
             win()
@@ -64,21 +73,41 @@ pub(super) fn switch_tab(forward: bool) {
                     return None;
                 };
                 let favicon = favicon_url(profile(id)?, tab);
-                Some(json!({ "id": id, "url": shown_url(&tab.url), "title": tab.label(), "favicon": favicon }))
+                // The pictures only as it opens: the panel keeps them while ⌃ is held.
+                let snapshot = opening
+                    .then(|| SNAPSHOTS.with_borrow(|snapshots| snapshots.get(&id).cloned()))
+                    .flatten();
+                Some(json!({ "id": id, "url": shown_url(&tab.url), "title": tab.label(), "favicon": favicon, "snapshot": snapshot }))
             })
             .collect()
     });
+    let count = rows.len();
     let detail = json!({ "tabs": rows, "picked": index });
     dispatch(&win().overlay_view, "arbalete:switch", &detail.to_string());
-    if let Some(overlay) = win().overlay.with_borrow(Clone::clone)
-        && overlay.is_visible() == 0
-    {
+    if opening && let Some(overlay) = win().overlay.with_borrow(Clone::clone) {
         win().over_url_bar.set(false);
-        place_overlay(OVERLAY_ROW);
+        place_switcher(count);
         overlay.set_visible(1);
         round_overlay();
     }
     win().switch.set(Some((tabs, index)));
+}
+
+/// Centers the tab switcher on the window, as wide as its `count` tabs, or as the window allows.
+fn place_switcher(count: usize) {
+    place_overlay_by(|size| {
+        let tabs = i32::try_from(count).unwrap_or(i32::MAX);
+        let width = tabs
+            .saturating_mul(SWITCHER_TAB)
+            .saturating_add(2 * SWITCHER_PADDING)
+            .min(size.width - 2 * SWITCHER_MARGIN);
+        Rect {
+            x: (size.width - width) / 2,
+            y: ((size.height - SWITCHER_HEIGHT) / 2).max(24),
+            width,
+            height: SWITCHER_HEIGHT,
+        }
+    });
 }
 
 /// Shows the tab picked in the switcher, if it is shown.
@@ -183,6 +212,31 @@ pub(super) fn round_overlay() {
 
 /// Centers the Command Bar on the window, or places it over the url bar, `height` tall.
 pub(super) fn place_overlay(height: i32) {
+    place_overlay_by(|size| {
+        if win().over_url_bar.get() {
+            let width = URL_EDIT_WIDTH.max(sidebar_width() - 2 * URL_BAR_LEFT);
+            Rect {
+                x: URL_BAR_LEFT,
+                y: URL_BAR_TOP,
+                width: width.min(URL_EDIT_MAX).min(size.width - URL_BAR_LEFT - 80),
+                height,
+            }
+        } else {
+            // Inset 160 points from the window's sides, or 20 in a narrow window.
+            let margin = if size.width >= OVERLAY_WIDTH { 160 } else { 20 };
+            let width = OVERLAY_WIDTH.min(size.width - margin);
+            Rect {
+                x: (size.width - width) / 2,
+                y: ((size.height - OVERLAY_BOX) / 2).max(24),
+                width,
+                height,
+            }
+        }
+    });
+}
+
+/// Places the Command Bar's panel where `bounds` puts it in the window's size.
+fn place_overlay_by(bounds: impl FnOnce(Size) -> Rect) {
     let (Some(overlay), Some(size)) = (
         win().overlay.with_borrow(Clone::clone),
         win()
@@ -191,26 +245,7 @@ pub(super) fn place_overlay(height: i32) {
     ) else {
         return;
     };
-    let bounds = if win().over_url_bar.get() {
-        let width = URL_EDIT_WIDTH.max(sidebar_width() - 2 * URL_BAR_LEFT);
-        Rect {
-            x: URL_BAR_LEFT,
-            y: URL_BAR_TOP,
-            width: width.min(URL_EDIT_MAX).min(size.width - URL_BAR_LEFT - 80),
-            height,
-        }
-    } else {
-        // Inset 160 points from the window's sides, or 20 in a narrow window.
-        let margin = if size.width >= OVERLAY_WIDTH { 160 } else { 20 };
-        let width = OVERLAY_WIDTH.min(size.width - margin);
-        Rect {
-            x: (size.width - width) / 2,
-            y: ((size.height - OVERLAY_BOX) / 2).max(24),
-            width,
-            height,
-        }
-    };
-    overlay.set_bounds(Some(&bounds));
+    overlay.set_bounds(Some(&bounds(size)));
 }
 
 /// Sends the Command Bar the open tabs, in every Space and the favorites, then the displayed

@@ -4,9 +4,10 @@
 // engine's suggestions, then the open tabs and the history pages matching it; the arrows pick one,
 // Enter or a click opens it, Escape closes the bar. Typing forward completes the field with the
 // best result's address, selected: typing on replaces it, deleting drops it, → or End keeps it.
-// While ⌃⇥ is held, it lists the tabs selected last instead.
+// While ⌃⇥ is held, it shows the tabs selected last instead, side by side (TabSwitcher).
 
 import AppKit
+import ImageIO
 import SwiftUI
 
 /// The search row's height and a result's, and the space around the results, measured on Arc's:
@@ -14,7 +15,6 @@ import SwiftUI
 private let searchRow: CGFloat = 64
 private let resultRow: CGFloat = 50
 private let resultsPadding: CGFloat = 8
-private let resultsInset: CGFloat = 10
 private let resultsTop: CGFloat = 3
 private let resultsBottom: CGFloat = 11.5
 /// The banner telling where suggestions come from, under the results.
@@ -80,7 +80,17 @@ struct Results: Decodable {
 }
 
 struct Switching: Decodable {
-    var tabs: [Tab]
+    struct Card: Decodable, Identifiable {
+        var id: Int
+        var url: String
+        var title: String
+        var favicon: String?
+        /// The last picture of its page, a JPEG in base64, sent as the switcher opens.
+        var snapshot: String?
+
+        var label: String { title.isEmpty ? url : title }
+    }
+    var tabs: [Card]
     var picked: Int
 }
 
@@ -170,6 +180,10 @@ final class CommandBar: ObservableObject {
     @Published var hovered: Int?
     @Published var completing = false
     @Published var switching: Switching?
+    /// The pictures of the switcher's tabs, by tab, with the JPEG each was made from.
+    private(set) var snapshots: [Int: (jpeg: String, image: NSImage)] = [:]
+    /// Told whether it is the tab switcher, which its panel rounds more, like Arc's.
+    var switched: (Bool) -> Void = { _ in }
     /// Whether the banner telling where suggestions come from shows, like Arc's under its ⓘ.
     @Published var informing = false {
         didSet { if informing != oldValue { sendHeight() } }
@@ -219,6 +233,8 @@ final class CommandBar: ObservableObject {
             completing = false
             switching = nil
             informing = false
+            // The app placed it again, one row tall: it is told its height anew.
+            height = 0
             field?.stringValue = text
             // Selected all once it shows, ready to be typed over.
             field?.currentEditor()?.selectAll(nil)
@@ -241,10 +257,20 @@ final class CommandBar: ObservableObject {
             updated.suggestions = detail.suggestions
             results = updated
         case "arbalete:switch":
-            switching = try? decoder.decode(Switching.self, from: detail)
+            let switching = try? decoder.decode(Switching.self, from: detail)
+            let ids = Set(switching?.tabs.map(\.id) ?? [])
+            snapshots = snapshots.filter { ids.contains($0.key) }
+            for tab in switching?.tabs ?? [] {
+                guard let jpeg = tab.snapshot, snapshots[tab.id]?.jpeg != jpeg,
+                    let image = thumbnail(jpeg)
+                else { continue }
+                snapshots[tab.id] = (jpeg, image)
+            }
+            self.switching = switching
         default:
             return
         }
+        switched(switching != nil)
         sendHeight()
     }
 
@@ -284,13 +310,13 @@ final class CommandBar: ObservableObject {
             + (results?.pages ?? []).map(CommandRow.init)
     }
 
-    /// Tells the app the bar's height, which it fits it to.
+    /// Tells the app the bar's height, which it fits it to; the app sizes the tab switcher itself
+    /// (place_switcher in app/src/shell/overlay.rs).
     func sendHeight() {
+        guard switching == nil else { return }
         let shown = min(rows.count, visibleRows)
         let height =
-            if let switching {
-                CGFloat(switching.tabs.count) * resultRow + 2 * resultsInset
-            } else if shown > 0 {
+            if shown > 0 {
                 searchRow + CGFloat(shown) * resultRow + resultsTop + resultsBottom
                     + (informing ? bannerRow : 0)
             } else {
@@ -388,15 +414,8 @@ struct CommandBarView: View {
 
     var body: some View {
         if let switching = bar.switching {
-            VStack(spacing: 0) {
-                ForEach(Array(switching.tabs.enumerated()), id: \.element.id) { index, tab in
-                    ResultRow(row: .tab(tab), picked: index == switching.picked, hovered: false, label: nil)
-                }
-            }
-            .padding(.horizontal, resultsPadding)
-            .padding(.vertical, resultsInset)
-            .frame(maxHeight: .infinity, alignment: .top)
-            .background(lightVeil)
+            TabSwitcher(switching: switching, snapshots: bar.snapshots.mapValues(\.image))
+                .background(lightVeil)
         } else {
             let rows = bar.rows
             VStack(spacing: 0) {
@@ -508,6 +527,87 @@ struct SuggestionsBanner: View {
         .frame(height: bannerRow)
         .background(Color.ink((0x000000, 0.03), (0x000000, 0.2)))
     }
+}
+
+/// The tab switcher's tabs, side by side, padded 16 like Arc's: the picked one stays in sight
+/// while the others scroll (place_switcher in app/src/shell/overlay.rs sizes the panel to them).
+struct TabSwitcher: View {
+    let switching: Switching
+    let snapshots: [Int: NSImage]
+
+    var body: some View {
+        ScrollViewReader { scroll in
+            ScrollView(.horizontal) {
+                HStack(spacing: 0) {
+                    ForEach(Array(switching.tabs.enumerated()), id: \.element.id) { index, tab in
+                        SwitcherTab(tab: tab, snapshot: snapshots[tab.id], picked: index == switching.picked)
+                            .id(index)
+                    }
+                }
+                .padding(16)
+            }
+            .scrollIndicators(.never)
+            .onAppear { scroll.scrollTo(switching.picked, anchor: .center) }
+            .onChange(of: switching.picked) { _, picked in
+                withAnimation(.easeOut(duration: 0.1)) { scroll.scrollTo(picked, anchor: .center) }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// A tab of the switcher, like Arc's: its page's last picture above its icon and title, 15
+/// points semibold, padded 12; the picked one on a tile rounded 8.
+struct SwitcherTab: View {
+    let tab: Switching.Card
+    let snapshot: NSImage?
+    let picked: Bool
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Group {
+                if let snapshot {
+                    Image(nsImage: snapshot).resizable().interpolation(.high).scaledToFill()
+                } else {
+                    // A page never pictured: its icon, larger.
+                    Color.ink((0x000000, 0.06), (0xFFFFFF, 0.06))
+                        .overlay { Favicon(url: tab.favicon, size: 32) }
+                }
+            }
+            .frame(width: 166, height: 104, alignment: .top)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Color.ink((0x000000, 0.1), (0xFFFFFF, 0.1)), lineWidth: 1)
+            )
+            // Arc's: black at 30%, 2 points around, half a point down.
+            .shadow(color: .black.opacity(0.3), radius: 2, y: 0.5)
+            HStack(spacing: 6) {
+                if tab.favicon != nil { Favicon(url: tab.favicon, size: 16) }
+                Text(tab.label)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.ink((0x000000, 0.85), (0xFFFFFF, 0.9)))
+                    .lineLimit(1)
+            }
+            .frame(width: 166, height: 18)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.ink((0x000000, 0.08), (0xFFFFFF, 0.14)).opacity(picked ? 1 : 0)))
+    }
+}
+
+/// A page's picture, a JPEG in base64, made small enough for the switcher.
+func thumbnail(_ jpeg: String) -> NSImage? {
+    let options = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 600,
+    ] as CFDictionary
+    guard let data = Data(base64Encoded: jpeg),
+        let source = CGImageSourceCreateWithData(data as CFData, nil),
+        let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options)
+    else { return nil }
+    return NSImage(cgImage: image, size: .zero)
 }
 
 /// One of the banner's buttons, small and rounded, the prominent one filled with the accent color.

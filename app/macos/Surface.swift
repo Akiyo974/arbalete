@@ -64,7 +64,10 @@ final class Surface {
         didSet { tintView.layer?.backgroundColor = tint?.cgColor }
     }
     private let parent: NSWindow
-    private let radius: CGFloat
+    /// How rounded it is.
+    var radius: CGFloat {
+        didSet { if radius != oldValue { shape() } }
+    }
     /// Where a beak on its top edge points, from its left edge, like Arc's site controls: its top
     /// `beakHeight` points are then the beak's, and its content is under them.
     var beak: CGFloat? {
