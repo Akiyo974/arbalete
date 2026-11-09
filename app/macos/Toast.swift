@@ -6,7 +6,7 @@
 import AppKit
 import SwiftUI
 
-/// What a toast says: an icon and a label, a key to press inside it, like "Tab closed. ⇧⌘T to
+/// What a toast says: an icon and a label, a key to press inside it, like "Tabs cleared. ⇧⌘T to
 /// Reopen", a line under it, and a button.
 struct Toast {
     /// The toast showing with the same key gives way to this one, like the zoom's level.

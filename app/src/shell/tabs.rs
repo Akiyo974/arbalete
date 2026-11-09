@@ -147,7 +147,7 @@ fn close_keeping(tab: Option<NodeId>, keep_pinned: bool) {
 
 /// Removes an open tab, which may be reopened, and returns the tab to show instead.
 fn remove_tab(tab: NodeId) -> Option<NodeId> {
-    let (next, kept) = STATE.with_borrow_mut(|state| {
+    let next = STATE.with_borrow_mut(|state| {
         let profile = state.sidebar.profile_of(tab).expect("an open tab");
         let closed = Closed {
             id: Some(tab),
@@ -158,8 +158,7 @@ fn remove_tab(tab: NodeId) -> Option<NodeId> {
             place: state.sidebar.place_of(tab),
         };
         // An incognito window's tabs cannot be reopened, nor are they archived.
-        let kept = !INCOGNITO.with_borrow(|incognito| incognito.contains_key(&profile));
-        if kept {
+        if !INCOGNITO.with_borrow(|incognito| incognito.contains_key(&profile)) {
             // Like Arc's, a tab closed goes to the archive too.
             if let Some(space) = state.sidebar.space_of(tab) {
                 state
@@ -168,18 +167,16 @@ fn remove_tab(tab: NodeId) -> Option<NodeId> {
             }
             state.keep_closed([closed]);
         }
-        (state.sidebar.next_after_close(tab), kept)
+        state.sidebar.next_after_close(tab)
     });
     update_sidebar(|sidebar| sidebar.remove(tab)).expect("an open tab");
     send_archive();
-    if kept {
-        tell_closed("Tab closed", 1);
-    }
+    // Like Arc's, closing a tab tells nothing: ⇧⌘T reopens it.
     next
 }
 
-/// Tells that `what` closed, like Arc's, with a button reopening the `count` tabs it closed;
-/// ⇧⌘T reopens one, like Reopen Closed Tab in the menu.
+/// Tells that `what` closed, like Arc's after clearing tabs or deleting a folder, with a button
+/// reopening the `count` tabs it closed; ⇧⌘T reopens one, like Reopen Closed Tab in the menu.
 fn tell_closed(what: &str, count: usize) {
     if count == 0 {
         return;
@@ -224,16 +221,17 @@ pub(super) fn close_folder_tabs(folder: NodeId) {
 
 /// Closes every "Today" tab of the displayed Space, which may be reopened.
 pub(super) fn clear_today() {
-    close_rows("Tabs cleared", |sidebar| {
+    close_rows(Some("Tabs cleared"), |sidebar| {
         let space = sidebar.displayed();
         let (id, profile) = (space.id, space.profile);
         Ok((sidebar.clear_today(id)?, profile))
     });
 }
 
-/// Closes the rows after a tab's, as clear_today closes "Today" tabs.
+/// Closes the rows after a tab's, as clear_today closes "Today" tabs, but like closing a tab,
+/// telling nothing.
 pub(super) fn close_tabs_below(tab: NodeId) {
-    close_rows("Tabs closed", |sidebar| {
+    close_rows(None, |sidebar| {
         let profile = sidebar.profile_of(tab).ok_or(Error::UnknownNode)?;
         Ok((sidebar.remove_below(tab)?, profile))
     });
@@ -241,17 +239,18 @@ pub(super) fn close_tabs_below(tab: NodeId) {
 
 /// Removes a folder and closes its tabs, as clear_today closes "Today" tabs.
 pub(super) fn delete_folder(folder: NodeId) {
-    close_rows("Folder deleted", |sidebar| {
+    close_rows(Some("Folder deleted"), |sidebar| {
         let profile = sidebar.profile_of(folder).ok_or(Error::UnknownNode)?;
         Ok((sidebar.remove_folder(folder)?, profile))
     });
 }
 
 /// Removes rows with `remove`, which returns their tabs and their profile; the tabs may be
-/// reopened, as a toast saying `what` happened offers. When the selected tab was one of them, shows the tab closing it would have shown,
-/// if it is left, or the overlay. Like a selection, an unknown row from a menu is ignored.
+/// reopened, as a toast saying `what` happened offers, if any. When the selected tab was one of
+/// them, shows the tab closing it would have shown, if it is left, or the overlay. Like a
+/// selection, an unknown row from a menu is ignored.
 pub(super) fn close_rows(
-    what: &str,
+    what: Option<&str>,
     remove: impl FnOnce(&mut Sidebar) -> Result<(Vec<Tab>, ProfileId), Error>,
 ) {
     let space = STATE.with_borrow(|state| state.sidebar.displayed().id);
@@ -278,7 +277,9 @@ pub(super) fn close_rows(
         });
         send_archive();
     }
-    tell_closed(what, removed.len());
+    if let Some(what) = what {
+        tell_closed(what, removed.len());
+    }
     STATE.with_borrow_mut(|state| {
         state.keep_closed(removed.into_iter().map(|tab| Closed {
             id: None,
