@@ -69,6 +69,7 @@ final class AppModel: ObservableObject {
     }
     var viewingChanged: () -> Void = {}
     @Published var archive: [ArchivedTab] = []
+    @Published var boosts: [LibraryBoost] = []
     /// The sidebar shows the library, on a section, under what its field searches.
     @Published var libraryShown = false
     /// The node a drag in the sidebar carries, whether a tab, and where it would land
@@ -229,6 +230,8 @@ final class AppModel: ObservableObject {
             refreshRecent()
         case "arbalete:archive":
             archive = (try? JSONDecoder().decode([ArchivedTab].self, from: detail)) ?? archive
+        case "arbalete:boosts":
+            boosts = (try? JSONDecoder().decode([LibraryBoost].self, from: detail)) ?? boosts
         case "arbalete:swipe":
             struct Gesture: Decodable {
                 var phase: String
@@ -388,6 +391,12 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// A Boost is on for the selected tab's site.
+    var selectedBoosted: Bool {
+        guard let id = page?.selected, case .tab(let tab)? = item(id) else { return false }
+        return tab.boosted ?? false
+    }
+
     /// A favorite, tab, folder or split of the displayed Space's page.
     func item(_ id: Int) -> Item? {
         guard let page else { return nil }
@@ -505,6 +514,7 @@ final class AppModel: ObservableObject {
         // Their page may have changed them.
         switch section {
         case .archive: run("send-archive")
+        case .boosts: run("send-boosts")
         default: break
         }
     }
@@ -598,6 +608,7 @@ final class NativeWindow {
     let commandBar: CommandBar
     let findBar: FindBar
     let siteControls: SiteControls
+    let boostEditor: BoostEditorModel
     let themePicker: ThemePickerModel
     let permissionPrompt: PermissionPrompt
     let authPrompt: AuthPrompt
@@ -691,6 +702,7 @@ final class NativeWindow {
         siteSurface.takesKeyboard = true
         siteSurface.resigned = { app.run("hide-site-controls") }
         surfaces["site"] = siteSurface
+        boostEditor = BoostEditorModel(in: window, app: app)
         let picker = ThemePickerModel(app: app)
         themePicker = picker
         let themeSurface = Surface(in: window, radius: 20, material: .hudWindow) {
@@ -740,6 +752,7 @@ final class NativeWindow {
         if let clicks { NSEvent.removeMonitor(clicks) }
         sidebar.close()
         surfaces.values.forEach { $0.close() }
+        boostEditor.close()
         splitHandles.close()
         pages.close()
         pageDrop.close()
@@ -756,6 +769,7 @@ final class NativeWindow {
         case "overlay": commandBar.handle(name, detail)
         case "find": findBar.handle(name, detail)
         case "site": siteControls.handle(name, detail)
+        case "boost": boostEditor.handle(name, detail)
         case "theme": themePicker.handle(name, detail)
         case "permission": permissionPrompt.handle(name, detail)
         case "auth": authPrompt.handle(name, detail)

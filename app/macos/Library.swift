@@ -8,8 +8,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum LibrarySection: String, CaseIterable, Identifiable {
-    // Arc's, in its order: its Easels and Boosts have no counterpart here.
-    case media, downloads, spaces, archive
+    // Arc's, in its order: its Easels have no counterpart here.
+    case media, downloads, spaces, boosts, archive
 
     var id: String { rawValue }
 
@@ -18,6 +18,7 @@ enum LibrarySection: String, CaseIterable, Identifiable {
         case .media: "Media"
         case .downloads: "Downloads"
         case .spaces: "Spaces"
+        case .boosts: "Boosts"
         case .archive: "Archived Tabs"
         }
     }
@@ -27,6 +28,7 @@ enum LibrarySection: String, CaseIterable, Identifiable {
         case .media: "photo.on.rectangle.angled"
         case .downloads: "arrow.down.circle"
         case .spaces: "rectangle.on.rectangle.angled"
+        case .boosts: "paintbrush.pointed"
         case .archive: "archivebox"
         }
     }
@@ -37,6 +39,7 @@ enum LibrarySection: String, CaseIterable, Identifiable {
         case .media: "photo.fill.on.rectangle.fill"
         case .downloads: "arrow.down.circle.fill"
         case .spaces: "rectangle.fill.on.rectangle.angled.fill"
+        case .boosts: "paintbrush.pointed.fill"
         case .archive: "archivebox.fill"
         }
     }
@@ -190,6 +193,7 @@ struct LibraryView: View {
                             switch model.section {
                             case .spaces: EmptyView()
                             case .archive: ArchivedTabs(model: model)
+                            case .boosts: BoostsList(model: model)
                             case .media: MediaGrid(model: model)
                             case .downloads: DownloadsList(model: model)
                             }
@@ -541,6 +545,73 @@ struct Empty: View {
 
     var body: some View {
         Text(text).foregroundStyle(.secondary).padding(.top, 20).frame(maxWidth: .infinity)
+    }
+}
+
+/// A Boost, as the library lists it.
+struct LibraryBoost: Decodable, Identifiable {
+    var id: UInt64
+    var site: String
+    var title: String
+    var active: Bool
+}
+
+/// The profile's Boosts, like Arc's: a click opens one in the editor over its site in Peek, the
+/// list staying; a switch turns it on, which turns its site's others off.
+struct BoostsList: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        let found = model.boosts.filter { matches(model.query, $0.title, $0.site) }
+        if model.boosts.isEmpty {
+            Empty(text: "No Boosts yet: make one from a site's controls")
+        } else if found.isEmpty {
+            Empty(text: "No Boost matches")
+        }
+        ForEach(found) { boost in
+            BoostRow(model: model, boost: boost)
+        }
+    }
+}
+
+struct BoostRow: View {
+    let model: AppModel
+    let boost: LibraryBoost
+    private let hovered = State(initialValue: false)
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "paintbrush.pointed.fill").font(.system(size: 13))
+                .foregroundStyle(boost.active ? Ink.primary : Ink.secondary)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(boost.title).font(.system(size: 14)).foregroundStyle(Ink.primary).lineLimit(1)
+                Text(boost.site).font(.system(size: 12)).foregroundStyle(Ink.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 6)
+            Toggle(
+                "",
+                isOn: Binding(
+                    get: { boost.active }, set: { model.run("set-boost-active", boost.id, $0) })
+            )
+            .toggleStyle(.switch).controlSize(.mini).labelsHidden()
+            .opacity(hovered.wrappedValue || boost.active ? 1 : 0)
+            .help(boost.active ? "Turn this Boost off" : "Turn this Boost on")
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 56)
+        .background(
+            RoundedRectangle(cornerRadius: 10).fill(Ink.item.opacity(hovered.wrappedValue ? 1 : 0)))
+        .contentShape(Rectangle())
+        .onTapGesture { model.run("peek-boost", boost.id) }
+        .onHover { hovered.wrappedValue = $0 }
+        .contextMenu {
+            Button("Edit in a Tab") {
+                model.closeLibrary()
+                model.run("edit-boost", boost.id)
+            }
+            Button("Delete Boost") { model.run("delete-boost", boost.id) }
+        }
     }
 }
 

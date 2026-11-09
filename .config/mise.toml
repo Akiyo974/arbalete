@@ -15,6 +15,8 @@ uv = "0.13.6"
 CEF_PATH = "{{env.HOME}}/cef"
 # Sparkle, the app's updater (app/macos/Updates.swift), in a folder named by its version.
 SPARKLE_PATH = "{{env.HOME}}/sparkle/2.10.1"
+# Monaco, the Boosts' code editor (app/editor), in a folder named by its version.
+MONACO_PATH = "{{env.HOME}}/monaco/0.57.0"
 
 # CEF's version, the cef crate's in the workspace's Cargo.toml, picks the CEF to download and the
 # bundling tool to install. The official CEF leaves out Chromium's proprietary codecs (H.264, AAC),
@@ -60,9 +62,25 @@ tar -xf "$archive" -C "$SPARKLE_PATH"
 rm "$archive"
 """
 
+# Monaco's npm package, checked against its checksum, once per version: its AMD build, which a
+# page loads without a bundler, and its notices.
+[tasks.monaco]
+description = "Download Monaco to MONACO_PATH"
+run = """
+[ -d "$MONACO_PATH/vs" ] && exit 0
+version=$(basename "$MONACO_PATH")
+download=$(mktemp -d)
+curl -fsSL -o "$download/monaco.tgz" "https://registry.npmjs.org/monaco-editor/-/monaco-editor-$version.tgz"
+echo "3ea1712fbacd3290cf4751007e3a5b57cc279767607812d4c3e57925fb0b05c2  $download/monaco.tgz" | shasum -a 256 -c
+tar -xzf "$download/monaco.tgz" -C "$download"
+mkdir -p "$MONACO_PATH"
+cp -R "$download/package/min/vs" "$download/package/LICENSE" "$download/package/ThirdPartyNotices.txt" "$MONACO_PATH/"
+rm -rf "$download"
+"""
+
 [tasks.setup]
-description = "Download CEF and Sparkle, and install the CEF bundling tool"
-depends = ["cef", "sparkle", "cef-bundler"]
+description = "Download CEF, Sparkle and Monaco, and install the CEF bundling tool"
+depends = ["cef", "sparkle", "monaco", "cef-bundler"]
 
 [tasks.check]
 description = "Run every check listed in CONTRIBUTING.md"
@@ -77,7 +95,7 @@ run = [
 
 [tasks.app]
 description = "Bundle the app"
-depends = ["sparkle"]
+depends = ["sparkle", "monaco"]
 # A development bundle, "Arbalete Dev", stands apart from an installed Arbalete: its own
 # identifier, so its own preferences, permissions and default browser registration (its data
 # folder too, app/src/main.rs), and its own icon. mise run release names the release's.
@@ -120,6 +138,12 @@ run = [
   "plutil -insert SUAutomaticallyUpdate -bool YES target/bundle/Arbalete.app/Contents/Info.plist",
   # The fonts of Easels' texts, like Arc's (app/macos/Easel.swift), with their license (SIL OFL).
   "cp -R app/resources/fonts target/bundle/Arbalete.app/Contents/Resources/fonts",
+  # The Boosts' code editor (app/editor), with Monaco and its license and notices, which
+  # redistributing it requires.
+  "mkdir -p target/bundle/Arbalete.app/Contents/Resources/editor && cp app/editor/* target/bundle/Arbalete.app/Contents/Resources/editor/",
+  "ditto \"$MONACO_PATH/vs\" target/bundle/Arbalete.app/Contents/Resources/editor/vs",
+  "cp \"$MONACO_PATH/LICENSE\" target/bundle/Arbalete.app/Contents/Resources/Monaco-LICENSE",
+  "cp \"$MONACO_PATH/ThirdPartyNotices.txt\" target/bundle/Arbalete.app/Contents/Resources/Monaco-ThirdPartyNotices.txt",
   # The helper extension, loaded in every profile (app/src/extensions.rs).
   "cp -R app/extension target/bundle/Arbalete.app/Contents/Resources/arbalete-helper",
   # A browser opens web links: macOS offers it as the default browser, which other apps' links

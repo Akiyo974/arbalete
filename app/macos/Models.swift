@@ -105,6 +105,8 @@ struct Tab: Decodable, Identifiable {
     var open: Bool?
     /// Its site is in developer mode.
     var developer: Bool?
+    /// A Boost is on for its site.
+    var boosted: Bool?
 
     /// Its title, or its address without one.
     var label: String { title.isEmpty ? url : title }

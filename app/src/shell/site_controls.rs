@@ -112,7 +112,7 @@ pub(super) fn send_site_controls(url: &str) {
         .collect();
     let settings = app_settings();
     let awake = settings.awake_sites.iter().any(|awake| awake == site(url));
-    let detail = json!({ "url": shown_url(url), "site": site(url), "awake": awake, "developer": developer_mode(url), "suspends": settings.suspend_tabs, "picture": !settings.no_picture_sites.iter().any(|blocked| blocked == site(url)), "pictures": settings.picture_in_picture, "extensions": extensions, "permissions": site_permissions(url) });
+    let detail = json!({ "url": shown_url(url), "site": site(url), "awake": awake, "developer": developer_mode(url), "suspends": settings.suspend_tabs, "picture": !settings.no_picture_sites.iter().any(|blocked| blocked == site(url)), "pictures": settings.picture_in_picture, "extensions": extensions, "permissions": site_permissions(url), "boosts": boosts::site_boosts(url) });
     dispatch(&win().site_view, "arbalete:show", &detail.to_string());
 }
 

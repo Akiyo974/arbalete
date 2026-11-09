@@ -1,0 +1,23 @@
+<!doctype html>
+<!-- The Boost editor's code (app/macos/BoostEditor.swift): Monaco, which the app bundles, in its
+     web view. editor.js talks with the panel. -->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html,
+      body,
+      #editor {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #1e1e1e;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="editor"></div>
+    <script src="vs/loader.js"></script>
+    <script src="editor.js"></script>
+  </body>
+</html>

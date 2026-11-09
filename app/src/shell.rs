@@ -38,6 +38,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 mod archive;
 mod auth_prompt;
+mod boosts;
 mod capture;
 mod chrome_pages;
 mod commands;
@@ -70,6 +71,7 @@ mod windows;
 
 use archive::*;
 use auth_prompt::*;
+pub use boosts::{page_closed as boosts_page_closed, page_created as boosts_page_created};
 use capture::*;
 pub use chrome_pages::*;
 pub use commands::*;
@@ -845,6 +847,7 @@ fn tab_json(id: NodeId, tab: &Tab, profile: ProfileId) -> serde_json::Value {
         "asleep": ASLEEP.with_borrow(|asleep| asleep.contains(&id)),
         "open": has_page(id),
         "developer": developer_mode(&tab.url),
+        "boosted": boosts::boosted(profile, &tab.url),
     })
 }
 
@@ -1027,6 +1030,7 @@ fn sync_native_surfaces() {
     }
     sync_permission_prompt();
     sync_auth_prompt();
+    boosts::place_boost_editor();
     if let Some(overlay) = IMPORT.with_borrow(Clone::clone) {
         IMPORT_VIEW.with(|view| mirror(view, &overlay));
     }
@@ -1439,7 +1443,7 @@ mod tests {
             { "id": home, "title": "Home", "emoji": null, "theme": { "colors": ["#a352ff", "#5289ff", "#ff5252"], "mode": "auto", "intensity": 0.8, "noise": 0.4 }, "profile": profile, "pinned": [] },
             { "id": work, "title": "Work", "emoji": "💼", "theme": theme("#3e7bfa"), "profile": profile, "pinned": [
                 { "id": folder, "title": "Docs", "folder": true },
-                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false, "asleep": false, "open": false, "developer": false },
+                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false, "asleep": false, "open": false, "developer": false, "boosted": false },
             ] },
         ]);
         assert_eq!(json["spaces"], spaces);

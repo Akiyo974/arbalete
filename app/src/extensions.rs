@@ -622,6 +622,7 @@ pub fn profile_ready(profile: ProfileId, dir: &Path) {
 /// Starts watching the extensions from the bridge's browser, which outlives the pages, with the
 /// first page, then learns which target each page is.
 pub fn page_created(profile: ProfileId, browser: &Browser) {
+    crate::shell::boosts_page_created(profile, browser);
     let Some(host) = browser.host() else { return };
     let started = BRIDGE.with_borrow(|bridge| bridge.host.is_some());
     if !started && let Some(sidebar) = crate::shell::bridge_host() {
@@ -651,6 +652,7 @@ pub fn page_created(profile: ProfileId, browser: &Browser) {
 
 /// Forgets a page as its browser closes.
 pub fn page_closed(page: i32) {
+    crate::shell::boosts_page_closed(page);
     store_page_closed(page);
     let registration = BRIDGE.with_borrow_mut(|bridge| {
         bridge.contents.remove(&page);

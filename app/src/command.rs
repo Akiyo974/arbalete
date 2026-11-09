@@ -3,6 +3,7 @@
 //! `{"name": "navigate", "args": "https://example.com/"}` or
 //! `{"name": "rename", "args": [12, "Work"]}`, a struct-like command's as an object.
 
+use arbalete_core::boosts::{Boost, BoostId};
 use arbalete_core::import::Choice;
 use arbalete_core::search::SearchEngine;
 use arbalete_core::sidebar::{
@@ -112,6 +113,26 @@ impl InspectorPanel {
             Self::Elements => "elements",
         }
     }
+}
+
+/// What the Boost editor's buttons ask of its Boost (Command::BoostEditor): `"undo"`, `"redo"`,
+/// `"reset"`, `"close"`, `"pick"`, `"globals"`, `"reload"` or `{"zap": <on>}`.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BoostEditorAction {
+    Undo,
+    Redo,
+    /// Takes every change of the Boost back.
+    Reset,
+    Close,
+    /// Starts the zap picker in the page, or stops it.
+    Zap(bool),
+    /// Starts the picker to insert an element's selector in the code.
+    Pick,
+    /// Sends the code the page's own globals, which its JavaScript may use.
+    Globals,
+    /// Reloads the edited page, which runs the code's JavaScript.
+    Reload,
 }
 
 /// A command, named like its variant in kebab case, `ShowSiteControls` as `show-site-controls`.
@@ -456,6 +477,20 @@ pub enum Command {
     SitePictureInPicture(String, bool),
     /// Turns a site's developer mode on or off: its host, and whether.
     DeveloperMode(String, bool),
+    /// Makes a Boost for the shown page's site and opens the editor on it.
+    NewBoost,
+    /// Opens the editor on a Boost, over a page of its site.
+    EditBoost(BoostId),
+    /// Opens the editor on a Boost over its site in Peek, from the library.
+    PeekBoost(BoostId),
+    /// The editor changed its Boost, during a gesture or not, which undoes as one.
+    ChangeBoost(Box<Boost>, bool),
+    BoostEditor(BoostEditorAction),
+    SetBoostActive(BoostId, bool),
+    RenameBoost(BoostId, String),
+    DeleteBoost(BoostId),
+    /// Sends the library the displayed profile's Boosts.
+    SendBoosts,
     /// Turns a setting on or off.
     SetSetting(Setting, bool),
     /// Shows a Space in the sidebar, and its selected tab in the content view.

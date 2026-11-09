@@ -67,6 +67,8 @@ fn main() {
     println!("cargo:rustc-link-lib=framework=AVKit");
     // The downloads' thumbnails (FileThumbnail in macos/Library.swift).
     println!("cargo:rustc-link-lib=framework=QuickLookThumbnailing");
+    // The Boosts' code editor, Monaco in a web view (macos/BoostEditor.swift).
+    println!("cargo:rustc-link-lib=framework=WebKit");
     // The certificate sheet (showCertificate in macos/Panels.swift).
     println!("cargo:rustc-link-lib=framework=SecurityInterface");
     // Sparkle ships in the bundle's Frameworks. Weak, since the helpers and the tests, which

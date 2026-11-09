@@ -509,6 +509,13 @@ final class SiteControls: ObservableObject {
             var id: UInt32 { setting }
         }
         var permissions: [SitePermission]
+        /// The site's Boosts, none when it cannot have any, like an incognito window's.
+        struct SiteBoost: Decodable, Identifiable {
+            var id: UInt64
+            var title: String
+            var active: Bool
+        }
+        var boosts: [SiteBoost]?
     }
 
     @Published var site: Site?
@@ -529,11 +536,12 @@ final class SiteControls: ObservableObject {
     }
 }
 
-/// The site controls' actions, like Arc's: share, copy the link (where Arc has its Boosts),
-/// capture a part of the page, and capture all of it; their commands.
+/// The site controls' actions, like Arc's: share, a new Boost, capture a part of the page, and
+/// capture all of it; their commands.
+private let newBoost = command("new-boost")
 private let siteActions = [
     (command("choose-menu", "site", "share"), "Share", "square.and.arrow.up"),
-    (command("choose-menu", "site", "copy-link"), "Copy Link", "link"),
+    (newBoost, "New Boost", "paintbrush.pointed"),
     (command("capture-area"), "Capture", "camera"),
     (command("capture-full"), "Capture Full Page", "text.viewfinder"),
 ]
@@ -556,7 +564,18 @@ struct SiteView: View {
                         } content: {
                             Image(systemName: symbol).font(.system(size: 17))
                         }
+                        .disabled(command == newBoost && site.boosts == nil)
                     }
+                }
+                if let boosts = site.boosts, !boosts.isEmpty {
+                    SiteSection(title: "Boosts", more: "New", action: { app.run("new-boost") }) {
+                        VStack(alignment: .leading, spacing: 11) {
+                            ForEach(boosts) { boost in
+                                SiteBoost(app: app, boost: boost)
+                            }
+                        }
+                    }
+                    .padding(.top, 10.5)
                 }
                 SiteSection(
                     title: "Extensions", more: "Manage", action: { app.run("manage-extensions") }
@@ -672,14 +691,16 @@ struct SiteView: View {
     }
 }
 
-/// The site controls' "…" button, like Arc's: a round button that pulls down what the site keeps,
-/// the extensions and the site's settings. Arc's Boosts have no counterpart here.
+/// The site controls' "…" button, like Arc's: a round button that pulls down the link, what the
+/// site keeps, the extensions and the site's settings.
 struct SiteMore: View {
     let app: AppModel
     private let hovered = State(initialValue: false)
 
     var body: some View {
         Menu {
+            Button("Copy Link") { run(command("choose-menu", "site", "copy-link")) }
+            Divider()
             Button("Clear Cache") { run(command("choose-menu", "site", "clear-cache")) }
             Button("Clear Cookies") { run(command("choose-menu", "site", "clear-cookies")) }
             Divider()
@@ -792,6 +813,33 @@ struct SiteExtensionTile: View {
             }
             waiting.wrappedValue = show
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: show)
+        }
+    }
+}
+
+/// A Boost of the site in its site controls: its switch, and a button opening it in the editor.
+struct SiteBoost: View {
+    let app: AppModel
+    let boost: SiteControls.Site.SiteBoost
+
+    var body: some View {
+        HStack(spacing: 4) {
+            SiteSetting(
+                symbol: "paintbrush.pointed.fill", title: boost.title, on: boost.active,
+                help: "Turn \(boost.active ? "off" : "on") this Boost"
+            ) {
+                app.run("set-boost-active", boost.id, !boost.active)
+            }
+            Button {
+                app.run("hide-site-controls")
+                app.run("edit-boost", boost.id)
+            } label: {
+                Image(systemName: "pencil").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Edit this Boost")
         }
     }
 }

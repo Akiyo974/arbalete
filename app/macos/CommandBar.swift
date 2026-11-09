@@ -29,6 +29,7 @@ let actions: [(title: String, command: String)] = [
     ("New Folder", command("new-folder")),
     ("New Easel", command("new-easel")),
     ("New Little Arbalete Window", command("new-little")),
+    ("New Boost", command("new-boost")),
     ("New Profile", command("new-profile")),
     ("Close Tab", command("close")),
     ("Reopen Closed Tab", command("reopen", 0)),

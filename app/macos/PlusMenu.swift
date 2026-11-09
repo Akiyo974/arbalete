@@ -43,8 +43,9 @@ extension AppModel {
                     id: "easel", symbol: "scribble", title: "New Easel", shortcut: "⌃⇧E"
                 ) { [weak self] in self?.run("new-easel") },
                 PlusMenuItem(
-                    id: "boost", symbol: "paintbrush.pointed", title: "New Boost", enabled: false,
-                    help: "Coming soon"),
+                    id: "boost", symbol: "paintbrush.pointed", title: "New Boost",
+                    enabled: page?.selected != nil
+                ) { [weak self] in self?.run("new-boost") },
             ],
             [
                 // Like Arc's, a split needs a page to join.

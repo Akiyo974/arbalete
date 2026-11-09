@@ -425,11 +425,26 @@ struct SiteControlsButton: View {
 
     var body: some View {
         GeometryReader { geometry in
-            IconButton(
-                symbol: symbol, label: "Site controls", size: 26, symbolSize: symbolSize,
-                active: model.siteControlsShown
-            ) {
+            let open = {
                 model.run("show-site-controls", commandButton(view, inMainWindow(geometry.frame(in: .global))))
+            }
+            if model.selectedBoosted {
+                // Like Arc's, a Boost on for the site fills the button with the Space's color.
+                Button(action: open) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(model.accentInk)
+                        .frame(width: 24, height: 24)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(model.accent))
+                        .frame(width: 26, height: 26)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Site controls (a Boost is on)")
+            } else {
+                IconButton(
+                    symbol: symbol, label: "Site controls", size: 26, symbolSize: symbolSize,
+                    active: model.siteControlsShown, action: open)
             }
         }
         .frame(width: 26, height: 26)

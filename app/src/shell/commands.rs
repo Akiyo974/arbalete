@@ -331,6 +331,15 @@ fn run_command(command: Command) {
         (Command::KeepAwake(site, on), _) => keep_awake(site, on),
         (Command::SitePictureInPicture(site, on), _) => allow_picture(site, on),
         (Command::DeveloperMode(site, on), _) => set_developer_mode(site, on),
+        (Command::NewBoost, _) => boosts::new_boost(),
+        (Command::EditBoost(id), _) => boosts::edit_boost(id),
+        (Command::PeekBoost(id), _) => boosts::peek_boost(id),
+        (Command::ChangeBoost(boost, gesture), _) => boosts::change_boost(*boost, gesture),
+        (Command::BoostEditor(action), _) => boosts::boost_editor_action(action),
+        (Command::SetBoostActive(id, on), _) => boosts::set_boost_active(id, on),
+        (Command::RenameBoost(id, title), _) => boosts::rename_boost(id, &title),
+        (Command::DeleteBoost(id), _) => boosts::delete_boost(id),
+        (Command::SendBoosts, _) => boosts::send_boosts(),
         (
             Command::CreateSpace {
                 title,
