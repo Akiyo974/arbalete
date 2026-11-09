@@ -152,9 +152,28 @@ pub(super) fn update_spaces(
 
 /// Deletes a Space, at once, like Arc's, which tells it and lets ⌘Z put it back.
 pub(super) fn delete_space(space: SpaceId) {
+    remove_space(space, "Space deleted", |sidebar| {
+        sidebar.delete_space(space)
+    });
+}
+
+/// Turns a Space into a folder of another Space, like Arc's, which tells it and lets ⌘Z put it
+/// back.
+pub(super) fn space_to_folder(space: SpaceId, into: SpaceId) {
+    remove_space(space, "Space turned into folder", |sidebar| {
+        sidebar.space_to_folder(space, into)
+    });
+}
+
+/// Removes a Space by `change`, then tells it as `what`, ⌘Z putting it back.
+fn remove_space(
+    space: SpaceId,
+    what: &str,
+    change: impl FnOnce(&mut Sidebar) -> Result<DeletedSpace, arbalete_core::sidebar::Error>,
+) {
     let mut deleted = None;
     update_spaces(space, |sidebar| {
-        deleted = Some(sidebar.delete_space(space)?);
+        deleted = Some(change(sidebar)?);
         Ok(())
     });
     let Some(deleted) = deleted else {
@@ -165,7 +184,7 @@ pub(super) fn delete_space(space: SpaceId) {
         let over = state.deleted.len().saturating_sub(MAX_CLOSED);
         state.deleted.drain(..over);
     });
-    tell_closed("Space deleted", 1);
+    tell_closed(what, 1);
 }
 
 /// Puts the Space deleted last back and shows it, if it was deleted after the tabs closed last.

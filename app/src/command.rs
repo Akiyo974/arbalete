@@ -523,6 +523,8 @@ pub enum Command {
     ToggleSpace(SpaceId),
     /// Deletes a Space with its tabs.
     DeleteSpace(SpaceId),
+    /// Turns a Space into a folder of another Space, the second one.
+    SpaceToFolder(SpaceId, SpaceId),
     /// Moves a Space to an index in sidebar order, as the app counts them once the Space has
     /// left.
     MoveSpace(SpaceId, usize),

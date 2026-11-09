@@ -397,13 +397,7 @@ fn move_to(sidebar: &Sidebar, id: NodeId) -> Entry {
             let space_id = serde_json::to_string(&space.id).expect("an id");
             Entry::Item(Item {
                 id: format!("move/{space_id}"),
-                title: match &space.emoji {
-                    // A symbol or a site's icon shows only in the sidebar.
-                    Some(emoji) if !emoji.starts_with("symbol:") && !emoji.starts_with("site:") => {
-                        format!("{emoji}  {}", space.title)
-                    }
-                    _ => space.title.clone(),
-                },
+                title: space_title(space),
                 checked: Some(space.id) == current,
                 enabled: true,
                 action: Action::Run(Command::MoveToSpace(id, space.id)),
@@ -419,6 +413,17 @@ fn move_to(sidebar: &Sidebar, id: NodeId) -> Entry {
         ),
     ]);
     Entry::Submenu("Move to".to_string(), spaces)
+}
+
+/// A Space as menus list it: its emoji, if any, then its title.
+fn space_title(space: &Space) -> String {
+    match &space.emoji {
+        // A symbol or a site's icon shows only in the sidebar.
+        Some(emoji) if !emoji.starts_with("symbol:") && !emoji.starts_with("site:") => {
+            format!("{emoji}  {}", space.title)
+        }
+        _ => space.title.clone(),
+    }
 }
 
 fn duplicate(id: NodeId) -> Entry {
@@ -462,6 +467,11 @@ fn space_menu(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
             Action::Run(Command::NewFolder(Some(space.pinned))),
         ),
         Entry::Separator,
+        Entry::Submenu(
+            format!("Export “{}” into Folder", space.title),
+            into_folder(sidebar, space),
+        ),
+        Entry::Separator,
         item(
             "manage",
             "Manage Spaces…",
@@ -477,6 +487,36 @@ fn space_menu(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
             action: delete,
         }),
     ]
+}
+
+/// The Spaces a Space may become a folder of, like Arc's: every Space, its own disabled. Another
+/// profile's asks first, as its tabs lose their sign-ins.
+fn into_folder(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
+    sidebar
+        .spaces()
+        .iter()
+        .map(|into| {
+            let into_id = serde_json::to_string(&into.id).expect("an id");
+            let command = Command::SpaceToFolder(space.id, into.id);
+            Entry::Item(Item {
+                id: format!("into-folder/{into_id}"),
+                title: space_title(into),
+                checked: false,
+                enabled: into.id != space.id,
+                action: if into.profile == space.profile {
+                    Action::Run(command)
+                } else {
+                    Action::Confirm {
+                        question: format!("Move these tabs to “{}”?", into.title),
+                        detail: "That Space uses another profile: the tabs may be signed out of \
+                            their sites or lose what was in progress.",
+                        button: "Move Tabs",
+                        command,
+                    }
+                },
+            })
+        })
+        .collect()
 }
 
 /// The profiles a Space may be attached to, its own checked, and a new one.
@@ -969,6 +1009,10 @@ mod tests {
                 "-",
                 "New Folder",
                 "-",
+                "Export “Home” into Folder ▸",
+                "  (Home)",
+                "  Work",
+                "-",
                 "Manage Spaces…",
                 "-",
                 "Delete Space",
@@ -1007,6 +1051,31 @@ mod tests {
         assert_eq!(
             choose("delete"),
             Some(Action::Run(Command::DeleteSpace(home.id)))
+        );
+        // The Work Space is another profile's: moving tabs there asks first.
+        let work_space = sidebar.spaces()[1].id;
+        let work_space_id = serde_json::to_string(&work_space).unwrap();
+        assert_eq!(
+            choose(&format!("into-folder/{work_space_id}")),
+            Some(Action::Confirm {
+                question: "Move these tabs to “Work”?".into(),
+                detail: "That Space uses another profile: the tabs may be signed out of their \
+                    sites or lose what was in progress.",
+                button: "Move Tabs",
+                command: Command::SpaceToFolder(home.id, work_space),
+            })
+        );
+        let mut same = Sidebar::default();
+        let home = same.spaces()[0].id;
+        let profile = same.profiles()[0].id;
+        let books = same.add_space("Books", profile).unwrap();
+        let books_id = serde_json::to_string(&books).unwrap();
+        assert_eq!(
+            find(
+                build(&same, Target::Space(home)).unwrap(),
+                &format!("into-folder/{books_id}")
+            ),
+            Some(Action::Run(Command::SpaceToFolder(home, books)))
         );
     }
 

@@ -220,6 +220,9 @@ pub struct DeletedSpace {
     space: Space,
     nodes: Vec<Node>,
     routes: Vec<Option<usize>>,
+    /// The folder it was turned into (`Sidebar::space_to_folder`), and the one in it holding its
+    /// "Today" tabs, whose rows `restore_space` takes back.
+    folder: Option<(NodeId, Option<NodeId>)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1078,6 +1081,7 @@ impl Sidebar {
             space,
             nodes,
             routes,
+            folder: None,
         })
     }
 
@@ -1094,7 +1098,66 @@ impl Sidebar {
         self.spaces.insert(index, deleted.space);
         self.url_routing.remember_space(id, &deleted.routes);
         self.displayed = Some(id);
+        // Turned into a folder, it takes back what the folder still holds.
+        if let Some((folder, today)) = deleted.folder
+            && self.folder_mut(folder).is_ok()
+        {
+            let (pinned, today_root) = self.space(id).map(|s| (s.pinned, s.today))?;
+            if let Some(today) =
+                today.filter(|today| self.nodes.get(today).and_then(|n| n.parent) == Some(folder))
+            {
+                for row in self.nodes[&today].children.clone() {
+                    self.move_node(row, today_root, usize::MAX)?;
+                }
+                self.remove(today)?;
+            }
+            for row in self.nodes[&folder].children.clone() {
+                self.move_node(row, pinned, usize::MAX)?;
+            }
+            self.remove(folder)?;
+            // A tab back in its Space is no longer another's selected one.
+            for index in 0..self.spaces.len() {
+                let space = &self.spaces[index];
+                if let Some(tab) = space.selected
+                    && self.space_of(tab) != Some(space.id)
+                {
+                    self.spaces[index].selected = None;
+                }
+            }
+        }
         Ok(id)
+    }
+
+    /// Turns a Space into a folder named after it, first among another Space's pinned tabs, like
+    /// Arc's: its pinned rows, then its "Today" tabs in a "Today" folder, and displays that
+    /// Space. Returns the Space deleted, for `restore_space` to undo it.
+    pub fn space_to_folder(&mut self, id: SpaceId, into: SpaceId) -> Result<DeletedSpace, Error> {
+        let (title, pinned, today) = self
+            .space(id)
+            .map(|s| (s.title.clone(), s.pinned, s.today))?;
+        let target = self.space(into)?.pinned;
+        if id == into || self.is_incognito(id) || self.is_incognito(into) {
+            return Err(Error::UnknownSpace);
+        }
+        let folder = self.add_folder(target, &title)?;
+        self.move_node(folder, target, 0)?;
+        for row in self.nodes[&pinned].children.clone() {
+            self.move_node(row, folder, usize::MAX)?;
+        }
+        let today_rows = self.nodes[&today].children.clone();
+        let today = if today_rows.is_empty() {
+            None
+        } else {
+            let today = self.add_folder(folder, "Today")?;
+            for row in today_rows {
+                self.move_node(row, today, usize::MAX)?;
+            }
+            Some(today)
+        };
+        let mut deleted = self.delete_space(id)?;
+        deleted.folder = Some((folder, today));
+        self.display(into)?;
+        Ok(deleted)
     }
 
     /// Opens a tab at the end of the Space's "Today" tabs, from the Space's selected tab.
@@ -2306,6 +2369,72 @@ mod tests {
         assert_eq!(sidebar.spaces()[0].selected, None);
         assert!(sidebar.node(folder).is_none());
         assert_eq!(sidebar.folder_to_space(tab), Err(Error::NotAFolder));
+    }
+
+    #[test]
+    fn turns_a_space_into_a_folder_of_another_and_back() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let profile = home.profile;
+        let work = sidebar.add_space("Work", profile).unwrap();
+        let space = sidebar.space(work).unwrap().clone();
+        let kept = sidebar.add_folder(home.pinned, "Kept").unwrap();
+        let pinned = sidebar
+            .add_tab(space.pinned, "https://p.test/", "P")
+            .unwrap();
+        let nested = sidebar.add_folder(space.pinned, "Nested").unwrap();
+        let today = sidebar.open_tab(work, "https://t.test/").unwrap();
+        sidebar.select(work, today).unwrap();
+        sidebar.display(work).unwrap();
+        assert_eq!(
+            sidebar.space_to_folder(work, work).unwrap_err(),
+            Error::UnknownSpace
+        );
+
+        let deleted = sidebar.space_to_folder(work, home.id).unwrap();
+        assert_eq!(sidebar.spaces().len(), 1);
+        assert_eq!(sidebar.displayed().id, home.id);
+        // First among the pinned tabs, named after the Space: its pinned rows, then its "Today"
+        // tabs in a folder, pinned now.
+        let [folder, after] = children(&sidebar, home.pinned)[..] else {
+            panic!("two rows")
+        };
+        assert_eq!(after, kept);
+        assert!(
+            matches!(&sidebar.node(folder).unwrap().kind, NodeKind::Folder { title, .. } if title == "Work")
+        );
+        let [p, n, t] = children(&sidebar, folder)[..] else {
+            panic!("three rows")
+        };
+        assert_eq!((p, n), (pinned, nested));
+        assert!(
+            matches!(&sidebar.node(t).unwrap().kind, NodeKind::Folder { title, .. } if title == "Today")
+        );
+        assert_eq!(children(&sidebar, t), [today]);
+        assert!(sidebar.is_pinned(today));
+
+        sidebar.select(home.id, today).unwrap();
+        assert_eq!(sidebar.restore_space(deleted), Ok(work));
+        assert_eq!(sidebar.displayed().id, work);
+        assert_eq!(children(&sidebar, home.pinned), [kept]);
+        assert_eq!(children(&sidebar, space.pinned), [pinned, nested]);
+        assert_eq!(children(&sidebar, space.today), [today]);
+        assert!(!sidebar.is_pinned(today));
+        assert_eq!(sidebar.space(work).unwrap().selected, Some(today));
+        assert_eq!(sidebar.space(home.id).unwrap().selected, None);
+        assert!(sidebar.node(folder).is_none() && sidebar.node(t).is_none());
+    }
+
+    #[test]
+    fn turns_a_space_without_today_tabs_into_a_plain_folder() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let work = sidebar.add_space("Work", home.profile).unwrap();
+        let pinned = sidebar.space(work).unwrap().pinned;
+        let tab = sidebar.add_tab(pinned, "https://p.test/", "P").unwrap();
+        sidebar.space_to_folder(work, home.id).unwrap();
+        let folder = children(&sidebar, home.pinned)[0];
+        assert_eq!(children(&sidebar, folder), [tab]);
     }
 
     #[test]

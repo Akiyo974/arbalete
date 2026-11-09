@@ -373,6 +373,7 @@ fn run_command(command: Command) {
             update_spaces(id, |sidebar| sidebar.set_space_profile(id, profile));
         }
         (Command::DeleteSpace(id), _) => delete_space(id),
+        (Command::SpaceToFolder(id, into), _) => space_to_folder(id, into),
         (Command::MoveSpace(id, index), _) => {
             let _ = update_sidebar(|sidebar| sidebar.move_space(id, index));
         }
