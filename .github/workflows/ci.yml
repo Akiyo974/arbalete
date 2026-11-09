@@ -47,13 +47,16 @@ jobs:
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          # The default key hashes every Rust version installed on the runner, which varies between
-          # runner images. Without it, a pull request that changes Cargo.lock or mise.toml still
-          # restores main's latest cache; cargo rebuilds only what changed.
-          add-rust-environment-hash-key: false
-          # Pull requests read main's cache (GitHub falls back to the base branch) without saving
-          # their own: the repository's 10 GB of cache stays for main.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # The key also hashes Cargo.lock, so main saves a new cache once the dependencies change
+          # (a cache is never overwritten), and the Rust versions, which mise pins alone on the
+          # runner. A pull request that changes Cargo.lock restores main's latest cache all the
+          # same, and cargo rebuilds what changed. CEF's build (Cargo.toml) keys it whole: CEF's
+          # C++ wrapper, the slowest dependency, is rebuilt for a new CEF anyway.
+          key: cef-${{ hashFiles('Cargo.toml') }}
+          # A pull request reads its own cache, else main's (GitHub falls back to the base branch),
+          # and saves one only when its key is new, when it changes what the key hashes: its next
+          # runs then start from there rather than from main's.
+          save-if: true
 
       # CEF_PATH, set in mise.toml. actions/cache needs a path without "..".
       - name: Cache CEF
