@@ -1177,6 +1177,29 @@ impl Sidebar {
         Ok(self.insert(Some(today), NodeKind::Tab(tab)))
     }
 
+    /// Opens a tab from the Space's selected tab, as a link opened behind it: like Arc's, right
+    /// under it, after the tabs already opened from it there. From a tab outside the "Today"
+    /// tabs, a favorite or a pinned one, or from none, it opens as `open_tab` opens one.
+    pub fn open_tab_below(&mut self, space: SpaceId, url: &str) -> Result<NodeId, Error> {
+        let today = self.space(space)?.today;
+        let opener = self.space(space)?.selected;
+        let place = opener
+            .filter(|&opener| self.ancestors(opener).any(|id| id == today))
+            .and_then(|opener| {
+                let (parent, index) = self.place_of(self.row_of(opener))?;
+                let after = self.nodes[&parent].children[index + 1..]
+                    .iter()
+                    .take_while(|&&id| self.open_opener(id) == Some(opener))
+                    .count();
+                Some((parent, index + 1 + after))
+            });
+        let tab = self.open_tab(space, url)?;
+        if let Some((parent, index)) = place {
+            self.place(tab, today, parent, index);
+        }
+        Ok(tab)
+    }
+
     /// Shows `tab` in `space`. A favorite is shown in whichever Space it is selected from.
     pub fn select(&mut self, space: SpaceId, tab: NodeId) -> Result<(), Error> {
         self.check_tab(tab)?;
@@ -3399,6 +3422,64 @@ mod tests {
         sidebar.remove(b).unwrap();
         sidebar.remove(c).unwrap();
         assert_eq!(sidebar.next_after_close(a), None);
+    }
+
+    #[test]
+    fn opens_tabs_below_the_selected_one_in_order() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let opener = sidebar.open_tab(home.id, "opener").unwrap();
+        let older = sidebar.open_tab(home.id, "older").unwrap();
+        sidebar.select(home.id, opener).unwrap();
+        let first = sidebar.open_tab_below(home.id, "first").unwrap();
+        let second = sidebar.open_tab_below(home.id, "second").unwrap();
+        assert_eq!(
+            children(&sidebar, home.today),
+            [opener, first, second, older]
+        );
+        // Tabs opened from another tab start again right under it.
+        sidebar.select(home.id, first).unwrap();
+        let nested = sidebar.open_tab_below(home.id, "nested").unwrap();
+        assert_eq!(
+            children(&sidebar, home.today),
+            [opener, first, nested, second, older]
+        );
+    }
+
+    #[test]
+    fn opens_tabs_below_the_selected_one_in_its_folder_or_split() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let folder = sidebar.add_folder(home.today, "Folder").unwrap();
+        let opener = sidebar.open_tab(home.id, "opener").unwrap();
+        sidebar.move_node(opener, folder, 0).unwrap();
+        sidebar.select(home.id, opener).unwrap();
+        let opened = sidebar.open_tab_below(home.id, "opened").unwrap();
+        assert_eq!(children(&sidebar, folder), [opener, opened]);
+
+        let other = sidebar.open_tab(home.id, "other").unwrap();
+        let split = sidebar.split(other, opener).unwrap();
+        let below = sidebar.open_tab_below(home.id, "below").unwrap();
+        assert_eq!(children(&sidebar, folder), [split, opened, below]);
+    }
+
+    #[test]
+    fn opens_tabs_from_a_pinned_tab_or_a_favorite_with_the_today_tabs() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let today = sidebar.open_tab(home.id, "today").unwrap();
+        let pinned = sidebar.add_tab(home.pinned, "pinned", "pinned").unwrap();
+        sidebar.select(home.id, pinned).unwrap();
+        let from_pinned = sidebar.open_tab_below(home.id, "a").unwrap();
+        let favorites = sidebar.profiles()[0].favorites;
+        let favorite = sidebar.add_tab(favorites, "favorite", "favorite").unwrap();
+        sidebar.select(home.id, favorite).unwrap();
+        let from_favorite = sidebar.open_tab_below(home.id, "b").unwrap();
+        assert_eq!(
+            children(&sidebar, home.today),
+            [today, from_pinned, from_favorite]
+        );
+        assert_eq!(children(&sidebar, home.pinned), [pinned]);
     }
 
     #[test]

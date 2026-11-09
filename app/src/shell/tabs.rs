@@ -41,16 +41,18 @@ pub(super) fn open_tab(url: &str) {
     show_selected();
 }
 
-/// Opens a tab in the displayed Space behind the one shown, and starts loading its page. Like
-/// Arc's, a toast tells, which a click goes to, while the sidebar that would show the new tab is
-/// hidden.
+/// Opens a tab in the displayed Space behind the one shown, right under it, and starts loading
+/// its page. Like Arc's, a toast tells, which a click goes to, while the sidebar that would show
+/// the new tab is hidden.
 pub(super) fn open_background_tab(url: &str) {
     if is_chrome_page(url) {
         return open_chrome_page(url);
     }
     let tab = update_sidebar(|sidebar| {
         let space = sidebar.displayed().id;
-        sidebar.open_tab(space, url).expect("the displayed Space")
+        sidebar
+            .open_tab_below(space, url)
+            .expect("the displayed Space")
     });
     load_hidden(tab);
     if win().sidebar_mode.get() == SidebarMode::Hidden {
