@@ -151,6 +151,7 @@ fn run_command(command: Command) {
         }
         (Command::EvenPanes(index), _) => even_panes(index),
         (Command::Reopen(rank), _) => reopen_tab(rank),
+        (Command::UndoClose, _) => undo_close(),
         (Command::Pin(tab), _) => toggle_pin(tab),
         (Command::NewFolder(parent), _) => new_folder(parent),
         (Command::NewEasel, _) => new_easel(),

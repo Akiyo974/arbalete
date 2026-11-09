@@ -171,29 +171,40 @@ fn remove_tab(tab: NodeId) -> Option<NodeId> {
     });
     update_sidebar(|sidebar| sidebar.remove(tab)).expect("an open tab");
     send_archive();
-    // Like Arc's, closing a tab tells nothing: ⇧⌘T reopens it.
+    // Like Arc's, closing a tab tells nothing: ⌘Z or ⇧⌘T reopens it.
     next
 }
 
-/// Tells that `what` closed, like Arc's after clearing tabs or deleting a folder, with a button
-/// reopening the `count` tabs it closed; ⇧⌘T reopens one, like Reopen Closed Tab in the menu.
+/// Tells that `what` closed, like Arc's after clearing tabs or deleting a folder, with ⌘Z, or a
+/// button, reopening the tabs it closed.
 fn tell_closed(what: &str, count: usize) {
     if count == 0 {
         return;
     }
-    let reopen = json!({ "name": "reopen", "args": 0 }).to_string();
-    let mut told = json!({
+    toast(json!({
         "key": "closed",
         "text": format!("{what}."),
+        "keys": "⌘Z",
+        "trailing": "to Undo",
         "button": "Undo",
         "buttonIcon": "arrow.uturn.backward",
-        "commands": vec![reopen; count],
+        "commands": [json!({ "name": "undo-close" }).to_string()],
+    }));
+}
+
+/// Reopens what closed last, like Arc's ⌘Z: the tabs closed together, as clearing "Today" closes
+/// them, or the tab closed last.
+pub(super) fn undo_close() {
+    let count = STATE.with_borrow(|state| {
+        let last = state.closed.last().map(|closed| closed.at);
+        let together = state.closed.iter().rev();
+        together
+            .take_while(|closed| Some(closed.at) == last)
+            .count()
     });
-    if count == 1 {
-        told["keys"] = json!("⇧⌘T");
-        told["trailing"] = json!("to Reopen");
+    for _ in 0..count {
+        reopen_tab(0);
     }
-    toast(told);
 }
 
 /// Shows the tab that replaces the selected one, or, like Arc's, the empty Space's panel when
@@ -206,22 +217,32 @@ fn show_next(next: Option<NodeId>) {
 }
 
 /// Closes the tabs of a folder, the selected one last, so the tab shown instead is not one about
-/// to close.
+/// to close; ⌘Z reopens them together.
 pub(super) fn close_folder_tabs(folder: NodeId) {
     let tabs = STATE.with_borrow(|state| {
-        let mut tabs = state.sidebar.folder_tabs(folder).ok()?;
+        let mut tabs = state.sidebar.folder_tabs(folder).unwrap_or_default();
         let selected = state.sidebar.displayed().selected;
         tabs.sort_by_key(|&tab| Some(tab) == selected);
-        Some(tabs)
+        tabs
     });
-    for tab in tabs.unwrap_or_default() {
+    let since = SystemTime::now();
+    for tab in tabs {
         close_keeping(Some(tab), true);
     }
+    // Closed at the same time, like the tabs a toast's Undo reopens.
+    STATE.with_borrow_mut(|state| {
+        let mut together = state.closed.iter_mut().rev().take_while(|c| c.at >= since);
+        if let Some(last) = together.next() {
+            let at = last.at;
+            together.for_each(|closed| closed.at = at);
+        }
+    });
 }
 
 /// Closes every "Today" tab of the displayed Space, which may be reopened.
 pub(super) fn clear_today() {
-    close_rows(Some("Tabs cleared"), |sidebar| {
+    // Arc's words.
+    close_rows(Some("Cleared Tabs"), |sidebar| {
         let space = sidebar.displayed();
         let (id, profile) = (space.id, space.profile);
         Ok((sidebar.clear_today(id)?, profile))

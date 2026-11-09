@@ -19,8 +19,8 @@ use objc2_app_kit::{
     NSControlStateValueOff, NSControlStateValueOn, NSDownArrowFunctionKey, NSEvent, NSEventMask,
     NSEventModifierFlags, NSEventPhase, NSEventType, NSF12FunctionKey, NSImage,
     NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSPasteboard, NSPasteboardTypeString,
-    NSRightArrowFunctionKey, NSSharingServicePicker, NSTextField, NSUpArrowFunctionKey, NSView,
-    NSWindow, NSWindowButton, NSWorkspace,
+    NSRightArrowFunctionKey, NSSharingServicePicker, NSText, NSTextField, NSUpArrowFunctionKey,
+    NSView, NSWindow, NSWindowButton, NSWorkspace,
 };
 use objc2_foundation::{
     NSAppleEventDescriptor, NSAppleEventManager, NSArray, NSData, NSDataBase64DecodingOptions,
@@ -128,6 +128,19 @@ define_class!(
         #[unsafe(method(arbaleteReopenTab:))]
         fn reopen_tab(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::Reopen(0));
+        }
+
+        // Like Arc's, ⌘Z is the undo of the text field being typed in, page or interface, and
+        // else reopens what closed last. Not a changeable shortcut: no "arbalete" prefix.
+        #[unsafe(method(undoTypingOrClose:))]
+        fn undo_typing_or_close(&self, sender: Option<&AnyObject>) {
+            let mtm = MainThreadMarker::new().expect("main thread");
+            if typing(mtm) {
+                // SAFETY: undo: takes its sender, the menu item.
+                unsafe { NSApp(mtm).sendAction_to_from(sel!(undo:), None, sender) };
+            } else {
+                crate::shell::run(Command::UndoClose);
+            }
         }
 
         #[unsafe(method(arbaleteTogglePin:))]
@@ -1134,8 +1147,29 @@ pub fn default_shortcuts() -> BTreeMap<String, Keys> {
     DEFAULT_SHORTCUTS.with_borrow(Clone::clone)
 }
 
+/// Whether the key window's focus is a text field, an interface's or a page's: Chromium's view of
+/// a page tells the type of its focused field, none when it is not one.
+fn typing(mtm: MainThreadMarker) -> bool {
+    let Some(responder) = NSApp(mtm)
+        .keyWindow()
+        .and_then(|window| window.firstResponder())
+    else {
+        return false;
+    };
+    if responder.isKindOfClass(NSText::class()) {
+        return true;
+    }
+    let text_input_type = sel!(textInputType);
+    // SAFETY: RenderWidgetHostViewCocoa's textInputType returns Chromium's ui::TextInputType, an
+    // int, TEXT_INPUT_TYPE_NONE being 0.
+    responder.respondsToSelector(text_input_type) && {
+        let kind: i32 = unsafe { msg_send![&*responder, textInputType] };
+        kind != 0
+    }
+}
+
 /// Standard editing actions: they reach the focused web view, page or UI, through the responder
-/// chain, which Chromium answers.
+/// chain, which Chromium answers; but Undo, which reopens what closed out of a text field.
 fn edit_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
     let paste_and_match_style = item(
         mtm,
@@ -1147,7 +1181,12 @@ fn edit_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
     paste_and_match_style
         .setKeyEquivalentModifierMask(NSEventModifierFlags::Command | NSEventModifierFlags::Shift);
     vec![
-        item(mtm, ns_string!("Undo"), sel!(undo:), ns_string!("z")),
+        item(
+            mtm,
+            ns_string!("Undo"),
+            sel!(undoTypingOrClose:),
+            ns_string!("z"),
+        ),
         item(mtm, ns_string!("Redo"), sel!(redo:), ns_string!("Z")),
         NSMenuItem::separatorItem(mtm),
         item(mtm, ns_string!("Cut"), sel!(cut:), ns_string!("x")),
