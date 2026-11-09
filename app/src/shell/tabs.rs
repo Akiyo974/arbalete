@@ -175,8 +175,8 @@ fn remove_tab(tab: NodeId) -> Option<NodeId> {
     next
 }
 
-/// Tells that `what` closed, like Arc's after clearing tabs or deleting a folder, with ⌘Z, or a
-/// button, reopening the tabs it closed.
+/// Tells that `what` closed, like Arc's after clearing tabs or deleting a folder, with ⌘Z
+/// reopening the tabs it closed. Like Arc's, the toast has no button.
 fn tell_closed(what: &str, count: usize) {
     if count == 0 {
         return;
@@ -186,9 +186,6 @@ fn tell_closed(what: &str, count: usize) {
         "text": format!("{what}."),
         "keys": "⌘Z",
         "trailing": "to Undo",
-        "button": "Undo",
-        "buttonIcon": "arrow.uturn.backward",
-        "commands": [json!({ "name": "undo-close" }).to_string()],
     }));
 }
 

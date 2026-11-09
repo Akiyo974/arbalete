@@ -1147,8 +1147,9 @@ pub fn default_shortcuts() -> BTreeMap<String, Keys> {
     DEFAULT_SHORTCUTS.with_borrow(Clone::clone)
 }
 
-/// Whether the key window's focus is a text field, an interface's or a page's: Chromium's view of
-/// a page tells the type of its focused field, none when it is not one.
+/// Whether ⌘Z goes to the key window's focused text field, an interface's or a page's: like
+/// Arc's, an interface's only once it has typing to undo. Chromium's view of a page tells the
+/// type of its focused field, none when it is not one, but not whether it has typing to undo.
 fn typing(mtm: MainThreadMarker) -> bool {
     let Some(responder) = NSApp(mtm)
         .keyWindow()
@@ -1157,7 +1158,7 @@ fn typing(mtm: MainThreadMarker) -> bool {
         return false;
     };
     if responder.isKindOfClass(NSText::class()) {
-        return true;
+        return responder.undoManager().is_some_and(|undo| undo.canUndo());
     }
     let text_input_type = sel!(textInputType);
     // SAFETY: RenderWidgetHostViewCocoa's textInputType returns Chromium's ui::TextInputType, an

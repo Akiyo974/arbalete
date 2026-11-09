@@ -309,7 +309,7 @@ pub enum Command {
     CloseInspector(NodeId),
     /// Reopens a closed tab, by its rank from the last closed one, 0.
     Reopen(usize),
-    /// Reopens what closed last, with one key or click: a tab, or the tabs closed together.
+    /// Reopens what closed last, like ⌘Z: the tabs closed together, or a tab.
     UndoClose,
     /// Pins or unpins a tab, or the selected one.
     Pin(Option<NodeId>),
