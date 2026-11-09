@@ -663,6 +663,8 @@ struct Closed {
     at: SystemTime,
     /// The tab of its split it goes back beside, and whether before it.
     beside: Option<(NodeId, bool)>,
+    /// The folder or section it goes back into, out of a split, and its index there.
+    place: Option<(NodeId, usize)>,
 }
 
 impl UiState {
@@ -1341,6 +1343,7 @@ mod tests {
             profile,
             at,
             beside: None,
+            place: None,
         });
         let closed = &state.to_json()["closed"][0];
         assert_eq!(closed["url"], "https://example.com/");
@@ -1371,6 +1374,7 @@ mod tests {
             profile,
             at: std::time::UNIX_EPOCH,
             beside: None,
+            place: None,
         };
         state.keep_closed((0..20).map(closed));
         state.keep_closed((20..30).map(closed));

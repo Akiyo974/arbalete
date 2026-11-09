@@ -135,6 +135,7 @@ fn remove_tab(tab: NodeId) -> Option<NodeId> {
             profile,
             at: SystemTime::now(),
             beside: state.sidebar.split_neighbor(tab),
+            place: state.sidebar.place_of(tab),
         };
         // An incognito window's tabs cannot be reopened, nor are they archived.
         let kept = !INCOGNITO.with_borrow(|incognito| incognito.contains_key(&profile));
@@ -265,6 +266,7 @@ pub(super) fn close_rows(
             profile,
             at: now,
             beside: None,
+            place: None,
         }))
     });
     send_state();
@@ -368,8 +370,9 @@ pub(super) fn new_folder(parent: Option<NodeId>) {
     }
 }
 
-/// Reopens a closed tab, by its rank from the last closed one: back in its split, beside the tab
-/// it showed with while that one is open, like Arc's; else in the displayed Space.
+/// Reopens a closed tab, by its rank from the last closed one, and shows it with its Space: back
+/// in its split, beside the tab it showed with while that one is open, like Arc's; else back in
+/// its folder or section at its index; else in the displayed Space.
 pub(super) fn reopen_tab(rank: usize) {
     let closed = STATE.with_borrow_mut(|state| {
         let index = state.closed.len().checked_sub(rank + 1)?;
@@ -387,10 +390,24 @@ pub(super) fn reopen_tab(rank: usize) {
                 .reaches(shown, space)
                 .then_some((space, target, before))
         });
-        let space = beside.map_or(shown, |(space, ..)| space);
-        let tab = sidebar
-            .open_tab(space, &closed.tab.url)
-            .expect("a known Space");
+        // Else back where it was, like Arc's, while that folder or section is left.
+        let place = closed.place.and_then(|(parent, index)| {
+            let space = sidebar.space_of(parent)?;
+            sidebar
+                .reaches(shown, space)
+                .then_some((space, parent, index))
+        });
+        let space = beside
+            .map(|(space, ..)| space)
+            .or(place.map(|(space, ..)| space))
+            .unwrap_or(shown);
+        let tab = match place {
+            Some((_, parent, index)) => {
+                sidebar.add_tab_at(parent, index, &closed.tab.url, &closed.tab.title)
+            }
+            None => sidebar.open_tab(space, &closed.tab.url),
+        }
+        .expect("a known Space or folder");
         if let Some((_, target, before)) = beside {
             // A split already full takes it as a row of its own.
             let _ = sidebar.split_beside(tab, target, before);
@@ -399,6 +416,10 @@ pub(super) fn reopen_tab(rank: usize) {
         let same_profile = sidebar.profile_of_space(space) == Some(closed.profile);
         let reopened = sidebar.tab_mut(tab).expect("just opened");
         reopened.title = closed.tab.title;
+        // A pinned tab goes back to the url it saved, not the one it was on.
+        if reopened.saved_url.is_some() && closed.tab.saved_url.is_some() {
+            reopened.saved_url = closed.tab.saved_url;
+        }
         if same_profile {
             reopened.favicon = closed.tab.favicon;
         }

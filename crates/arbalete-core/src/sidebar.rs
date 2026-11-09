@@ -1091,6 +1091,17 @@ impl Sidebar {
 
     /// Adds a tab at the end of `parent`; a pinned tab saves its url, as when it is pinned.
     pub fn add_tab(&mut self, parent: NodeId, url: &str, title: &str) -> Result<NodeId, Error> {
+        self.add_tab_at(parent, usize::MAX, url, title)
+    }
+
+    /// Adds a tab at `index` among `parent`'s children, or last past them, as `add_tab` does.
+    pub fn add_tab_at(
+        &mut self,
+        parent: NodeId,
+        index: usize,
+        url: &str,
+        title: &str,
+    ) -> Result<NodeId, Error> {
         self.check_container(parent)?;
         self.check_room(parent)?;
         let tab = Tab {
@@ -1104,7 +1115,22 @@ impl Sidebar {
             last_shown: None,
         };
         self.show_favorites_hint(parent);
-        Ok(self.insert(Some(parent), NodeKind::Tab(tab)))
+        let id = self.insert(None, NodeKind::Tab(tab));
+        self.nodes.get_mut(&id).expect("just inserted").parent = Some(parent);
+        let children = self.children_mut(parent);
+        children.insert(index.min(children.len()), id);
+        Ok(id)
+    }
+
+    /// Where a row is, to put it back there: its parent and its index among the parent's
+    /// children; none for a tab in a split, which goes back beside another of its tabs instead.
+    pub fn place_of(&self, id: NodeId) -> Option<(NodeId, usize)> {
+        let parent = self.node(id)?.parent?;
+        if self.is_split(parent) {
+            return None;
+        }
+        let index = self.node(parent)?.children.iter().position(|&c| c == id)?;
+        Some((parent, index))
     }
 
     /// Adds a new tab with `tab`'s url, title and icon at `index` among `parent`'s children, as
@@ -2060,6 +2086,29 @@ mod tests {
     fn children(sidebar: &Sidebar, id: NodeId) -> Vec<NodeId> {
         sidebar.check_invariants().unwrap();
         sidebar.node(id).unwrap().children.clone()
+    }
+
+    #[test]
+    fn a_tab_removed_goes_back_to_its_place() {
+        let mut sidebar = Sidebar::default();
+        let space = home(&sidebar);
+        let a = sidebar.open_tab(space.id, "https://a.test/").unwrap();
+        let b = sidebar.open_tab(space.id, "https://b.test/").unwrap();
+        let (parent, index) = sidebar.place_of(a).unwrap();
+        assert_eq!((parent, index), (space.today, 0));
+        sidebar.remove(a).unwrap();
+        let again = sidebar
+            .add_tab_at(parent, index, "https://a.test/", "A")
+            .unwrap();
+        assert_eq!(children(&sidebar, space.today), vec![again, b]);
+        // Past the end, it goes last.
+        let c = sidebar
+            .add_tab_at(parent, 9, "https://c.test/", "C")
+            .unwrap();
+        assert_eq!(children(&sidebar, space.today), vec![again, b, c]);
+        // A tab in a split has no place of its own.
+        sidebar.split(c, b).unwrap();
+        assert_eq!(sidebar.place_of(c), None);
     }
 
     #[test]

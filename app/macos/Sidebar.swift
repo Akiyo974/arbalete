@@ -472,61 +472,81 @@ struct SpaceSections: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 1) {
-                    SpaceHeader(model: model, page: page, space: space)
-                    // Like Arc's, collapsing a Space folds its pinned tabs away, not today's.
-                    if !page.collapsed {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 1) {
+                        SpaceHeader(model: model, page: page, space: space)
+                        // Like Arc's, collapsing a Space folds its pinned tabs away, not today's.
+                        if !page.collapsed {
+                            ItemRows(
+                                model: model, items: page.pinned, parent: page.roots.pinned,
+                                selected: page.selected, pinned: true)
+                                // Fading, not sliding, which would pass over the header.
+                                .transition(.opacity)
+                        }
+                        // Dropped on, the divider puts the node last among the pinned tabs, the
+                        // line showing under the last one.
+                        DividerRow(model: model, clearable: !page.today.isEmpty, root: page.roots.pinned)
+                            .onDrop(
+                                of: [.plainText],
+                                delegate: SectionDrop(
+                                    model: model, parent: page.roots.pinned, index: page.pinned.count,
+                                    shown: lastShown(page.pinned).map { .after($0) }
+                                        ?? .into(page.roots.pinned)))
+                        // Dropped on, New Tab puts the node first among today's tabs.
+                        NewTabRow(model: model, root: page.roots.today)
+                            .onDrop(
+                                of: [.plainText],
+                                delegate: SectionDrop(
+                                    model: model, parent: page.roots.today, index: 0,
+                                    shown: page.today.first.map { .before($0.id) }
+                                        ?? .into(page.roots.today)))
                         ItemRows(
-                            model: model, items: page.pinned, parent: page.roots.pinned,
-                            selected: page.selected, pinned: true)
-                            // Fading, not sliding, which would pass over the header.
-                            .transition(.opacity)
+                            model: model, items: page.today, parent: page.roots.today,
+                            selected: page.selected)
+                        // Like Arc's, the room below the rows moves the window and, dropped on, puts
+                        // what a drag carries after today's last tab.
+                        WindowDragArea()
+                            .frame(maxWidth: .infinity, minHeight: 8, maxHeight: .infinity)
+                            .onDrop(
+                                of: [.plainText],
+                                delegate: TailDrop(model: model, page: page, width: _width.wrappedValue))
                     }
-                    // Dropped on, the divider puts the node last among the pinned tabs, the
-                    // line showing under the last one.
-                    DividerRow(model: model, clearable: !page.today.isEmpty, root: page.roots.pinned)
-                        .onDrop(
-                            of: [.plainText],
-                            delegate: SectionDrop(
-                                model: model, parent: page.roots.pinned, index: page.pinned.count,
-                                shown: lastShown(page.pinned).map { .after($0) }
-                                    ?? .into(page.roots.pinned)))
-                    // Dropped on, New Tab puts the node first among today's tabs.
-                    NewTabRow(model: model, root: page.roots.today)
-                        .onDrop(
-                            of: [.plainText],
-                            delegate: SectionDrop(
-                                model: model, parent: page.roots.today, index: 0,
-                                shown: page.today.first.map { .before($0.id) }
-                                    ?? .into(page.roots.today)))
-                    ItemRows(
-                        model: model, items: page.today, parent: page.roots.today,
-                        selected: page.selected)
-                    // Like Arc's, the room below the rows moves the window and, dropped on, puts
-                    // what a drag carries after today's last tab.
-                    WindowDragArea()
-                        .frame(maxWidth: .infinity, minHeight: 8, maxHeight: .infinity)
-                        .onDrop(
-                            of: [.plainText],
-                            delegate: TailDrop(model: model, page: page, width: _width.wrappedValue))
+                    .frame(minHeight: _height.wrappedValue, alignment: .top)
+                    // Rows moving or dropped slide to their places, as quickly as Arc's.
+                    .animation(.easeInOut(duration: 0.12), value: (page.pinned + page.today).map(\.id))
+                    // Folders open and close sliding, the pinned tabs fold away fading.
+                    .animation(.easeInOut(duration: 0.2), value: openFolders(page.pinned + page.today))
+                    .animation(.easeInOut(duration: 0.2), value: page.collapsed)
                 }
-                .frame(minHeight: _height.wrappedValue, alignment: .top)
-                // Rows moving or dropped slide to their places, as quickly as Arc's.
-                .animation(.easeInOut(duration: 0.12), value: (page.pinned + page.today).map(\.id))
-                // Folders open and close sliding, the pinned tabs fold away fading.
-                .animation(.easeInOut(duration: 0.2), value: openFolders(page.pinned + page.today))
-                .animation(.easeInOut(duration: 0.2), value: page.collapsed)
-            }
-            .scrollIndicators(.never)
-            // Like Arc's, the tab list's empty room moves the window; a double-click there does
-            // not zoom it.
-            .background(WindowDragArea())
-            .onGeometryChange(for: CGSize.self) { $0.size } action: {
-                _width.wrappedValue = $0.width
-                _height.wrappedValue = $0.height
+                .scrollIndicators(.never)
+                // Like Arc's, the tab list's empty room moves the window; a double-click there does
+                // not zoom it.
+                .background(WindowDragArea())
+                .onGeometryChange(for: CGSize.self) { $0.size } action: {
+                    _width.wrappedValue = $0.width
+                    _height.wrappedValue = $0.height
+                }
+                // Like Arc's, the tab selected scrolls into view, as one reopened or picked by a key.
+                .onChange(of: page.selected) { _, selected in
+                    guard let selected, let row = Self.row(of: selected, in: page.pinned + page.today)
+                    else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(row) }
+                }
             }
         }
+    }
+
+    /// The row showing a tab: its own, its split's, or its closed folder's.
+    static func row(of tab: Int, in items: [Item]) -> Int? {
+        for item in items {
+            if case .folder(_, _, true, let children) = item {
+                if let row = row(of: tab, in: children) { return row }
+            } else if item.tabs.contains(where: { $0.id == tab }) {
+                return item.id
+            }
+        }
+        return nil
     }
 }
 
