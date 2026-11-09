@@ -174,14 +174,15 @@ struct LibraryEntry: View {
 
     var body: some View {
         let sources = model.state?.mediaSources ?? ["captures", "downloads"]
-        IconButton(symbol: "books.vertical", label: "View Library ⇧⌘L") {
+        // Measured on Arc's: a 32-point square, like the "+".
+        IconButton(symbol: "books.vertical", label: "View Library ⇧⌘L", size: 32) {
             recent.markRead()
             model.openLibrary(nil)
         }
         .overlay(alignment: .topTrailing) {
             if let item = recent.items.first(where: { $0.id == recent.badge }), !recent.expanded {
                 Badge(item: item)
-                    .offset(x: 9, y: -9)
+                    .offset(x: 7, y: -7)
                     .allowsHitTesting(false)
                     .transition(.badgeDrop)
             }
@@ -199,7 +200,7 @@ struct LibraryEntry: View {
             if recent.expanded && !recent.items.isEmpty {
                 Flyout(model: model, recent: recent, width: width)
                     // Measured on Arc's: its last row 2 points over the button.
-                    .padding(.bottom, 30)
+                    .padding(.bottom, 34)
                     .offset(x: -2)
                     .onHover { over in
                         hoveredFlyout.wrappedValue = over

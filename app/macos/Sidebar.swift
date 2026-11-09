@@ -1728,10 +1728,8 @@ struct Footer: View {
             .opacity(drafting ? 0 : 1)
             .disabled(drafting)
             SpaceIcons(model: model)
-                .padding(.horizontal, 5)
             // Like Arc's, the "+" opens its own menu, turning into a "×" while it shows.
             PlusButton(shown: menuShown, active: model.active) { setMenu(!menuShown) }
-                .padding(.trailing, 2)
                 .help(menuShown ? "" : "New")
                 .opacity(drafting ? 0 : 1)
                 .disabled(drafting)
@@ -1744,7 +1742,7 @@ struct Footer: View {
             if menuShown {
                 PlusMenu(model: model) { setMenu(false) }
                     .background(Frame(frame: _menuFrame.projectedValue))
-                    .padding(.trailing, 2 + 14 - plusMenuArrowTrailing)
+                    .padding(.trailing, 16 - plusMenuArrowTrailing)
                     // The arrow's tip over the "+"'s center, 20 points over the footer's bottom.
                     .padding(.bottom, 20 + plusMenuAbovePlus)
                     .fixedSize()
@@ -1793,19 +1791,29 @@ struct PlusButton: View {
     let shown: Bool
     let active: Bool
     let action: () -> Void
+    private let _hovered = State<Bool>(initialValue: false)
+    private var hovered: Bool {
+        get { _hovered.wrappedValue }
+        nonmutating set { _hovered.wrappedValue = newValue }
+    }
 
     var body: some View {
         Button(action: action) {
-            // At Arc's size, measured; like Arc's, it turns a quarter of a half turn into a "×".
+            // At Arc's size, measured: a 32-point square, 8 points from the sidebar's edge; like
+            // Arc's, it turns a quarter of a half turn into a "×".
             Image(systemName: "plus")
                 .font(.system(size: 17, weight: .regular))
                 .rotationEffect(.degrees(shown ? 45 : 0))
                 .animation(.easeInOut(duration: 0.2), value: shown)
-                .frame(width: 28, height: 28)
+                .frame(width: 32, height: 32)
+                // Hovered, it lights up like the library's button at the footer's other end.
+                .background(
+                    RoundedRectangle(cornerRadius: 7).fill(.primary.opacity(hovered ? 0.1 : 0)))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .opacity(active || shown ? 1 : 0.3)
+        .onHover { hovered = $0 }
     }
 }
 
@@ -1824,7 +1832,7 @@ struct Frame: View {
 
 /// The Spaces' icons, measured on Arc's: alone, a Space shows none; otherwise each takes up to
 /// 34 points, centered, and when they don't fit they share the room, the displayed one keeping
-/// at least 22.5 points.
+/// at least 22 points and the others 8, past which they scroll.
 struct SpaceIcons: View {
     @ObservedObject var model: AppModel
 
@@ -1835,16 +1843,19 @@ struct SpaceIcons: View {
             let room = geometry.size.width
             let roomy = count * 34 <= room
             let even = min(34, room / max(count, 1))
-            let displayed = roomy ? even : max(even, 22.5)
-            let other = roomy ? even : (room - displayed) / max(count - 1, 1)
-            HStack(spacing: 0) {
-                ForEach(spaces) { space in
-                    let shown = space.id == model.state?.space
-                    SpaceIcon(model: model, space: space, displayed: shown, slot: shown ? displayed : other)
-                        .transition(.scale.combined(with: .opacity))
+            let displayed = roomy ? even : max(even, 22)
+            let other = roomy ? even : max(8, (room - displayed) / max(count - 1, 1))
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    ForEach(spaces) { space in
+                        let shown = space.id == model.state?.space
+                        SpaceIcon(model: model, space: space, displayed: shown, slot: shown ? displayed : other)
+                            .transition(.scale.combined(with: .opacity))
+                    }
                 }
+                .frame(minWidth: room, minHeight: geometry.size.height)
             }
-            .frame(width: room, height: geometry.size.height)
+            .scrollDisabled(displayed + other * (count - 1) <= room)
             // Like Arc's, a new Space's icon grows in as the others make room, and they resize
             // as the displayed one changes.
             // Like Arc's, measured: a quick start settling without overshoot.
@@ -1875,12 +1886,16 @@ struct SpaceIcon: View {
             model.slide(to: space.id)
         } label: {
             Group {
-                if let emoji = space.emoji {
-                    SpaceGlyph(icon: emoji, size: 12).opacity(displayed ? 1 : 0.5)
+                // Like Arc's, without room only the displayed and the hovered Spaces show their
+                // icon, the others a dot.
+                if let emoji = space.emoji, slot >= 22 || displayed || hovered {
+                    // A bit over Arc's 12 and 14 points: as large as a tab's favicon, 16 points,
+                    // which an emoji's text at 13 points draws.
+                    SpaceGlyph(icon: emoji, size: 13, picture: 16).opacity(displayed ? 1 : 0.5)
                 } else {
                     // Measured on Arc's: 8 points shown, 7 not, 4 without room; brighter
                     // hovered, dimmed while the window is inactive.
-                    let size: CGFloat = slot < 22.5 ? 4 : displayed ? 8 : 7
+                    let size: CGFloat = slot < 22 ? 4 : displayed ? 8 : 7
                     let ink: Double = displayed ? 0.5 : hovered ? 0.36 : 0.18
                     Circle()
                         .fill(.primary.opacity(ink * (model.active ? 1 : 0.5)))

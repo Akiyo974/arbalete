@@ -10,14 +10,21 @@ import SwiftUI
 struct SpaceGlyph: View {
     let icon: String
     let size: CGFloat
+    /// The square a symbol or a site's icon fills, when it is not drawn like an emoji's text.
+    var picture: CGFloat? = nil
 
     var body: some View {
         if let name = symbolName(icon) {
-            Image(systemName: name).font(.system(size: size * 0.85, weight: .semibold))
+            if let picture {
+                Image(systemName: name).resizable().scaledToFit().fontWeight(.semibold)
+                    .frame(width: picture, height: picture)
+            } else {
+                Image(systemName: name).font(.system(size: size * 0.85, weight: .semibold))
+            }
         } else if let url = siteIcon(icon) {
             if let image = uiImage(url) {
                 Image(nsImage: image).resizable().interpolation(.high)
-                    .frame(width: size, height: size)
+                    .frame(width: picture ?? size, height: picture ?? size)
             } else {
                 Image(systemName: "globe").font(.system(size: size * 0.85, weight: .semibold))
             }
