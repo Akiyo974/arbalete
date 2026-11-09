@@ -511,7 +511,7 @@ wrap_context_menu_handler! {
                 }
             };
             match command_id {
-                OPEN_LINK => perform(Action::Run(Command::Open(link))),
+                OPEN_LINK => perform(Action::Run(Command::OpenInBackground(link))),
                 OPEN_LINK_WINDOW => open_link_in_new_window(&link),
                 OPEN_LINK_SPLIT => open_in_pane(&link),
                 OPEN_LINK_LITTLE => open_little(Some(link)),
@@ -973,7 +973,7 @@ wrap_life_span_handler! {
     impl LifeSpanHandler {
         /// A popup a page opens with `window.open` and a size, like a sign-in's, opens in a
         /// Little Arbalete window, like Arc's, keeping its opener: it sends its result there and
-        /// closes. Others open in tabs.
+        /// closes. Others open in tabs, behind the one shown for a link clicked with ⌘.
         fn on_before_popup(
             &self,
             _browser: Option<&mut Browser>,
@@ -1013,7 +1013,11 @@ wrap_life_span_handler! {
                 OPENING_POPUPS.with_borrow_mut(|popups| popups.push((popup_id, id)));
                 return 0;
             }
-            open_tab(&url);
+            if target_disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB {
+                open_background_tab(&url);
+            } else {
+                open_tab(&url);
+            }
             1
         }
 

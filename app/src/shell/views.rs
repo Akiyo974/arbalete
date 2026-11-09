@@ -85,6 +85,19 @@ pub(super) fn show_selected() {
     }
 }
 
+/// Starts loading a tab's page while it stays hidden, like a link opened behind the page shown:
+/// its title and icon come in the sidebar meanwhile. Until its profile's web data is ready, it
+/// loads once shown instead.
+pub(super) fn load_hidden(tab: NodeId) {
+    if page(tab).is_some() {
+        PAGES.with_borrow_mut(|pages| {
+            if let Some(live) = pages.get_mut(&tab) {
+                live.hidden_since.get_or_insert_with(now);
+            }
+        });
+    }
+}
+
 /// A tab's page, opened the first time, hidden, once its profile's web data is ready: until
 /// then, none.
 fn page(tab: NodeId) -> Option<()> {
