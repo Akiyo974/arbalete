@@ -215,6 +215,7 @@ final class SidebarHost {
     private var watch: AnyCancellable?
     private var revealed = false
     private var rightClicks: Any?
+    private var middleClicks: Any?
 
     init(window: NSWindow, model: AppModel) {
         self.window = window
@@ -272,6 +273,16 @@ final class SidebarHost {
             DispatchQueue.main.async { catcher.action() }
             return nil
         }
+        // Nor do middle clicks: like Arc's, a row takes one as the mouse wheel goes down.
+        middleClicks = NSEvent.addLocalMonitorForEvents(matching: [.otherMouseDown]) {
+            [weak self] event in
+            guard let self, event.window === self.window, event.buttonNumber == 2,
+                let root = self.window.contentView?.superview,
+                let catcher = root.hitTest(event.locationInWindow) as? MiddleClick.Catcher
+            else { return event }
+            DispatchQueue.main.async { catcher.action() }
+            return nil
+        }
         // Once the state changed, the displayed Space's: its publisher tells before.
         watch = model.$state.receive(on: DispatchQueue.main).sink { [container] _ in
             container.appearance = NSAppearance(
@@ -283,6 +294,8 @@ final class SidebarHost {
     func close() {
         if let rightClicks { NSEvent.removeMonitor(rightClicks) }
         rightClicks = nil
+        if let middleClicks { NSEvent.removeMonitor(middleClicks) }
+        middleClicks = nil
         holder.removeFromSuperview()
         sidebarOrigins[ObjectIdentifier(window)] = nil
     }

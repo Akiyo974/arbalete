@@ -1347,6 +1347,8 @@ struct TabRow: View {
                 model.run("menu", ["node": tab.id])
             }
         }
+        // Like Arc's, a middle click does what its button does.
+        .middleClick { model.run("close", tab.id) }
     }
 }
 
@@ -1543,6 +1545,7 @@ struct SplitRow: View {
         .contentShape(Rectangle())
         .onTapGesture { model.run("select", tab.id) }
         .rightClick { model.run("menu", ["node": id]) }
+        .middleClick { model.run("close", tab.id) }
         .help(tab.label)
     }
 }
@@ -1914,6 +1917,40 @@ extension View {
     /// Runs `action` on a right click, which SwiftUI views otherwise leave to a context menu.
     func rightClick(_ action: @escaping () -> Void) -> some View {
         overlay(RightClick(action: action))
+    }
+}
+
+extension View {
+    /// Runs `action` when the mouse wheel is pressed over it, like Arc's rows, before its release.
+    func middleClick(_ action: @escaping () -> Void) -> some View {
+        overlay(MiddleClick(action: action))
+    }
+}
+
+/// Catches middle clicks only, which the sidebar's window hands it, letting every other event
+/// through to the views under it.
+struct MiddleClick: NSViewRepresentable {
+    let action: () -> Void
+
+    func makeNSView(context: Context) -> Catcher {
+        let view = Catcher()
+        view.action = action
+        return view
+    }
+
+    func updateNSView(_ view: Catcher, context: Context) {
+        view.action = action
+    }
+
+    final class Catcher: NSView {
+        var action: () -> Void = {}
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard let event = NSApp.currentEvent, event.type == .otherMouseDown,
+                event.buttonNumber == 2
+            else { return nil }
+            return super.hitTest(point)
+        }
     }
 }
 
