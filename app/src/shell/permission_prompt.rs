@@ -20,8 +20,14 @@ pub(super) struct PermissionRequest {
 enum PermissionCallback {
     /// For the camera, the microphone or the screen: the media types asked for.
     Media(MediaAccessCallback, u32),
-    /// For anything else, Chromium's prompt by its id.
-    Prompt(u64, PermissionPromptCallback),
+    /// For anything else, Chromium's prompt by its id, and the permissions it asks for.
+    Prompt(u64, u32, PermissionPromptCallback),
+}
+
+thread_local! {
+    /// The origin and the permissions of the prompt being answered, while Chromium learns the
+    /// answer.
+    static ANSWERING: RefCell<Option<(String, u32)>> = const { RefCell::new(None) };
 }
 
 // Asks the user before a site uses the camera, the microphone, the screen or anything else
@@ -69,7 +75,19 @@ wrap_permission_handler! {
             if asks.is_empty() {
                 return 0;
             }
-            let callback = PermissionCallback::Prompt(prompt_id, callback.clone());
+            // Once allowed, a page's permission button, like Meet's for the camera and the
+            // microphone, shows Chromium's next screen for the same request, like the one waiting
+            // for macOS's own prompt: the request is decided, and accepting it again would crash.
+            let follows = ANSWERING.with_borrow(|answering| {
+                answering.as_ref().is_some_and(|(answered, permissions)| {
+                    *answered == origin && requested_permissions & !permissions == 0
+                })
+            });
+            if follows {
+                callback.cont(PermissionRequestResult::IGNORE);
+                return 1;
+            }
+            let callback = PermissionCallback::Prompt(prompt_id, requested_permissions, callback.clone());
             ask_permission(browser, &origin, asks, callback);
             1
         }
@@ -78,7 +96,7 @@ wrap_permission_handler! {
         fn on_dismiss_permission_prompt(&self, _browser: Option<&mut Browser>, prompt_id: u64, _result: PermissionRequestResult) {
             PERMISSION_REQUESTS.with_borrow_mut(|requests| {
                 requests.retain(|request| {
-                    !matches!(request.callback, PermissionCallback::Prompt(id, _) if id == prompt_id)
+                    !matches!(request.callback, PermissionCallback::Prompt(id, ..) if id == prompt_id)
                 });
             });
             surfaces_changed();
@@ -120,11 +138,15 @@ pub(super) fn answer_permission(id: u64, allow: bool) {
             keep_decision(&request.browser, &request.origin, &request.asks, allow);
             callback.cont(if allow { requested } else { 0 });
         }
-        PermissionCallback::Prompt(_, callback) => callback.cont(if allow {
-            PermissionRequestResult::ACCEPT
-        } else {
-            PermissionRequestResult::DENY
-        }),
+        PermissionCallback::Prompt(_, requested, callback) => {
+            ANSWERING.set(Some((request.origin, requested)));
+            callback.cont(if allow {
+                PermissionRequestResult::ACCEPT
+            } else {
+                PermissionRequestResult::DENY
+            });
+            ANSWERING.set(None);
+        }
     }
     surfaces_changed();
 }
