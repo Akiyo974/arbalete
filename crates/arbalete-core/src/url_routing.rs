@@ -62,13 +62,36 @@ impl UrlRouting {
             .map_or(self.default, |route| route.destination)
     }
 
-    /// Sends the links that would open in `space` to the Space shown last instead.
-    pub fn forget_space(&mut self, space: SpaceId) {
-        let destinations = self.routes.iter_mut().map(|route| &mut route.destination);
-        for destination in destinations.chain([&mut self.default]) {
-            if *destination == Destination::Space(space) {
-                *destination = Destination::MostRecentSpace;
+    /// Sends the links that would open in `space` to the Space shown last instead, and returns
+    /// where they did, by route, `None` for the default, for `remember_space` to undo it.
+    pub fn forget_space(&mut self, space: SpaceId) -> Vec<Option<usize>> {
+        let forgotten: Vec<_> = (0..self.routes.len())
+            .map(Some)
+            .chain([None])
+            .filter(|&index| *self.destination_mut(index) == Destination::Space(space))
+            .collect();
+        for &index in &forgotten {
+            *self.destination_mut(index) = Destination::MostRecentSpace;
+        }
+        forgotten
+    }
+
+    /// Sends back to `space` the links `forget_space` sent elsewhere, where none changed since.
+    pub fn remember_space(&mut self, space: SpaceId, forgotten: &[Option<usize>]) {
+        for &index in forgotten {
+            if index.is_none_or(|index| index < self.routes.len()) {
+                let destination = self.destination_mut(index);
+                if *destination == Destination::MostRecentSpace {
+                    *destination = Destination::Space(space);
+                }
             }
+        }
+    }
+
+    fn destination_mut(&mut self, route: Option<usize>) -> &mut Destination {
+        match route {
+            Some(index) => &mut self.routes[index].destination,
+            None => &mut self.default,
         }
     }
 }
@@ -196,9 +219,13 @@ mod tests {
             ],
             default: Destination::Space(work),
         };
-        routing.forget_space(work);
+        let forgotten = routing.forget_space(work);
         assert_eq!(routing.routes[0].destination, Destination::MostRecentSpace);
         assert_eq!(routing.routes[1].destination, Destination::Space(home));
         assert_eq!(routing.default, Destination::MostRecentSpace);
+        routing.remember_space(work, &forgotten);
+        assert_eq!(routing.routes[0].destination, Destination::Space(work));
+        assert_eq!(routing.routes[1].destination, Destination::Space(home));
+        assert_eq!(routing.default, Destination::Space(work));
     }
 }

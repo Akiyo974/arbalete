@@ -372,7 +372,7 @@ fn run_command(command: Command) {
         (Command::SetSpaceProfile(id, profile), _) => {
             update_spaces(id, |sidebar| sidebar.set_space_profile(id, profile));
         }
-        (Command::DeleteSpace(id), _) => update_spaces(id, |sidebar| sidebar.delete_space(id)),
+        (Command::DeleteSpace(id), _) => delete_space(id),
         (Command::MoveSpace(id, index), _) => {
             let _ = update_sidebar(|sidebar| sidebar.move_space(id, index));
         }

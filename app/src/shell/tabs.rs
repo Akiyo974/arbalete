@@ -175,9 +175,9 @@ fn remove_tab(tab: NodeId) -> Option<NodeId> {
     next
 }
 
-/// Tells that `what` closed, like Arc's after clearing tabs or deleting a folder, with ⌘Z
-/// reopening the tabs it closed. Like Arc's, the toast has no button.
-fn tell_closed(what: &str, count: usize) {
+/// Tells that `what` closed, like Arc's after clearing tabs or deleting a folder or a Space, with
+/// ⌘Z putting it back. Like Arc's, the toast has no button.
+pub(super) fn tell_closed(what: &str, count: usize) {
     if count == 0 {
         return;
     }
@@ -189,9 +189,12 @@ fn tell_closed(what: &str, count: usize) {
     }));
 }
 
-/// Reopens what closed last, like Arc's ⌘Z: the tabs closed together, as clearing "Today" closes
-/// them, or the tab closed last.
+/// Reopens what closed last, like Arc's ⌘Z: the Space deleted, the tabs closed together, as
+/// clearing "Today" closes them, or the tab closed last.
 pub(super) fn undo_close() {
+    if restore_space() {
+        return;
+    }
     let count = STATE.with_borrow(|state| {
         let last = state.closed.last().map(|closed| closed.at);
         let together = state.closed.iter().rev();

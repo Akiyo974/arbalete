@@ -18,8 +18,8 @@ use arbalete_core::import::browsers::{self, Family};
 use arbalete_core::import::{self, Choice, safari};
 use arbalete_core::search::SearchEngine;
 use arbalete_core::sidebar::{
-    ArchiveAfter, Color, DownloadLocation, Error, NodeId, NodeKind, ProfileId, Sidebar, Space,
-    SpaceId, SplitLayout, Tab, View as WindowView,
+    ArchiveAfter, Color, DeletedSpace, DownloadLocation, Error, NodeId, NodeKind, ProfileId,
+    Sidebar, Space, SpaceId, SplitLayout, Tab, View as WindowView,
 };
 use arbalete_core::store::Place;
 use arbalete_core::url_routing::Destination;
@@ -664,6 +664,9 @@ struct UiState {
     sidebar: Sidebar,
     /// Closed tabs, the last one at the end, the [`MAX_CLOSED`] last ones until the app quits.
     closed: Vec<Closed>,
+    /// Deleted Spaces, with when, which ⌘Z puts back, the last one at the end, the
+    /// [`MAX_CLOSED`] last ones until the app quits.
+    deleted: Vec<(SystemTime, DeletedSpace)>,
 }
 
 /// A closed tab, which may be reopened.

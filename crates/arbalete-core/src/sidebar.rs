@@ -212,6 +212,16 @@ impl Space {
     }
 }
 
+/// A Space deleted, with its tabs and folders and the links that opened in it, which
+/// `Sidebar::restore_space` puts back.
+#[derive(Clone, Debug)]
+pub struct DeletedSpace {
+    index: usize,
+    space: Space,
+    nodes: Vec<Node>,
+    routes: Vec<Option<usize>>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Node {
     pub id: NodeId,
@@ -1031,9 +1041,9 @@ impl Sidebar {
         Ok(())
     }
 
-    /// Deletes a Space with its tabs and folders, but not the last one. Its neighbor, the next one
-    /// or else the previous one, is displayed instead.
-    pub fn delete_space(&mut self, id: SpaceId) -> Result<(), Error> {
+    /// Deletes a Space with its tabs and folders, but not the last one, and returns them for
+    /// `restore_space`. Its neighbor, the next one or else the previous one, is displayed instead.
+    pub fn delete_space(&mut self, id: SpaceId) -> Result<DeletedSpace, Error> {
         let index = self
             .spaces
             .iter()
@@ -1054,14 +1064,37 @@ impl Sidebar {
             self.displayed = Some(self.spaces[next].id);
         }
         let space = self.spaces.remove(index);
-        self.url_routing.forget_space(id);
+        let routes = self.url_routing.forget_space(id);
+        let mut nodes = Vec::new();
         let mut pending = vec![space.pinned, space.today];
         while let Some(id) = pending.pop() {
             let node = self.nodes.remove(&id).expect("children are known nodes");
-            pending.extend(node.children);
+            pending.extend(node.children.iter().copied());
+            nodes.push(node);
         }
         self.deselect_removed();
-        Ok(())
+        Ok(DeletedSpace {
+            index,
+            space,
+            nodes,
+            routes,
+        })
+    }
+
+    /// Puts a deleted Space back where it was, with its tabs, folders and links, and displays
+    /// it, like Arc's ⌘Z after deleting one; not once its profile is gone.
+    pub fn restore_space(&mut self, deleted: DeletedSpace) -> Result<SpaceId, Error> {
+        if !self.profiles.iter().any(|p| p.id == deleted.space.profile) {
+            return Err(Error::UnknownProfile);
+        }
+        let id = deleted.space.id;
+        self.nodes
+            .extend(deleted.nodes.into_iter().map(|node| (node.id, node)));
+        let index = deleted.index.min(self.listed_spaces());
+        self.spaces.insert(index, deleted.space);
+        self.url_routing.remember_space(id, &deleted.routes);
+        self.displayed = Some(id);
+        Ok(id)
     }
 
     /// Opens a tab at the end of the Space's "Today" tabs, from the Space's selected tab.
@@ -2145,7 +2178,7 @@ mod tests {
                 12 => sidebar.select(space, node),
                 13 => sidebar.close_in_place(space, node).map(drop),
                 14 => sidebar.remove_folder(node).map(drop),
-                15 if index < 2 => sidebar.delete_space(space),
+                15 if index < 2 => sidebar.delete_space(space).map(drop),
                 _ => sidebar.add_space("Space", home(&sidebar).profile).map(drop),
             };
             if let Err(problem) = sidebar.check_invariants() {
@@ -3667,8 +3700,26 @@ mod tests {
         }
         sidebar.delete_space(books).unwrap();
         assert_eq!(sidebar.displayed().id, home);
-        assert_eq!(sidebar.delete_space(home), Err(Error::LastSpace));
-        assert_eq!(sidebar.delete_space(work), Err(Error::UnknownSpace));
+        assert_eq!(sidebar.delete_space(home).unwrap_err(), Error::LastSpace);
+        assert_eq!(sidebar.delete_space(work).unwrap_err(), Error::UnknownSpace);
+    }
+
+    #[test]
+    fn restores_a_deleted_space_where_it_was_with_its_tabs_and_links() {
+        let mut sidebar = Sidebar::default();
+        let profile = sidebar.profiles()[0].id;
+        let work = sidebar.add_space("Work", profile).unwrap();
+        sidebar.add_space("Books", profile).unwrap();
+        let tab = sidebar.open_tab(work, "a").unwrap();
+        sidebar.url_routing.default = Destination::Space(work);
+        let before = sidebar.clone();
+        let deleted = sidebar.delete_space(work).unwrap();
+        assert_eq!(sidebar.restore_space(deleted), Ok(work));
+        assert_eq!(sidebar.displayed().id, work);
+        assert_eq!(sidebar.spaces()[1].id, work);
+        assert_eq!(sidebar.space_of(tab), Some(work));
+        assert_eq!(sidebar.url_routing, before.url_routing);
+        sidebar.check_invariants().unwrap();
     }
 
     #[test]

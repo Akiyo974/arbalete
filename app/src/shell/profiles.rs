@@ -150,6 +150,41 @@ pub(super) fn update_spaces(
     }
 }
 
+/// Deletes a Space, at once, like Arc's, which tells it and lets ⌘Z put it back.
+pub(super) fn delete_space(space: SpaceId) {
+    let mut deleted = None;
+    update_spaces(space, |sidebar| {
+        deleted = Some(sidebar.delete_space(space)?);
+        Ok(())
+    });
+    let Some(deleted) = deleted else {
+        return;
+    };
+    STATE.with_borrow_mut(|state| {
+        state.deleted.push((SystemTime::now(), deleted));
+        let over = state.deleted.len().saturating_sub(MAX_CLOSED);
+        state.deleted.drain(..over);
+    });
+    tell_closed("Space deleted", 1);
+}
+
+/// Puts the Space deleted last back and shows it, if it was deleted after the tabs closed last.
+/// Whether it did.
+pub(super) fn restore_space() -> bool {
+    let deleted = STATE.with_borrow_mut(|state| {
+        let at = state.deleted.last()?.0;
+        let last = state.closed.last().is_none_or(|closed| closed.at <= at);
+        last.then(|| state.deleted.pop().expect("a last one").1)
+    });
+    let Some(deleted) = deleted else {
+        return false;
+    };
+    if update_sidebar(|sidebar| sidebar.restore_space(deleted)).is_ok() {
+        show_selected();
+    }
+    true
+}
+
 /// A profile's web data directory, once CEF has it open. None before, as for a profile just
 /// imported: it is opened then, and extensions::profile_ready tells once it is.
 pub fn opened_web_data(profile: ProfileId) -> Option<PathBuf> {
