@@ -2,6 +2,7 @@
 //! (app/src/mac.rs) and runs the item picked (shell::perform).
 
 use crate::command::{Command, SiteData, Target};
+use arbalete_core::easel;
 use arbalete_core::sidebar::{
     MAX_FAVORITES, MAX_SPLIT_TABS, NodeId, NodeKind, Sidebar, Space, Tab,
 };
@@ -209,26 +210,33 @@ fn tab_menu(sidebar: &Sidebar, id: NodeId, tab: &Tab) -> Vec<Entry> {
     let pinned = sidebar.is_pinned(id);
     let pin = if pinned { "Unpin Tab" } else { "Pin Tab" };
     let mute = if tab.muted { "Unmute" } else { "Mute" };
+    // An Easel's board has no link, no sound and no page to duplicate (decision 0009).
+    let easel = easel::number(&tab.url).is_some();
     // In Arc's order: the link first, then the tab's own settings; a "Today" tab, like Arc's,
     // pins with ⌘D or a drag rather than from its menu.
-    let mut menu = vec![
-        copy_link(&tab.url),
-        share(&tab.url),
-        Entry::Separator,
-        item(
-            "rename",
-            "Rename…",
-            Action::Ask("arbalete:rename", json!(id)),
-        ),
-        item("mute", mute, Action::Run(Command::ToggleMute(id))),
-    ];
+    let rename = item(
+        "rename",
+        "Rename…",
+        Action::Ask("arbalete:rename", json!(id)),
+    );
+    let mut menu = if easel {
+        vec![rename]
+    } else {
+        vec![
+            copy_link(&tab.url),
+            share(&tab.url),
+            Entry::Separator,
+            rename,
+            item("mute", mute, Action::Run(Command::ToggleMute(id))),
+        ]
+    };
     if pinned {
         menu.extend([
             Entry::Separator,
             item("pin", pin, Action::Run(Command::Pin(Some(id)))),
         ]);
     }
-    if let Some(saved) = tab.saved_url.as_deref().filter(|_| pinned) {
+    if let Some(saved) = tab.saved_url.as_deref().filter(|_| pinned && !easel) {
         menu.push(Entry::Submenu(
             "Edit Pinned Page".to_string(),
             vec![
@@ -258,15 +266,21 @@ fn tab_menu(sidebar: &Sidebar, id: NodeId, tab: &Tab) -> Vec<Entry> {
             "Add Split View",
             Action::Run(Command::AddPane(Some(tab))),
         ),
-        duplicate(tab),
+    ]);
+    if !easel {
+        menu.push(duplicate(tab));
+    }
+    // Like Arc's, a "Today" tab closed goes to the archive; a pinned one stays.
+    let close = match (pinned, easel) {
+        (true, false) => "Close Tab",
+        (false, false) => "Archive Tab",
+        (true, true) => "Close Easel",
+        (false, true) => "Archive Easel",
+    };
+    menu.extend([
         move_to(sidebar, tab),
         Entry::Separator,
-        // Like Arc's, a "Today" tab closed goes to the archive; a pinned one stays.
-        item(
-            "close",
-            if pinned { "Close Tab" } else { "Archive Tab" },
-            Action::Run(Command::Close(Some(tab))),
-        ),
+        item("close", close, Action::Run(Command::Close(Some(tab)))),
     ]);
     // Pinned tabs stay: only "Today" tabs close those below them.
     if !pinned {
@@ -718,6 +732,29 @@ mod tests {
         }
         let menu = build(&sidebar, Target::Node(split)).unwrap();
         assert_eq!(titles(&menu)[1], "(Add Tab…)");
+    }
+
+    #[test]
+    fn an_easel_has_no_link_sound_or_duplicate() {
+        let mut sidebar = Sidebar::default();
+        let home = sidebar.spaces()[0].id;
+        let tab = sidebar.open_tab(home, &easel::url(1)).unwrap();
+        let menu = build(&sidebar, Target::Node(tab)).unwrap();
+        assert_eq!(
+            titles(&menu),
+            [
+                "Rename…",
+                "-",
+                "Add Split View",
+                "Move to ▸",
+                "  ✓ Home",
+                "  -",
+                "  New Space…",
+                "-",
+                "Archive Easel",
+                "(Archive Tabs Below)",
+            ]
+        );
     }
 
     #[test]

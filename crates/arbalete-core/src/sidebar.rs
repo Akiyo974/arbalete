@@ -3682,6 +3682,15 @@ mod tests {
     }
 
     #[test]
+    fn splits_easels_like_pages() {
+        let mut sidebar = Sidebar::default();
+        let home = sidebar.spaces()[0].id;
+        let first = sidebar.open_tab(home, &crate::easel::url(1)).unwrap();
+        let second = sidebar.open_tab(home, &crate::easel::url(2)).unwrap();
+        assert!(sidebar.split(first, second).is_ok());
+    }
+
+    #[test]
     fn splits_a_tab_with_another_in_its_place() {
         let mut sidebar = Sidebar::default();
         let home = home(&sidebar);

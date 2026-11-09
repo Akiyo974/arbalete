@@ -1581,14 +1581,18 @@ private struct ChipButton: View {
     }
 }
 
-/// A tab's icon, or a placeholder without one.
+/// A tab's icon, a symbol as "symbol:<name>" (an Easel's), or a placeholder without one.
 struct Favicon: View {
     let url: String?
     let size: CGFloat
 
     var body: some View {
         Group {
-            if let image = uiImage(url) {
+            if let symbol = url?.split(separator: ":", maxSplits: 1).dropFirst().first,
+                url?.hasPrefix("symbol:") == true
+            {
+                Image(systemName: String(symbol)).resizable().scaledToFit().padding(size / 10)
+            } else if let image = uiImage(url) {
                 Image(nsImage: image).resizable().interpolation(.high)
             } else {
                 RoundedRectangle(cornerRadius: 4).fill(.primary.opacity(0.15))

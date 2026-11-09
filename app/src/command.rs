@@ -293,6 +293,30 @@ pub enum Command {
     /// Creates a folder for the UI to rename, at the end of the displayed Space's pinned tabs,
     /// or of a folder, from its menu.
     NewFolder(Option<NodeId>),
+    /// Opens a new Easel in "Today", from the "+" menu or the Command Bar (decision 0009).
+    NewEasel,
+    /// Saves an Easel's board, by its number, as its view sends it after each change.
+    SaveEasel(u64, arbalete_core::easel::Easel),
+    /// Adds a capture of the shown page, a PNG file so many points wide and tall, to an Easel by
+    /// its number, or to a new one, with where it was on the page.
+    AddCaptureToEasel(
+        std::path::PathBuf,
+        f64,
+        f64,
+        Option<u64>,
+        Option<arbalete_core::easel::PageView>,
+    ),
+    /// Shows the Easel of a tab in Peek, as a capture lands in its board already open.
+    PeekEasel(NodeId),
+    /// Shows a live capture of an Easel, by the Easel's number and its own: its page, at its
+    /// address, as it was captured and so many times its size, in the view the board holds for it.
+    ShowLiveCapture(u64, u64, String, arbalete_core::easel::PageView, f64),
+    /// Draws a live capture's page so many times its size, as its card's size changes.
+    ScaleLiveCapture(u64, u64, f64),
+    /// Closes a live capture's page, by the Easel's number and its own.
+    CloseLiveCapture(u64, u64),
+    /// Moves a picture into an Easel, by its number, under the name its board gives it.
+    AddEaselImage(u64, std::path::PathBuf, String),
     /// Closes every tab of a folder, from its menu.
     CloseFolderTabs(NodeId),
     /// Removes a tab from the favorites, from its menu.

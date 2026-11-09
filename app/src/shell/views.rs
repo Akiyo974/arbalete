@@ -91,6 +91,10 @@ fn page(tab: NodeId) -> Option<()> {
     if PAGES.with_borrow(|pages| pages.contains_key(&tab)) {
         return Some(());
     }
+    // An Easel shows its board instead of a page.
+    if let Some(number) = easel_of(tab) {
+        return easel_view(tab, number);
+    }
     let (profile, url) = STATE.with_borrow_mut(|state| {
         let profile = state.sidebar.profile_of(tab)?;
         Some((profile, state.sidebar.tab_mut(tab)?.url.clone()))
@@ -172,6 +176,10 @@ pub(super) fn tab_number(tab: NodeId) -> i64 {
 
 /// Gives a tab's page the keyboard, and its window, if it shows.
 pub(super) fn focus_page(tab: NodeId) {
+    #[cfg(target_os = "macos")]
+    if has_easel_view(tab) {
+        return crate::native::focus_page(tab_number(tab));
+    }
     let Some(host) = PAGES.with_borrow(|pages| pages.get(&tab)?.browser.host()) else {
         return;
     };
@@ -307,9 +315,11 @@ fn space_tint(tab: NodeId) -> u32 {
 /// Tells the UI how the shown page stands: its progress and history are its own.
 fn send_page_state() {
     let browser = content();
+    // A page about to open loads; an Easel's board never does.
+    let board = win().shown.get().is_some_and(has_easel_view);
     let loading = browser
         .as_ref()
-        .is_none_or(|browser| browser.is_loading() == 1);
+        .map_or(!board, |browser| browser.is_loading() == 1);
     update_page(|page| {
         page.loading = loading;
         page.progress = if loading { 0.0 } else { 1.0 };
@@ -374,6 +384,7 @@ pub(super) fn prune_pages() {
     for tab in gone {
         close_page(tab);
     }
+    prune_easel_views();
     STATE.with_borrow(|state| {
         SNAPSHOTS.with_borrow_mut(|snapshots| {
             snapshots.retain(|tab, _| state.sidebar.node(*tab).is_some());

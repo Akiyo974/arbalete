@@ -82,6 +82,8 @@ final class PeekChrome {
     private let card: Overlay
     let page = PageHost()
     let state = PeekPage()
+    /// The tab whose Easel's board Peek shows, borrowed from its page's container.
+    var lender: Int?
     private let controls: Overlay
     /// The label of the control hovered, beside it.
     private let label: Overlay
@@ -188,9 +190,18 @@ final class PeekChrome {
         controlsLayer.add(appear, forKey: "appear")
     }
 
-    /// Takes its page's view away, its browser closing, which destroys it.
+    /// Takes its page's view away, its browser closing, which destroys it; or gives an Easel's
+    /// board back to its tab, or lets it go, saved.
     func pageClosed() {
-        page.subviews.forEach { $0.removeFromSuperview() }
+        for view in page.subviews {
+            if view is EaselView, let lender, let container = pageContainers[lender] {
+                container.host.addSubview(view)
+            } else {
+                view.removeFromSuperview()
+            }
+        }
+        lender = nil
+        page.layer?.backgroundColor = nil
     }
 
     func close() {

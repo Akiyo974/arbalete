@@ -863,13 +863,23 @@ wrap_load_handler! {
 
     impl LoadHandler {
         /// A page's navigation is committed: it is a visit, whether or not the page loads fully.
-        fn on_load_start(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, _transition_type: TransitionType) {
+        fn on_load_start(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, _transition_type: TransitionType) {
             let Some(frame) = frame.filter(|frame| frame.is_main() == 1) else { return };
+            // An Easel's live capture shows a page the user visited already.
+            if browser.as_deref().is_some_and(is_live_capture) {
+                return;
+            }
             let url = CefString::from(&frame.url()).to_string();
             update_history(self.profile, |history| history.visit(&url, now()));
         }
 
         fn on_loading_state_change(&self, browser: Option<&mut Browser>, is_loading: i32, can_go_back: i32, can_go_forward: i32) {
+            if let Some(browser) = browser.as_deref().filter(|b| is_live_capture(b)) {
+                if is_loading == 0 {
+                    live_capture_loaded(browser);
+                }
+                return;
+            }
             if browser.as_deref().is_some_and(is_peek) {
                 if is_loading == 0 {
                     ask_top_color(browser.as_deref());
@@ -1050,6 +1060,13 @@ wrap_life_span_handler! {
                         post_task(ThreadId::UI, Some(&mut RemoveLittle::new(id)));
                         return 1;
                     }
+                }
+                if let Some(browser) = browser.as_deref().filter(|b| live_capture_closing(b))
+                    && let Some(host) = browser.host()
+                {
+                    let view = host.window_handle() as usize;
+                    post_task(ThreadId::UI, Some(&mut RemoveLiveCapture::new(view)));
+                    return 1;
                 }
                 let Some((id, window)) = PEEK_CLOSING.get() else { return 0 };
                 if browser.is_none_or(|browser| browser.identifier() != id) {

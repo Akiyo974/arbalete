@@ -58,6 +58,10 @@ unsafe extern "C" {
     fn arbalete_ui_page_closed(view: *mut std::ffi::c_void);
     fn arbalete_ui_hand_pages_over(from: u32, to: u32);
     fn arbalete_ui_focus_page(tab: i64);
+    fn arbalete_ui_easel(window: u32, tab: i64, easel: *const c_char) -> bool;
+    fn arbalete_ui_easel_closed(tab: i64);
+    fn arbalete_ui_live_capture_view(easel: i64, id: i64) -> *mut std::ffi::c_void;
+    fn arbalete_ui_live_capture_closed(view: *mut std::ffi::c_void);
     fn arbalete_ui_page_status(view: *mut c_void, text: *const c_char, instant: bool);
     fn arbalete_ui_tools_view(tab: i64) -> *mut std::ffi::c_void;
     fn arbalete_ui_tools_room(tab: i64, x: f64, y: f64, width: f64, height: f64);
@@ -67,6 +71,12 @@ unsafe extern "C" {
     fn arbalete_ui_peek(window: u32, shown: bool, x: f64, y: f64, width: f64, height: f64);
     fn arbalete_ui_peek_view(window: u32) -> *mut std::ffi::c_void;
     fn arbalete_ui_peek_closed(window: u32);
+    fn arbalete_ui_peek_easel(
+        window: u32,
+        tab: i64,
+        title: *const c_char,
+        easel: *const c_char,
+    ) -> bool;
     #[allow(clippy::too_many_arguments)]
     fn arbalete_ui_open_window(
         window: u32,
@@ -464,6 +474,44 @@ pub fn page_view(window: u32, tab: i64) -> Option<*mut std::ffi::c_void> {
 pub fn page_closed(view: *mut std::ffi::c_void) {
     // SAFETY: CEF's view of a browser closing, which the call only compares.
     unsafe { arbalete_ui_page_closed(view) };
+}
+
+/// Shows an Easel's board (JSON) in the view of the tab `tab`, made in the window `window` the
+/// first time; a board already shown keeps its own. False while the window cannot hold it yet.
+pub fn easel(window: u32, tab: i64, easel: &str) -> bool {
+    let easel = CString::new(easel).unwrap_or_default();
+    // SAFETY: a C string, which the call reads before returning.
+    unsafe { arbalete_ui_easel(window, tab, easel.as_ptr()) }
+}
+
+/// Shows an Easel's board (JSON) in Peek's card in the window `window`, titled `title`: the
+/// tab's own board if it has one, borrowed until Peek closes (peek_closed). False while the card
+/// cannot hold it.
+pub fn peek_easel(window: u32, tab: i64, title: &str, easel: &str) -> bool {
+    let title = CString::new(title).unwrap_or_default();
+    let easel = CString::new(easel).unwrap_or_default();
+    // SAFETY: C strings, which the call reads before returning.
+    unsafe { arbalete_ui_peek_easel(window, tab, title.as_ptr(), easel.as_ptr()) }
+}
+
+/// The view a live capture's page is drawn in, `id` on the Easel `easel`, which the board holds
+/// while it shows it.
+pub fn live_capture_view(easel: i64, id: i64) -> Option<*mut std::ffi::c_void> {
+    // SAFETY: plain values; the view lives until live_capture_closed.
+    let view = unsafe { arbalete_ui_live_capture_view(easel, id) };
+    (!view.is_null()).then_some(view)
+}
+
+/// Takes away a live capture's page's view, `view`, its browser closing.
+pub fn live_capture_closed(view: *mut std::ffi::c_void) {
+    // SAFETY: CEF's view of a browser closing, which the call only compares.
+    unsafe { arbalete_ui_live_capture_closed(view) };
+}
+
+/// Takes away the view of an Easel's tab, closed.
+pub fn easel_closed(tab: i64) {
+    // SAFETY: a plain value.
+    unsafe { arbalete_ui_easel_closed(tab) };
 }
 
 /// Moves the pages' containers out of the window `from`, which closes, into the window `to`,

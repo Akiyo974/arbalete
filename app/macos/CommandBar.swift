@@ -27,6 +27,7 @@ private let suggestionCount = 4
 /// The app's actions the Command Bar runs, by their names, and the commands they send.
 let actions: [(title: String, command: String)] = [
     ("New Folder", command("new-folder")),
+    ("New Easel", command("new-easel")),
     ("New Little Arbalete Window", command("new-little")),
     ("New Profile", command("new-profile")),
     ("Close Tab", command("close")),

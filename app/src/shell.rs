@@ -43,6 +43,7 @@ mod chrome_pages;
 mod commands;
 mod content;
 mod downloads_ui;
+mod easels;
 mod find;
 mod history_ui;
 mod import_ui;
@@ -74,6 +75,7 @@ pub use chrome_pages::*;
 pub use commands::*;
 pub use content::*;
 use downloads_ui::*;
+use easels::*;
 use find::*;
 use history_ui::*;
 use import_ui::*;
@@ -855,7 +857,11 @@ fn has_page(tab: NodeId) -> bool {
 
 /// Where the UI loads a tab's icon from: the app serves the profile's cached icons (favicon_file),
 /// from the UI's own origin so that the UI may read their pixels.
+/// An Easel's is a drawing's symbol, as "symbol:<name>".
 fn favicon_url(profile: ProfileId, tab: &Tab) -> Option<String> {
+    if arbalete_core::easel::number(&tab.url).is_some() {
+        return Some("symbol:scribble".into());
+    }
     Some(icon_url(profile, tab.favicon.as_deref()?))
 }
 

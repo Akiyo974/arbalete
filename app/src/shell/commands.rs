@@ -153,6 +153,20 @@ fn run_command(command: Command) {
         (Command::Reopen(rank), _) => reopen_tab(rank),
         (Command::Pin(tab), _) => toggle_pin(tab),
         (Command::NewFolder(parent), _) => new_folder(parent),
+        (Command::NewEasel, _) => new_easel(),
+        (Command::ShowLiveCapture(number, id, url, page, scale), _) => {
+            show_live_capture((number, id), &url, page, scale)
+        }
+        (Command::ScaleLiveCapture(number, id, scale), _) => {
+            scale_live_capture((number, id), scale)
+        }
+        (Command::CloseLiveCapture(number, id), _) => close_live_capture((number, id)),
+        (Command::AddCaptureToEasel(file, width, height, number, page), _) => {
+            add_capture_to_easel(&file, (width, height), number, page)
+        }
+        (Command::PeekEasel(tab), _) => peek_easel(tab, None),
+        (Command::SaveEasel(number, easel), _) => save_easel(number, &easel),
+        (Command::AddEaselImage(number, file, name), _) => add_easel_image(number, &file, &name),
         (Command::CloseFolderTabs(folder), _) => close_folder_tabs(folder),
         (Command::RemoveFavorite(tab), _) => remove_favorite(tab),
         // Like a selection, an unknown Space from the UI is ignored.

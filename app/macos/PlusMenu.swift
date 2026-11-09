@@ -40,8 +40,8 @@ extension AppModel {
             ],
             [
                 PlusMenuItem(
-                    id: "easel", symbol: "scribble", title: "New Easel", shortcut: "⌃⇧E",
-                    enabled: false, help: "Coming soon"),
+                    id: "easel", symbol: "scribble", title: "New Easel", shortcut: "⌃⇧E"
+                ) { [weak self] in self?.run("new-easel") },
                 PlusMenuItem(
                     id: "boost", symbol: "paintbrush.pointed", title: "New Boost", enabled: false,
                     help: "Coming soon"),

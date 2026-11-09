@@ -94,7 +94,7 @@ final class PageHost: NSView {
 /// block that AppKit lays out, like Arc's.
 @MainActor
 final class PageContainer: NSView {
-    fileprivate let host = PageHost()
+    let host = PageHost()
     fileprivate let bar: BarHost
     fileprivate var barHeight: CGFloat = 0 {
         didSet { if barHeight != oldValue { arrange() } }
@@ -704,5 +704,6 @@ public func focusPage(_ tab: Int64) {
     MainActor.assumeIsolated {
         guard let page = pageContainers[Int(tab)], !page.isHidden else { return }
         page.window?.makeKey()
+        if let board = page.board { page.window?.makeFirstResponder(board.canvas) }
     }
 }

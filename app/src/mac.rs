@@ -135,6 +135,11 @@ define_class!(
             crate::shell::run(Command::Pin(None));
         }
 
+        #[unsafe(method(arbaleteNewEasel:))]
+        fn new_easel(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::NewEasel);
+        }
+
         #[unsafe(method(arbaleteNewFolder:))]
         fn new_folder(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::NewFolder(None));
@@ -754,6 +759,13 @@ pub fn setup_menu() {
                     ns_string!("New Folder"),
                     sel!(arbaleteNewFolder:),
                     ns_string!(""),
+                ),
+                // ⌃⇧E, like Arc's.
+                control_shift_item(
+                    mtm,
+                    ns_string!("New Easel"),
+                    sel!(arbaleteNewEasel:),
+                    ns_string!("e"),
                 ),
                 // No shortcut: imports are rare.
                 item(

@@ -51,6 +51,9 @@ final class CaptureChrome {
     private var marks: [Mark] = []
     /// The page's frame and its picture, while a capture shows.
     private var frame = NSRect.zero
+    /// What the page told of itself as its picture was taken, for a part picked: where it was
+    /// scrolled, for an Easel's live capture.
+    private var blocks: PageBlocks?
     /// Where the developer bar's capture button is, from the window's top left corner: the
     /// panel framing the page shows under it.
     var button: NSRect?
@@ -74,6 +77,7 @@ final class CaptureChrome {
         veil.copy = { [weak self] in self?.copyPart() }
         veil.save = { [weak self] in self?.savePart() }
         veil.library = { [weak self] in self?.keepPart() }
+        veil.easel = { [weak self] in self?.addToEasel() }
         veil.edit = { [weak self] in self?.edit() }
         veil.scroll = { dx, dy, point in
             model.run("scroll-capture", dx, dy, Int(point.x), Int(point.y))
@@ -89,6 +93,7 @@ final class CaptureChrome {
         guard let image = NSBitmapImageRep(data: png)?.cgImage else { return }
         self.frame = frame
         if area {
+            self.blocks = blocks
             closeFraming()
             let scale = blocks.map { frame.width / max($0.width, 1) } ?? 1
             let rects = (blocks?.rects ?? []).compactMap { rect -> NSRect? in
@@ -161,6 +166,65 @@ final class CaptureChrome {
         guard (try? png.write(to: file)) != nil else { return }
         model.run("save-capture-to-library", file.path)
         tell("Saved to Library")
+    }
+
+    /// Adds the part picked to an Easel, like Arc's: a menu at the pointer lists the displayed
+    /// Space's, then a new one (decision 0009). An Easel's board shown adds it itself.
+    private func addToEasel() {
+        guard let image = veil.part, let content = parent.contentView else { return }
+        let page = pageView()
+        let easels = (model.page.map { $0.pinned + $0.today } ?? []).flatMap(\.tabs)
+            .filter { $0.url.hasPrefix("arbalete://easel/") }
+        let menu = NSMenu()
+        for easel in easels {
+            let item = NSMenuItem(title: easel.label, action: nil, keyEquivalent: "")
+            item.image = NSImage(systemSymbolName: "scribble", accessibilityDescription: nil)
+            menu.addItem(ClosureMenuItem(item) { [weak self] in self?.add(image, page, to: easel) })
+        }
+        if !easels.isEmpty { menu.addItem(.separator()) }
+        let new = NSMenuItem(title: "New Easel", action: nil, keyEquivalent: "")
+        new.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
+        menu.addItem(ClosureMenuItem(new) { [weak self] in self?.add(image, page, to: nil) })
+        let point = content.convert(parent.mouseLocationOutsideOfEventStream, from: nil)
+        menu.popUp(positioning: nil, at: point, in: content)
+    }
+
+    /// Where the part picked is on the page, in its CSS pixels, once the page told where it was
+    /// scrolled.
+    private func pageView() -> EaselPage? {
+        guard let blocks, let height = blocks.height, let scrollX = blocks.scrollX,
+            let scrollY = blocks.scrollY, let selection = veil.selection, frame.width > 0
+        else { return nil }
+        let css = blocks.width / frame.width
+        let part = CGRect(
+            x: selection.minX * css, y: selection.minY * css, width: selection.width * css,
+            height: selection.height * css)
+        return EaselPage(
+            width: blocks.width, height: height, scrollX: scrollX, scrollY: scrollY,
+            part: EaselRect(part))
+    }
+
+    private func add(_ image: CGImage, _ page: EaselPage?, to easel: Tab?) {
+        closeVeil()
+        let scale = parent.backingScaleFactor
+        let size = CGSize(width: CGFloat(image.width) / scale, height: CGFloat(image.height) / scale)
+        if let easel, let board = pageContainers[easel.id]?.board {
+            let tab = model.activeTab
+            board.canvas.addCapture(
+                image, size: size, url: tab?.url ?? "", title: tab?.label ?? "",
+                icon: uiImage(tab?.favicon), page: page)
+            // Like Arc's, the Easel shows in Peek, unless it shows already.
+            guard board.isHiddenOrHasHiddenAncestor else { return tell("Added to Easel") }
+            return model.run("peek-easel", easel.id)
+        }
+        guard let png = pngData(image) else { return }
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString + ".png")
+        guard (try? png.write(to: file)) != nil else { return }
+        let number = easel.flatMap { Int($0.url.dropFirst("arbalete://easel/".count)) }
+        model.run(
+            "add-capture-to-easel", file.path, Double(size.width), Double(size.height),
+            number as Any? ?? NSNull(), page.map { jsonObject($0) } ?? NSNull())
     }
 
     private func savePart() {
@@ -271,6 +335,7 @@ final class Veil: NSView {
     var copy: () -> Void = {}
     var save: () -> Void = {}
     var library: () -> Void = {}
+    var easel: () -> Void = {}
     var edit: () -> Void = {}
     /// Scrolls the page under it, by a wheel's deltas, at a point of it.
     var scroll: (CGFloat, CGFloat, NSPoint) -> Void = { _, _, _ in }
@@ -495,7 +560,7 @@ final class Veil: NSView {
 /// What a part picked may become, inside it, like Arc's menu, measured: rows 40 points apart,
 /// a 32-point hover inset 10 points.
 private struct CaptureMenu: View {
-    static let size = NSSize(width: 272, height: 2 * 6 + 5 * 40 + 9)
+    static let size = NSSize(width: 272, height: 2 * 6 + 6 * 40 + 9)
     let veil: Veil
 
     var body: some View {
@@ -504,6 +569,7 @@ private struct CaptureMenu: View {
             CaptureMenuRow(
                 symbol: "photo.on.rectangle.angled", title: "Save to Library", action: veil.library)
             CaptureMenuRow(symbol: "square.and.arrow.down", title: "Save…", action: veil.save)
+            CaptureMenuRow(symbol: "scribble", title: "Add to Easel", action: veil.easel)
             Rectangle().fill(Color(red: 0x1F / 255, green: 0x1D / 255, blue: 0x34 / 255))
                 .frame(height: 0.5).padding(.horizontal, 10).padding(.vertical, 4)
             CaptureMenuRow(symbol: "pencil.circle", title: "Edit", action: veil.edit)
@@ -771,6 +837,9 @@ private struct FrameHueTrack: View {
 /// points.
 struct PageBlocks: Decodable {
     var width: Double
+    var height: Double?
+    var scrollX: Double?
+    var scrollY: Double?
     var rects: [[Double]]
 }
 
@@ -790,4 +859,21 @@ public func captured(
             capture.show(png, area: mode == 1, frame: frame, blocks: blocks)
         }
     }
+}
+
+/// A menu item that runs a closure.
+@MainActor
+final class ClosureMenuItem: NSMenuItem {
+    private let run: () -> Void
+
+    init(_ item: NSMenuItem, run: @escaping () -> Void) {
+        self.run = run
+        super.init(title: item.title, action: #selector(chosen), keyEquivalent: "")
+        target = self
+        image = item.image
+    }
+
+    required init(coder: NSCoder) { fatalError() }
+
+    @objc private func chosen() { run() }
 }

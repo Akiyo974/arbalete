@@ -135,7 +135,7 @@ pub(super) fn place_peek() {
 
 /// Whether Peek shows a link.
 pub fn peek_shown() -> bool {
-    PEEK.with_borrow(Option::is_some)
+    PEEK.with_borrow(Option::is_some) || easel_peeked()
 }
 
 /// Closes Peek, its page with it.
@@ -144,6 +144,9 @@ pub(super) fn close_peek() {
         return;
     }
     close_find();
+    if close_peek_easel().is_some() {
+        return;
+    }
     let Some(peek) = PEEK.take() else { return };
     #[cfg(target_os = "macos")]
     crate::native::peek(win().id, None);
@@ -158,6 +161,16 @@ pub(super) fn close_peek() {
 
 /// Opens Peek's page in a tab of its own, or beside the selected tab in a split, and closes it.
 pub(super) fn keep_peek(split: bool) {
+    // An Easel's tab is there already: shown, or beside the selected tab.
+    if let Some(tab) = close_peek_easel() {
+        if split {
+            update_sidebar(|sidebar| {
+                let beside = sidebar.displayed().selected?;
+                sidebar.split(tab, beside).ok()
+            });
+        }
+        return select_tab(tab);
+    }
     let url = PEEK.with_borrow(|peek| {
         let frame = peek.as_ref()?.browser.main_frame()?;
         Some(CefString::from(&frame.url()).to_string())

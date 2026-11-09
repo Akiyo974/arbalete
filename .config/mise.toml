@@ -118,6 +118,8 @@ run = [
   # a banner in the sidebar then offers to restart into it, like Arc's.
   "plutil -insert SUEnableAutomaticChecks -bool YES target/bundle/Arbalete.app/Contents/Info.plist",
   "plutil -insert SUAutomaticallyUpdate -bool YES target/bundle/Arbalete.app/Contents/Info.plist",
+  # The fonts of Easels' texts, like Arc's (app/macos/Easel.swift), with their license (SIL OFL).
+  "cp -R app/resources/fonts target/bundle/Arbalete.app/Contents/Resources/fonts",
   # The helper extension, loaded in every profile (app/src/extensions.rs).
   "cp -R app/extension target/bundle/Arbalete.app/Contents/Resources/arbalete-helper",
   # A browser opens web links: macOS offers it as the default browser, which other apps' links

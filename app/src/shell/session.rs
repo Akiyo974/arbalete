@@ -141,6 +141,7 @@ pub(super) fn restore(path: PathBuf) {
         });
     }
     STATE.with_borrow_mut(|state| favicon::sweep(&mut state.sidebar, profile_dir));
+    sweep_easels();
     // Users of an earlier version have changed their sidebar: they never get it at launch.
     let untouched = STATE.with_borrow(|state| is_untouched(&state.sidebar));
     if !app_settings().onboarded && untouched {

@@ -16,7 +16,8 @@ pub(super) enum CaptureMode {
 
 /// Lists the page's blocks that show, which a capture of a part picks with a click, like Arc's:
 /// the elements laid out as boxes, or pictures and controls, from 12 points across, but the whole
-/// page.
+/// page. Where the page's view is scrolled and how tall it is come along, which an Easel's live
+/// capture loads the page at.
 const BLOCKS_SCRIPT: &str = r#"(() => {
   const width = innerWidth, height = innerHeight, rects = [];
   const replaced = new Set(['IMG', 'SVG', 'svg', 'VIDEO', 'CANVAS', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'PICTURE']);
@@ -30,7 +31,7 @@ const BLOCKS_SCRIPT: &str = r#"(() => {
     rects.push([r.left, r.top, r.width, r.height]);
     if (rects.length >= 4000) break;
   }
-  return { width, rects };
+  return { width, height, scrollX, scrollY, rects };
 })()"#;
 
 /// Where the shown page lies in the window, in points from its top left corner.

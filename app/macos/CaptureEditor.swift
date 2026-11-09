@@ -33,6 +33,25 @@ private let paletteRows: [[NSColor]] = [
     [hex(0xFFFFFF), hex(0xB2B2B2), hex(0xB80095), hex(0x00C4F7), hex(0x2A30FA)],
 ]
 
+/// How the tools' bar, the palette and the text's control look: the editor's, dark, or an Easel's
+/// (Easel.swift), with their palette.
+struct ChromeLook {
+    var bar: Color
+    var icon: Color
+    var selectedIcon: Color
+    var selected: Color
+    var hovered: Color
+    var palette: [[NSColor]]
+    /// The text control's "Aa" and its steps.
+    var face: Color
+    var step: Color
+
+    static let editor = ChromeLook(
+        bar: EditorInk.bar, icon: EditorInk.icon, selectedIcon: .white, selected: EditorInk.selected,
+        hovered: EditorInk.hovered, palette: paletteRows, face: Color(white: 0xD2 / 255),
+        step: Color(white: 0x55 / 255))
+}
+
 enum EditorTool: CaseIterable {
     case select, image, text, ellipse, rectangle, arrow, pen
 
@@ -76,7 +95,7 @@ enum EditorTool: CaseIterable {
 
 /// A text's sizes on the screen, which "+" and "–" step through, and its faces, which "Aa"
 /// cycles through, like Arc's.
-private let textSizes: [CGFloat] = [14, 24, 46, 80]
+let textSizes: [CGFloat] = [14, 24, 46, 80]
 
 private func textFont(_ face: Int, size: CGFloat) -> NSFont {
     switch face % 4 {
@@ -107,6 +126,19 @@ struct Mark {
     /// the screen's.
     var pixelsPerPoint: CGFloat = 1
     var image: CGImage?
+    /// A text in its color, without the editor's pill, as an Easel's are.
+    var plain = false
+    /// A picture's file, on an Easel.
+    var file: String?
+    /// The page a capture comes from, on an Easel, its title and its icon's file; where the
+    /// capture was on it, and whether it shows the page live.
+    var url: String?
+    var title: String?
+    var favicon: String?
+    var page: EaselPage?
+    var live = false
+    /// Unique on an Easel.
+    var id = 0
 
     var tail: CGPoint { points.first ?? .zero }
     var head: CGPoint { points.last ?? .zero }
@@ -185,13 +217,16 @@ struct Mark {
             context.setLineWidth(line)
             context.strokePath()
         case .text:
-            let radius = 8 * pixelsPerPoint * scale
-            context.addPath(CGPath(roundedRect: r, cornerWidth: radius, cornerHeight: radius, transform: nil))
-            context.setFillColor(NSColor.black.cgColor)
-            context.fillPath()
+            if !plain {
+                let radius = 8 * pixelsPerPoint * scale
+                context.addPath(
+                    CGPath(roundedRect: r, cornerWidth: radius, cornerHeight: radius, transform: nil))
+                context.setFillColor(NSColor.black.cgColor)
+                context.fillPath()
+            }
             let font = textFont(face, size: textSizes[size] * pixelsPerPoint * scale)
             let string = NSAttributedString(
-                string: text, attributes: [.font: font, .foregroundColor: NSColor.white])
+                string: text, attributes: [.font: font, .foregroundColor: plain ? color : NSColor.white])
             let typeset = CTLineCreateWithAttributedString(string)
             let width = CTLineGetTypographicBounds(typeset, nil, nil, nil)
             context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
@@ -208,7 +243,13 @@ struct Mark {
     }
 }
 
-private extension NSColor {
+extension NSColor {
+    /// Light enough for a black mark on it, as shown now.
+    var isLight: Bool {
+        guard let rgb = usingColorSpace(.sRGB) else { return false }
+        return 0.299 * rgb.redComponent + 0.587 * rgb.greenComponent + 0.114 * rgb.blueComponent > 0.6
+    }
+
     /// Its brightness, for a grey; nil for a color.
     var whiteComponentIfGrey: CGFloat? {
         guard let rgb = usingColorSpace(.sRGB) else { return nil }
@@ -229,7 +270,7 @@ private func distance(_ point: CGPoint, _ a: CGPoint, _ b: CGPoint) -> CGFloat {
 }
 
 /// A line through `points`, smoothed: curves through their middles.
-private func smoothPath(_ points: [CGPoint]) -> CGPath {
+func smoothPath(_ points: [CGPoint]) -> CGPath {
     let path = CGMutablePath()
     guard let first = points.first else { return path }
     path.move(to: first)
@@ -296,6 +337,10 @@ final class EditorModel: ObservableObject {
         .pen: hex(0xF32F13),
     ]
 
+    /// How many text sizes "+" and "–" step through, and how a text's box fits its text.
+    var sizes = textSizes.count
+    var fit: (inout Mark) -> Void = { $0.fitText() }
+
     var selectedMark: Mark? {
         guard let selected, marks.indices.contains(selected) else { return nil }
         return marks[selected]
@@ -315,14 +360,14 @@ final class EditorModel: ObservableObject {
 
     func resizeText(by step: Int) {
         guard let selected, selectedMark?.kind == .text else { return }
-        marks[selected].size = max(0, min(textSizes.count - 1, marks[selected].size + step))
-        marks[selected].fitText()
+        marks[selected].size = max(0, min(sizes - 1, marks[selected].size + step))
+        fit(&marks[selected])
     }
 
     func cycleFace() {
         guard let selected, selectedMark?.kind == .text else { return }
-        marks[selected].face += 1
-        marks[selected].fitText()
+        marks[selected].face = (marks[selected].face + 1) % 4
+        fit(&marks[selected])
     }
 }
 
@@ -346,49 +391,45 @@ final class CaptureEditor {
     }
 }
 
-/// The dimmed window, the picture and its marks, where the tools draw, with the tools' bar, the
-/// palette and the text's control over it.
+/// Where marks are drawn with the tools, with the tools' bar, the palette and the text's control
+/// over it: the editor's picture, or an Easel's board (Easel.swift). The marks count in the
+/// units of `area`, `scale` view points each.
 @MainActor
-final class EditorCanvas: NSView {
-    let model = EditorModel()
-    var done: ([Mark]) -> Void = { _ in }
-    private let image: CGImage
-    /// Where the part shows on the page, from the window's top left corner, which it zooms from.
-    private let from: CGRect
-    /// How far the zoom is, from the page's part (0) to the editor's (1).
-    private var progress: CGFloat = 0
-    private var animation: Timer?
-    private let tools: NSHostingView<EditorToolsView>
+class MarkCanvas: NSView, NSTextFieldDelegate {
+    let model: EditorModel
+    let tools: NSHostingView<EditorToolsView>
     private let palette: NSHostingView<PaletteView>
     private let textControl: NSHostingView<TextControlView>
     private var dragStart: CGPoint?
     private var lastPoint: CGPoint?
-    /// A drawing under way: its kind and box, in the picture's pixels.
+    /// A drawing under way: its kind and box, in the marks' units.
     private var drawing: Mark?
     /// The handle dragged: a box's corner, from its top left clockwise, or an arrow's tail (0)
     /// or head (1).
     private var handle: Int?
-    private var hovered: Int?
+    /// The mark moved: its index, as it was, and where the drag began, in the marks' units.
+    private var moving: (index: Int, mark: Mark, start: CGPoint)?
+    private(set) var hovered: Int?
     private var field: NSTextField?
     private var editing: Int?
     private var observer: AnyCancellable?
-    private var closing = false
 
-    init(image: CGImage, from: CGRect) {
-        self.image = image
-        self.from = from
-        let model = model
-        tools = NSHostingView(rootView: EditorToolsView(model: model, addImage: {}))
-        palette = NSHostingView(rootView: PaletteView(model: model))
-        textControl = NSHostingView(rootView: TextControlView(model: model))
+    private let look: ChromeLook
+
+    init(model: EditorModel? = nil, look: ChromeLook = .editor) {
+        let model = model ?? EditorModel()
+        self.model = model
+        self.look = look
+        tools = NSHostingView(rootView: EditorToolsView(model: model, look: look, addImage: {}))
+        palette = NSHostingView(rootView: PaletteView(model: model, look: look))
+        textControl = NSHostingView(rootView: TextControlView(model: model, look: look))
         super.init(frame: .zero)
-        for view in [tools, palette, textControl] as [NSView] {
-            (view as? NSHostingView<EditorToolsView>)?.safeAreaRegions = []
-            addSubview(view)
-        }
+        for view in [tools, palette, textControl] as [NSView] { addSubview(view) }
+        tools.safeAreaRegions = []
         palette.safeAreaRegions = []
         textControl.safeAreaRegions = []
-        tools.rootView = EditorToolsView(model: model, addImage: { [weak self] in self?.addImage() })
+        tools.rootView = EditorToolsView(
+            model: model, look: look, addImage: { [weak self] in self?.addImage() })
         observer = model.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.refresh() }
         }
@@ -405,109 +446,93 @@ final class EditorCanvas: NSView {
         trackingAreas.forEach(removeTrackingArea)
         addTrackingArea(
             NSTrackingArea(
-                rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect, .cursorUpdate],
+                rect: .zero,
+                options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect, .cursorUpdate],
                 owner: self))
     }
 
-    // MARK: Zoom
+    // MARK: What the canvas makes of it
 
-    func open() {
+    /// Where the marks' origin and units are, in the view.
+    var area: CGRect { bounds }
+    var scale: CGFloat { 1 }
+    /// The marks' units per point of the screen, for the marks drawn now.
+    var pixelsPerPoint: CGFloat { 1 }
+    /// The tools work: not while the editor zooms.
+    var editable: Bool { true }
+    /// Texts are white on a black pill, like the editor's; or plain, in their color.
+    var plainText: Bool { false }
+
+    /// Draws a mark, the area's origin at the context's.
+    func drawMark(_ mark: Mark, in context: CGContext) {
+        mark.draw(in: context, scale: scale)
+    }
+
+    /// A text's font, and its alignment, as shown now.
+    func font(of mark: Mark) -> NSFont {
+        textFont(mark.face, size: textSizes[mark.size] * mark.pixelsPerPoint * scale)
+    }
+
+    func alignment(of mark: Mark) -> NSTextAlignment { .center }
+
+    /// A click out of `area`.
+    func pressedOutside() {}
+    func escape() { model.selected = nil }
+    /// Draws what is under the marks.
+    func drawBackground(_ context: CGContext) {}
+    /// The tools' bar, 12 points from the area's bottom left corner, like Arc's.
+    var toolsFrame: CGRect {
+        CGRect(x: area.minX + 12, y: area.maxY - 12 - 44, width: 272, height: 44)
+    }
+    /// A picture added: by default, at the area's top left corner, about two thirds of its
+    /// height, like Arc's editor.
+    func insert(picture: CGImage, from file: URL?) {
+        let height = area.height / scale * 0.65
+        let width = height * CGFloat(picture.width) / CGFloat(picture.height)
+        add(Mark(kind: .image, rect: CGRect(x: 0, y: 0, width: width, height: height), color: .clear,
+            image: picture))
+    }
+
+    /// Adds a mark, selected.
+    func add(_ mark: Mark) {
+        model.marks.append(mark)
+        model.selected = model.marks.count - 1
+        model.tool = .select
         window?.makeFirstResponder(self)
-        animate(to: 1)
     }
 
-    private func close() {
-        guard !closing else { return }
-        closing = true
-        commitText()
-        model.selected = nil
-        animate(to: 0) { [weak self] in
-            guard let self else { return }
-            self.done(self.model.marks)
-        }
-    }
-
-    /// Zooms to `target` with an ease out, like Arc's, in about 0.22 s.
-    private func animate(to target: CGFloat, then: @escaping () -> Void = {}) {
-        animation?.invalidate()
-        let start = progress
-        let began = CACurrentMediaTime()
-        let duration = 0.22
-        animation = Timer.scheduledTimer(withTimeInterval: 1 / 120, repeats: true) { [weak self] timer in
-            MainActor.assumeIsolated {
-                guard let self else { return timer.invalidate() }
-                let t = min(1, (CACurrentMediaTime() - began) / duration)
-                let eased = 1 - pow(1 - t, 3)
-                self.progress = start + (target - start) * eased
-                self.refresh()
-                if t >= 1 {
-                    timer.invalidate()
-                    then()
-                }
-            }
-        }
-    }
-
-    /// Where the picture fits the window, 20 points from its top and bottom, centered.
-    private var fitted: CGRect {
-        let room = bounds.insetBy(dx: 20, dy: 20)
-        let width = CGFloat(image.width)
-        let height = CGFloat(image.height)
-        let scale = min(room.width / width, room.height / height)
-        let size = CGSize(width: width * scale, height: height * scale)
-        return CGRect(
-            x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2, width: size.width,
-            height: size.height)
-    }
-
-    /// Where the picture shows now, on its way between the page and the editor.
-    private var pictureRect: CGRect {
-        let end = fitted
-        let p = progress
-        return CGRect(
-            x: from.minX + (end.minX - from.minX) * p, y: from.minY + (end.minY - from.minY) * p,
-            width: from.width + (end.width - from.width) * p,
-            height: from.height + (end.height - from.height) * p)
-    }
-
-    private var scale: CGFloat { pictureRect.width / CGFloat(image.width) }
-    /// The picture's pixels per point, once zoomed.
-    private var pixelsPerPoint: CGFloat { CGFloat(image.width) / fitted.width }
-
-    private func toPicture(_ point: CGPoint) -> CGPoint {
-        let rect = pictureRect
+    func toMarks(_ point: CGPoint) -> CGPoint {
+        let rect = area
         return CGPoint(x: (point.x - rect.minX) / scale, y: (point.y - rect.minY) / scale)
     }
 
-    private func toView(_ point: CGPoint) -> CGPoint {
-        let rect = pictureRect
+    func toView(_ point: CGPoint) -> CGPoint {
+        let rect = area
         return CGPoint(x: rect.minX + point.x * scale, y: rect.minY + point.y * scale)
     }
 
-    private func toView(_ rect: CGRect) -> CGRect {
-        let picture = pictureRect
+    func toView(_ rect: CGRect) -> CGRect {
+        let area = area
         return CGRect(
-            x: picture.minX + rect.minX * scale, y: picture.minY + rect.minY * scale,
+            x: area.minX + rect.minX * scale, y: area.minY + rect.minY * scale,
             width: rect.width * scale, height: rect.height * scale)
     }
 
     // MARK: Drawing
 
     /// Places the tools' bar, the palette and the text's control, and draws again.
-    private func refresh() {
-        let picture = pictureRect
-        // 12 points from the picture's bottom left corner, like Arc's.
-        tools.frame = CGRect(x: picture.minX + 12, y: picture.maxY - 12 - 44, width: 272, height: 44)
-        tools.isHidden = progress == 0
+    func refresh() {
+        tools.frame = toolsFrame
+        tools.isHidden = !editable
         let mark = model.selectedMark
-        if let mark, progress == 1, [.ellipse, .rectangle, .arrow, .pen].contains(mark.kind) {
+        if let mark, editable, [.ellipse, .rectangle, .arrow, .pen].contains(mark.kind) {
             let box = toView(mark.bounds)
             palette.frame = CGRect(x: box.midX - 91, y: box.minY - 13.5 - 77, width: 182, height: 77)
             palette.isHidden = false
         } else {
             palette.isHidden = true
         }
-        if let mark, progress == 1, mark.kind == .text {
+        if let mark, editable, mark.kind == .text {
             let box = toView(mark.rect)
             textControl.frame = CGRect(x: box.minX - 12 - 42, y: box.midY - 40, width: 42, height: 80)
             textControl.isHidden = false
@@ -515,7 +540,9 @@ final class EditorCanvas: NSView {
             textControl.isHidden = true
         }
         if let field, let editing, model.marks.indices.contains(editing) {
-            field.frame = toView(model.marks[editing].rect)
+            let mark = model.marks[editing]
+            field.frame = toView(mark.rect)
+            field.font = font(of: mark)
         }
         needsDisplay = true
     }
@@ -527,23 +554,16 @@ final class EditorCanvas: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
-        NSColor.black.withAlphaComponent(EditorInk.dim * progress).setFill()
-        bounds.fill()
-        let picture = pictureRect
+        drawBackground(context)
+        let area = area
         context.saveGState()
-        context.translateBy(x: picture.minX, y: picture.maxY)
-        context.scaleBy(x: 1, y: -1)
-        context.interpolationQuality = .high
-        context.draw(image, in: CGRect(origin: .zero, size: picture.size))
-        context.restoreGState()
-        context.saveGState()
-        context.clip(to: picture)
-        context.translateBy(x: picture.minX, y: picture.minY)
+        context.clip(to: area)
+        context.translateBy(x: area.minX, y: area.minY)
         for (index, mark) in model.marks.enumerated() where index != editing {
-            mark.draw(in: context, scale: scale)
+            drawMark(mark, in: context)
         }
         context.restoreGState()
-        guard progress == 1 else { return }
+        guard editable else { return }
         drawPreview(context)
         if let hovered, hovered != model.selected, model.marks.indices.contains(hovered) {
             outline(model.marks[hovered], width: 2)
@@ -604,7 +624,7 @@ final class EditorCanvas: NSView {
         switch mark.kind {
         case .image: outline(mark, width: 1)
         case .pen: break
-        case .text: break
+        case .text: if plainText { outline(mark, width: 1) }
         default: outline(mark, width: mark.kind == .arrow ? 1 : 2)
         }
         for point in handles(of: mark) {
@@ -628,7 +648,7 @@ final class EditorCanvas: NSView {
         }
     }
 
-    private func mark(at point: CGPoint) -> Int? {
+    func mark(at point: CGPoint) -> Int? {
         let slop = 6 / scale
         return model.marks.indices.last { model.marks[$0].contains(point, slop: slop) }
     }
@@ -639,17 +659,33 @@ final class EditorCanvas: NSView {
 
     override func mouseMoved(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        let over = model.tool == .select ? mark(at: toPicture(point)) : nil
+        let over = model.tool == .select ? mark(at: toMarks(point)) : nil
         if over != hovered {
             hovered = over
+            hoverChanged()
             needsDisplay = true
         }
         updateCursor(event)
     }
 
+    override func mouseExited(with event: NSEvent) {
+        guard hovered != nil else { return }
+        hovered = nil
+        hoverChanged()
+        needsDisplay = true
+    }
+
+    /// The mark under the pointer changed.
+    func hoverChanged() {}
+
+    /// How far to move the mark at `index`, dragged to `box`, to snap it: none by default.
+    func snap(_ box: CGRect, moving index: Int, event: NSEvent) -> CGSize { .zero }
+    /// The drag that snapped ended.
+    func snapEnded() {}
+
     private func updateCursor(_ event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        guard pictureRect.contains(point) else { return NSCursor.arrow.set() }
+        guard area.contains(point) else { return NSCursor.arrow.set() }
         switch model.tool {
         case .select, .image:
             if let mark = model.selectedMark,
@@ -667,13 +703,12 @@ final class EditorCanvas: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        guard progress == 1 else { return }
+        guard editable else { return }
         let point = convert(event.locationInWindow, from: nil)
         commitText()
         window?.makeFirstResponder(self)
-        // Like Arc's, a click out of the picture leaves the editor.
-        guard pictureRect.contains(point) else { return close() }
-        let at = toPicture(point)
+        guard area.contains(point) else { return pressedOutside() }
+        let at = toMarks(point)
         dragStart = at
         lastPoint = at
         handle = nil
@@ -689,6 +724,7 @@ final class EditorCanvas: NSView {
                         editText(selected)
                     } else {
                         NSCursor.closedHand.set()
+                        moving = (selected, model.marks[selected], at)
                     }
                 }
             }
@@ -709,7 +745,7 @@ final class EditorCanvas: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        let at = toPicture(convert(event.locationInWindow, from: nil))
+        let at = toMarks(convert(event.locationInWindow, from: nil))
         guard let start = dragStart, let last = lastPoint else { return }
         lastPoint = at
         if var drawing {
@@ -726,6 +762,12 @@ final class EditorCanvas: NSView {
         } else if let selected = model.selected, model.marks.indices.contains(selected) {
             if let handle {
                 resize(selected, handle: handle, to: at)
+            } else if let moving, moving.index == selected {
+                // From where it was, so that snapping does not add up.
+                var mark = moving.mark
+                mark.move(by: CGSize(width: at.x - moving.start.x, height: at.y - moving.start.y))
+                mark.move(by: snap(mark.bounds, moving: selected, event: event))
+                model.marks[selected] = mark
             } else {
                 model.marks[selected].move(by: CGSize(width: at.x - last.x, height: at.y - last.y))
             }
@@ -753,7 +795,7 @@ final class EditorCanvas: NSView {
             mark.rect = CGRect(
                 x: min(fixed.x, corner.x), y: min(fixed.y, corner.y), width: abs(corner.x - fixed.x),
                 height: abs(corner.y - fixed.y))
-            if mark.kind == .text { mark.fitText() }
+            if mark.kind == .text { model.fit(&mark) }
         }
         model.marks[index] = mark
     }
@@ -761,6 +803,10 @@ final class EditorCanvas: NSView {
     override func mouseUp(with event: NSEvent) {
         dragStart = nil
         handle = nil
+        if moving != nil {
+            moving = nil
+            snapEnded()
+        }
         guard var mark = drawing else { return needsDisplay = true }
         drawing = nil
         let tool = model.tool
@@ -773,7 +819,8 @@ final class EditorCanvas: NSView {
                     x: mark.rect.minX, y: mark.rect.minY - 17 * pixelsPerPoint,
                     width: 270 * pixelsPerPoint, height: 34 * pixelsPerPoint)
             }
-            mark.color = .white
+            mark.plain = plainText
+            mark.color = plainText ? .black : .white
             model.marks.append(mark)
             model.tool = .select
             model.selected = model.marks.count - 1
@@ -798,20 +845,24 @@ final class EditorCanvas: NSView {
 
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
-        case 53: close()
-        case 51, 117:
-            if let selected = model.selected, model.marks.indices.contains(selected) {
-                model.marks.remove(at: selected)
-                model.selected = nil
-            }
+        case 53: escape()
+        case 51, 117: deleteSelected()
         default:
             let key = event.charactersIgnoringModifiers?.lowercased()
-            if let tool = EditorTool.allCases.first(where: { $0.key != nil && $0.key == key }) {
+            if event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+                let tool = EditorTool.allCases.first(where: { $0.key != nil && $0.key == key })
+            {
                 if tool == .image { addImage() } else { model.tool = tool }
             } else {
                 super.keyDown(with: event)
             }
         }
+    }
+
+    func deleteSelected() {
+        guard let selected = model.selected, model.marks.indices.contains(selected) else { return }
+        model.marks.remove(at: selected)
+        model.selected = nil
     }
 
     // MARK: Text
@@ -826,12 +877,15 @@ final class EditorCanvas: NSView {
         field.backgroundColor = EditorInk.accent.withAlphaComponent(0.08)
         field.wantsLayer = true
         field.layer?.cornerRadius = 9
-        field.textColor = .white
-        field.alignment = .center
+        field.textColor = mark.plain ? mark.color : .white
+        field.alignment = alignment(of: mark)
+        field.cell?.wraps = mark.plain
+        field.cell?.isScrollable = !mark.plain
         field.focusRingType = .none
-        field.font = textFont(mark.face, size: textSizes[mark.size])
+        field.font = font(of: mark)
         field.target = self
         field.action = #selector(textEntered)
+        field.delegate = self
         addSubview(field, positioned: .below, relativeTo: tools)
         window?.makeFirstResponder(field)
         field.currentEditor()?.selectAll(nil)
@@ -845,7 +899,15 @@ final class EditorCanvas: NSView {
         window?.makeFirstResponder(self)
     }
 
-    private func commitText() {
+    /// Like Arc's, Escape ends the text and lets it go.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard selector == #selector(cancelOperation(_:)) else { return false }
+        textEntered()
+        escape()
+        return true
+    }
+
+    func commitText() {
         guard let field, let index = editing else { return }
         self.field = nil
         editing = nil
@@ -857,15 +919,14 @@ final class EditorCanvas: NSView {
             model.selected = nil
         } else {
             model.marks[index].text = text
-            model.marks[index].fitText()
+            model.fit(&model.marks[index])
         }
         needsDisplay = true
     }
 
     // MARK: Pictures
 
-    /// Adds a picture the user picks, at the picture's top left corner, about two thirds of its
-    /// height, like Arc's.
+    /// Adds a picture the user picks.
     func addImage() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.image]
@@ -874,14 +935,116 @@ final class EditorCanvas: NSView {
             let source = CGImageSourceCreateWithURL(url as CFURL, nil),
             let picture = CGImageSourceCreateImageAtIndex(source, 0, nil)
         else { return }
-        let height = CGFloat(image.height) * 0.65
-        let width = height * CGFloat(picture.width) / CGFloat(picture.height)
-        model.marks.append(
-            Mark(kind: .image, rect: CGRect(x: 0, y: 0, width: width, height: height), color: .clear,
-                image: picture))
-        model.selected = model.marks.count - 1
-        model.tool = .select
+        insert(picture: picture, from: url)
+    }
+}
+
+/// The dimmed window, the picture and its marks, where the tools draw: the part zooms from the
+/// page into it, and back once a click out of it or Escape closes it.
+@MainActor
+final class EditorCanvas: MarkCanvas {
+    var done: ([Mark]) -> Void = { _ in }
+    private let image: CGImage
+    /// Where the part shows on the page, from the window's top left corner, which it zooms from.
+    private let from: CGRect
+    /// How far the zoom is, from the page's part (0) to the editor's (1).
+    private var progress: CGFloat = 0
+    private var animation: Timer?
+    private var closing = false
+
+    init(image: CGImage, from: CGRect) {
+        self.image = image
+        self.from = from
+        super.init()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    // MARK: Zoom
+
+    func open() {
         window?.makeFirstResponder(self)
+        animate(to: 1)
+    }
+
+    private func close() {
+        guard !closing else { return }
+        closing = true
+        commitText()
+        model.selected = nil
+        animate(to: 0) { [weak self] in
+            guard let self else { return }
+            self.done(self.model.marks)
+        }
+    }
+
+    // Like Arc's, a click out of the picture leaves the editor, as Escape does.
+    override func pressedOutside() { close() }
+    override func escape() { close() }
+
+    /// Zooms to `target` with an ease out, like Arc's, in about 0.22 s.
+    private func animate(to target: CGFloat, then: @escaping () -> Void = {}) {
+        animation?.invalidate()
+        let start = progress
+        let began = CACurrentMediaTime()
+        let duration = 0.22
+        animation = Timer.scheduledTimer(withTimeInterval: 1 / 120, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self else { return timer.invalidate() }
+                let t = min(1, (CACurrentMediaTime() - began) / duration)
+                let eased = 1 - pow(1 - t, 3)
+                self.progress = start + (target - start) * eased
+                self.refresh()
+                if t >= 1 {
+                    timer.invalidate()
+                    then()
+                }
+            }
+        }
+    }
+
+    /// Where the picture fits the window, 20 points from its top and bottom, centered.
+    private var fitted: CGRect {
+        let room = bounds.insetBy(dx: 20, dy: 20)
+        let width = CGFloat(image.width)
+        let height = CGFloat(image.height)
+        let scale = min(room.width / width, room.height / height)
+        let size = CGSize(width: width * scale, height: height * scale)
+        return CGRect(
+            x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2, width: size.width,
+            height: size.height)
+    }
+
+    /// Where the picture shows now, on its way between the page and the editor.
+    override var area: CGRect {
+        let end = fitted
+        let p = progress
+        return CGRect(
+            x: from.minX + (end.minX - from.minX) * p, y: from.minY + (end.minY - from.minY) * p,
+            width: from.width + (end.width - from.width) * p,
+            height: from.height + (end.height - from.height) * p)
+    }
+
+    override var scale: CGFloat { area.width / CGFloat(image.width) }
+    /// The picture's pixels per point, once zoomed.
+    override var pixelsPerPoint: CGFloat { CGFloat(image.width) / fitted.width }
+    override var editable: Bool { progress == 1 }
+
+    override func refresh() {
+        super.refresh()
+        tools.isHidden = progress == 0
+    }
+
+    override func drawBackground(_ context: CGContext) {
+        NSColor.black.withAlphaComponent(EditorInk.dim * progress).setFill()
+        bounds.fill()
+        let picture = area
+        context.saveGState()
+        context.translateBy(x: picture.minX, y: picture.maxY)
+        context.scaleBy(x: 1, y: -1)
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(origin: .zero, size: picture.size))
+        context.restoreGState()
     }
 }
 
@@ -890,24 +1053,26 @@ final class EditorCanvas: NSView {
 /// The tools' bar, like Arc's: seven buttons 36 points square in a 272 × 44 bar.
 struct EditorToolsView: View {
     @ObservedObject var model: EditorModel
+    let look: ChromeLook
     let addImage: () -> Void
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(EditorTool.allCases, id: \.self) { tool in
-                ToolButton(tool: tool, selected: model.tool == tool) {
+                ToolButton(tool: tool, look: look, selected: model.tool == tool) {
                     if tool == .image { addImage() } else { model.tool = tool }
                 }
             }
         }
         .padding(4)
-        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(EditorInk.bar))
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(look.bar))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
 private struct ToolButton: View {
     let tool: EditorTool
+    let look: ChromeLook
     let selected: Bool
     let action: () -> Void
     private let _hovered = State(initialValue: false)
@@ -917,15 +1082,16 @@ private struct ToolButton: View {
         Button(action: action) {
             Image(systemName: tool.symbol)
                 .font(.system(size: 15))
-                .foregroundStyle(selected ? Color.white : EditorInk.icon)
+                .foregroundStyle(selected ? look.selectedIcon : look.icon)
                 .frame(width: 36, height: 36)
                 .background(
                     RoundedRectangle(cornerRadius: 5).fill(
-                        selected ? EditorInk.selected : hovered ? EditorInk.hovered : .clear))
+                        selected ? look.selected : hovered ? look.hovered : .clear))
                 // Its key, at its bottom right, while it is hovered or selected, like Arc's.
                 .overlay(alignment: .bottomTrailing) {
                     if let key = tool.key, hovered || selected {
-                        Text(key).font(.system(size: 7.5, weight: .bold)).foregroundStyle(.white)
+                        Text(key).font(.system(size: 7.5, weight: .bold))
+                            .foregroundStyle(selected ? look.selectedIcon : look.icon)
                             .padding(.trailing, 3).padding(.bottom, 2)
                     }
                 }
@@ -941,12 +1107,13 @@ private struct ToolButton: View {
 /// five offset by half a step, the current one checked; it stays open as it recolors.
 struct PaletteView: View {
     @ObservedObject var model: EditorModel
+    let look: ChromeLook
 
     var body: some View {
         let current = model.selectedMark?.color
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 5.5) {
-                ForEach(Array(paletteRows.enumerated()), id: \.offset) { index, row in
+                ForEach(Array(look.palette.enumerated()), id: \.offset) { index, row in
                     HStack(spacing: 6) {
                         ForEach(Array(row.enumerated()), id: \.offset) { _, color in
                             Button {
@@ -962,9 +1129,7 @@ struct PaletteView: View {
                                             Image(systemName: "checkmark")
                                                 .font(.system(size: 9, weight: .bold))
                                                 .foregroundStyle(
-                                                    (color.whiteComponentIfGrey ?? 0) > 0.5
-                                                        || color.isEqual(paletteRows[0][1])
-                                                        ? Color.black : Color.white)
+                                                    color.isLight ? Color.black : Color.white)
                                         }
                                     }
                                     .frame(width: 20, height: 20)
@@ -978,8 +1143,10 @@ struct PaletteView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .frame(width: 182, height: 71, alignment: .topLeading)
-            .background(RoundedRectangle(cornerRadius: 10).fill(.black))
-            Notch(down: true).fill(.black).frame(width: 12, height: 6)
+            .background(
+                RoundedRectangle(cornerRadius: 10).fill(look.bar)
+                    .shadow(color: .black.opacity(0.15), radius: 6, y: 1))
+            Notch(down: true).fill(look.bar).frame(width: 12, height: 6)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -988,6 +1155,7 @@ struct PaletteView: View {
 /// The control at a text's left, like Arc's: "+" and "–" size it, "Aa" changes its face.
 struct TextControlView: View {
     @ObservedObject var model: EditorModel
+    let look: ChromeLook
 
     var body: some View {
         HStack(spacing: 0) {
@@ -995,7 +1163,7 @@ struct TextControlView: View {
                 step("plus", by: 1)
                 Button(action: model.cycleFace) {
                     Text("Aa").font(.custom("Hoefler Text", size: 15))
-                        .foregroundStyle(Color(white: 0xD2 / 255))
+                        .foregroundStyle(look.face)
                         .frame(width: 30, height: 24)
                         .contentShape(Rectangle())
                 }
@@ -1005,8 +1173,10 @@ struct TextControlView: View {
             }
             .padding(.vertical, 4)
             .frame(width: 36, height: 80)
-            .background(RoundedRectangle(cornerRadius: 8).fill(.black))
-            Notch(down: false).fill(.black).frame(width: 6, height: 12)
+            .background(
+                RoundedRectangle(cornerRadius: 8).fill(look.bar)
+                    .shadow(color: .black.opacity(0.15), radius: 6, y: 1))
+            Notch(down: false).fill(look.bar).frame(width: 6, height: 12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
@@ -1014,7 +1184,7 @@ struct TextControlView: View {
     private func step(_ symbol: String, by step: Int) -> some View {
         Button { model.resizeText(by: step) } label: {
             Image(systemName: symbol).font(.system(size: 12, weight: .regular))
-                .foregroundStyle(Color(white: 0x55 / 255))
+                .foregroundStyle(look.step)
                 .frame(width: 30, height: 24)
                 .contentShape(Rectangle())
         }
