@@ -92,16 +92,32 @@ fn open_window(view: WindowView, fresh: bool) {
 
 /// Opens a window as `open_window` does, an incognito one on its Space `incognito`.
 fn open_window_in(view: WindowView, fresh: bool, incognito: Option<SpaceId>) {
+    open_window_at(view, fresh, incognito, cascaded());
+}
+
+/// Opens a window of the previous session again where it was, else as another one opens.
+fn restore_window(saved: store::Window) {
+    open_window_at(saved.view, false, None, saved.place.or_else(cascaded));
+}
+
+/// Where a window opened from the focused one opens: offset from it, out of full screen.
+fn cascaded() -> Option<Place> {
+    let from = win().window.with_borrow(|w| w.as_ref()?.place())?;
+    Some(Place {
+        x: from.x + CASCADE,
+        y: from.y + CASCADE,
+        full_screen: false,
+        ..from
+    })
+}
+
+fn open_window_at(view: WindowView, fresh: bool, incognito: Option<SpaceId>, place: Option<Place>) {
     let id = NEXT_WINDOW.get();
     NEXT_WINDOW.set(id + 1);
     let window = Win::new(id);
     window.incognito.set(incognito);
     window.view.set(Some(view));
-    window.cascade.set(
-        win()
-            .window
-            .with_borrow(|window| window.as_ref().map(|w| w.bounds())),
-    );
+    window.place.replace(place);
     window.fresh.set(fresh);
     WINDOWS.with_borrow_mut(|windows| windows.push(Rc::new(window)));
     save_session();
@@ -124,7 +140,7 @@ wrap_task! {
 }
 
 /// How far a new window opens from the one it opens from, down and right, like macOS cascades.
-const CASCADE: i32 = 22;
+const CASCADE: f64 = 22.0;
 
 /// Closes the focused window, as its close button does: the last one quits.
 pub(super) fn close_window() {
@@ -180,9 +196,9 @@ pub fn close() {
     }
     if !CLOSING.get() {
         // Written while the sidebar still shows the focused window's view, which closing changes.
-        save_pending();
+        save_at_quit();
         CLOSING.set(true);
-        QUIT_WINDOWS.set(Some(other_windows()));
+        QUIT_WINDOWS.set(Some(saved_windows()));
     }
     let windows: Vec<_> = WINDOWS.with_borrow(|windows| {
         windows
@@ -281,16 +297,12 @@ wrap_browser_process_handler! {
 #[cfg(target_os = "macos")]
 fn open_main_window(id: u32) {
     focus(id);
-    let bounds = win().cascade.take().map(|from| Rect {
-        x: from.x + CASCADE,
-        y: from.y + CASCADE,
-        ..from
-    });
+    let place = win().place.take();
     let min = Size {
         width: MIN_WINDOW_WIDTH,
         height: MIN_WINDOW_HEIGHT,
     };
-    let window = crate::native::Window::open(id, bounds.as_ref(), &min);
+    let window = crate::native::Window::open(id, place.as_ref(), &min);
     window_ready(window);
 }
 
@@ -335,8 +347,8 @@ fn window_ready(window: MainWindow) {
     for link in PENDING_LINKS.take() {
         open_link(Some(link));
     }
-    for view in RESTORED_WINDOWS.take() {
-        open_window(view, false);
+    for window in RESTORED_WINDOWS.take() {
+        restore_window(window);
     }
     // Once it has settled in front: until then, the window taking the keyboard back from the
     // Command Bar's field would close it.
@@ -408,7 +420,7 @@ pub fn window_can_close(id: u32) -> bool {
         return true;
     }
     if !CLOSING.get() {
-        save_pending();
+        save_at_quit();
     }
     CLOSING.set(true);
     let hosts: Vec<_> = PAGES.with_borrow(|pages| {

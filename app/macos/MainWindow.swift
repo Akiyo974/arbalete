@@ -9,6 +9,10 @@ import AppKit
 private final class MainWindow: NSObject, NSWindowDelegate {
     let id: UInt32
     let window: NSWindow
+    /// Its frame before it entered full screen, which it gets back leaving it.
+    var normalFrame: NSRect?
+    /// Opened full screen, it enters full screen once shown.
+    var opensFullScreen = false
     private var observers: [NSObjectProtocol] = []
 
     init(id: UInt32, frame: NSRect?, minSize: NSSize) {
@@ -58,6 +62,10 @@ private final class MainWindow: NSObject, NSWindowDelegate {
 
     func windowShouldClose(_ sender: NSWindow) -> Bool { arbalete_window_should_close(id) }
 
+    func windowWillEnterFullScreen(_ notification: Notification) { normalFrame = window.frame }
+
+    func windowDidExitFullScreen(_ notification: Notification) { normalFrame = nil }
+
     func windowWillClose(_ notification: Notification) {
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
@@ -72,23 +80,82 @@ private final class MainWindow: NSObject, NSWindowDelegate {
 /// The main windows, by id.
 @MainActor private var mainWindows: [UInt32: MainWindow] = [:]
 
-/// Makes the window `id`, at `frame` if any, from the top left corner of the main screen, else
-/// centered, with its interface; hidden until shown.
+/// Makes the window `id`, with its interface, hidden until shown: placed, at `x`, `y`, `width`
+/// and `height` from the top left corner of the screen `screen`, a display's UUID, and full
+/// screen if `fullScreen`; else centered.
 @_cdecl("arbalete_ui_open_window")
 public func openWindow(
-    _ id: UInt32, _ framed: Bool, _ x: Double, _ y: Double, _ width: Double, _ height: Double,
-    _ minWidth: Double, _ minHeight: Double, _ send: Send
+    _ id: UInt32, _ placed: Bool, _ screen: UnsafePointer<CChar>, _ x: Double, _ y: Double,
+    _ width: Double, _ height: Double, _ fullScreen: Bool, _ minWidth: Double,
+    _ minHeight: Double, _ send: Send
 ) {
     MainActor.assumeIsolated {
-        let frame = framed ? screenRect(NSRect(x: x, y: y, width: width, height: height)) : nil
+        let frame =
+            placed
+            ? onScreen(String(cString: screen), NSRect(x: x, y: y, width: width, height: height))
+            : nil
         let main = MainWindow(
             id: id, frame: frame, minSize: NSSize(width: minWidth, height: minHeight))
+        main.opensFullScreen = placed && fullScreen
         mainWindows[id] = main
         guard let content = main.window.contentView else { return }
         let app = AppModel(window: id, send: send)
         nativeWindows[id] = NativeWindow(window: main.window, content: content, app: app)
         if settingsModel == nil { settingsModel = SettingsModel(app: app) }
         if onboardingModel == nil { onboardingModel = OnboardingModel(app: app) }
+    }
+}
+
+/// The UUID of the display showing `screen`, which outlives reconnecting it, unlike its number.
+@MainActor private func uuid(of screen: NSScreen) -> String? {
+    guard
+        let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
+        let uuid = CGDisplayCreateUUIDFromDisplayID(number.uint32Value)?.takeRetainedValue()
+    else { return nil }
+    return CFUUIDCreateString(nil, uuid) as String
+}
+
+/// The frame `rect`, from the top left corner of the screen `screen`, in AppKit's screen
+/// coordinates: on that screen, else on the main one, which has the menu bar, at the same place;
+/// within the screen's room left by the menu bar and the Dock, smaller if need be.
+@MainActor private func onScreen(_ screen: String, _ rect: NSRect) -> NSRect? {
+    guard
+        let target = NSScreen.screens.first(where: { uuid(of: $0) == screen })
+            ?? NSScreen.screens.first
+    else { return nil }
+    let room = target.visibleFrame
+    let width = min(rect.width, room.width)
+    let height = min(rect.height, room.height)
+    let x = target.frame.minX + rect.minX
+    let top = target.frame.maxY - rect.minY
+    return NSRect(
+        x: min(max(x, room.minX), room.maxX - width),
+        y: min(max(top - height, room.minY), room.maxY - height),
+        width: width, height: height)
+}
+
+/// Where the window `id` is: its screen's display UUID, written into `screen`, at most `size`
+/// bytes with the ending zero, and its frame from the top left corner of that screen; full
+/// screen, its frame once it leaves it. False for a window not made.
+@_cdecl("arbalete_ui_window_place")
+public func windowPlace(
+    _ id: UInt32, _ screen: UnsafeMutablePointer<CChar>, _ size: Int,
+    _ x: UnsafeMutablePointer<Double>, _ y: UnsafeMutablePointer<Double>,
+    _ width: UnsafeMutablePointer<Double>, _ height: UnsafeMutablePointer<Double>,
+    _ fullScreen: UnsafeMutablePointer<Bool>
+) -> Bool {
+    MainActor.assumeIsolated {
+        guard let main = mainWindows[id],
+            let on = main.window.screen ?? NSScreen.screens.first,
+            let name = uuid(of: on)
+        else { return false }
+        let full = main.window.styleMask.contains(.fullScreen)
+        let frame = full ? main.normalFrame ?? main.window.frame : main.window.frame
+        strlcpy(screen, name, size)
+        (x.pointee, y.pointee) = (frame.minX - on.frame.minX, on.frame.maxY - frame.maxY)
+        (width.pointee, height.pointee) = (frame.width, frame.height)
+        fullScreen.pointee = full
+        return true
     }
 }
 
@@ -120,6 +187,10 @@ public func activateWindow(_ id: UInt32) {
         guard let window = mainWindows[id]?.window else { return }
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
+        if mainWindows[id]?.opensFullScreen == true {
+            mainWindows[id]?.opensFullScreen = false
+            window.toggleFullScreen(nil)
+        }
     }
 }
 

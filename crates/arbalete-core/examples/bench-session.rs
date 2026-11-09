@@ -76,6 +76,10 @@ fn main() {
     sidebar.select(home.id, first).unwrap();
 
     std::fs::create_dir_all(&dir).unwrap();
-    store::save(&sidebar, &[], &dir.join(store::FILE_NAME)).unwrap();
+    let session = store::Session {
+        sidebar,
+        ..store::Session::default()
+    };
+    store::save(&session, &dir.join(store::FILE_NAME)).unwrap();
     println!("{count} tabs written to {}", dir.display());
 }

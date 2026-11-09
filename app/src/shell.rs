@@ -21,6 +21,7 @@ use arbalete_core::sidebar::{
     ArchiveAfter, Color, DownloadLocation, Error, NodeId, NodeKind, ProfileId, Sidebar, Space,
     SpaceId, SplitLayout, Tab, View as WindowView,
 };
+use arbalete_core::store::Place;
 use arbalete_core::url_routing::Destination;
 use arbalete_core::{favicon, store};
 use cef::*;
@@ -255,15 +256,17 @@ thread_local! {
     static SIDEBAR_DRAG: Cell<Option<i32>> = const { Cell::new(None) };
     /// The extensions' bridge's browser (make_bridge).
     static BRIDGE: RefCell<Option<Browser>> = const { RefCell::new(None) };
-    /// The other windows as quitting started, which the session keeps while they close.
-    static QUIT_WINDOWS: RefCell<Option<Vec<WindowView>>> = const { RefCell::new(None) };
+    /// Where the focused window was and the other windows as quitting started, which the
+    /// session keeps while they close.
+    static QUIT_WINDOWS: RefCell<Option<(Option<Place>, Vec<store::Window>)>> =
+        const { RefCell::new(None) };
     /// Stands for the window once every window has closed, while the app quits.
     static CLOSED: Rc<Win> = Rc::new(Win::new(u32::MAX));
     /// The id the next window opened takes.
     static NEXT_WINDOW: Cell<u32> = const { Cell::new(1) };
-    /// What the windows of the previous session but the focused one showed, which open again
-    /// once the first window is made.
-    static RESTORED_WINDOWS: RefCell<Vec<WindowView>> = const { RefCell::new(Vec::new()) };
+    /// The windows of the previous session but the focused one, which open again once the
+    /// first window is made.
+    static RESTORED_WINDOWS: RefCell<Vec<store::Window>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Where a native panel shows over the window, and whether it does, which the app keeps as it
@@ -335,8 +338,9 @@ struct Win {
     /// What the window shows of the sidebar while another window has the focus: the sidebar
     /// shows the focused window's.
     view: RefCell<Option<WindowView>>,
-    /// The window it opened from, which it opens offset from.
-    cascade: Cell<Option<Rect>>,
+    /// Where it opens: where it was in the previous session, or offset from the window it opened
+    /// from.
+    place: RefCell<Option<Place>>,
     /// An incognito window's Space, the only one it shows, gone with it.
     incognito: Cell<Option<SpaceId>>,
     /// Opened from another window, it shows the Command Bar once in front, like Arc's.
@@ -439,7 +443,7 @@ impl Win {
         Self {
             id,
             view: RefCell::new(None),
-            cascade: Cell::new(None),
+            place: RefCell::new(None),
             incognito: Cell::new(None),
             fresh: Cell::new(false),
             card_view: Cell::new(None),

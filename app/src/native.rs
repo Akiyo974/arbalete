@@ -2,6 +2,7 @@
 //! detail, and sends commands (app/src/command.rs).
 
 use crate::command::Command;
+use arbalete_core::store::Place;
 use cef::{Rect, Size};
 use std::ffi::{CStr, CString, c_char, c_void};
 
@@ -69,15 +70,28 @@ unsafe extern "C" {
     #[allow(clippy::too_many_arguments)]
     fn arbalete_ui_open_window(
         window: u32,
-        framed: bool,
+        placed: bool,
+        screen: *const c_char,
         x: f64,
         y: f64,
         width: f64,
         height: f64,
+        full_screen: bool,
         min_width: f64,
         min_height: f64,
         send: extern "C" fn(u32, *const c_char),
     );
+    #[allow(clippy::too_many_arguments)]
+    fn arbalete_ui_window_place(
+        window: u32,
+        screen: *mut c_char,
+        screen_size: usize,
+        x: *mut f64,
+        y: *mut f64,
+        width: *mut f64,
+        height: *mut f64,
+        full_screen: *mut bool,
+    ) -> bool;
     fn arbalete_ui_window_frame(
         window: u32,
         x: *mut f64,
@@ -147,25 +161,54 @@ unsafe extern "C" {
 pub struct Window(pub u32);
 
 impl Window {
-    /// Makes the window `id`, with its interface, at `bounds` if any, else centered; at least
+    /// Makes the window `id`, with its interface, at `place` if any, else centered; at least
     /// `min` large.
-    pub fn open(id: u32, bounds: Option<&Rect>, min: &Size) -> Self {
-        let rect = bounds.cloned().unwrap_or_default();
-        // SAFETY: plain values, and `send` lives as long as the app.
+    pub fn open(id: u32, place: Option<&Place>, min: &Size) -> Self {
+        let rect = place.cloned().unwrap_or_default();
+        let screen = CString::new(rect.screen).unwrap_or_default();
+        // SAFETY: plain values, a string that lives during the call, and `send` lives as long as
+        // the app.
         unsafe {
             arbalete_ui_open_window(
                 id,
-                bounds.is_some(),
-                rect.x.into(),
-                rect.y.into(),
-                rect.width.into(),
-                rect.height.into(),
+                place.is_some(),
+                screen.as_ptr(),
+                rect.x,
+                rect.y,
+                rect.width,
+                rect.height,
+                rect.full_screen,
                 min.width.into(),
                 min.height.into(),
                 send,
             )
         };
         Window(id)
+    }
+
+    /// Where it is, to open there again; `None` before it is made.
+    pub fn place(&self) -> Option<Place> {
+        let mut screen = [0 as c_char; 64];
+        let mut place = Place::default();
+        // SAFETY: the interface writes a string of at most `screen.len()` bytes, ending with a
+        // zero, and the values, during the call.
+        let placed = unsafe {
+            arbalete_ui_window_place(
+                self.0,
+                screen.as_mut_ptr(),
+                screen.len(),
+                &mut place.x,
+                &mut place.y,
+                &mut place.width,
+                &mut place.height,
+                &mut place.full_screen,
+            )
+        };
+        // SAFETY: the buffer ends with a zero, which the interface left or wrote.
+        place.screen = unsafe { CStr::from_ptr(screen.as_ptr()) }
+            .to_string_lossy()
+            .into_owned();
+        placed.then_some(place)
     }
 
     pub fn bounds(&self) -> Rect {

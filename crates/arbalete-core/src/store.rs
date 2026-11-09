@@ -1,4 +1,5 @@
-//! Saves the sidebar, and what the other windows show of it, as a JSON file and loads them back.
+//! Saves the sidebar, and what the windows show of it and where they are, as a JSON file and loads
+//! them back.
 //!
 //! The file carries a format version, so a later version of Arbalete can migrate older files.
 
@@ -20,13 +21,44 @@ pub const FILE_NAME: &str = "session.json";
 struct Saved {
     version: u32,
     sidebar: Sidebar,
-    /// What the windows but the focused one show, whose view the sidebar holds.
+    /// Where the focused window is, whose view the sidebar holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    place: Option<Place>,
+    /// The windows but the focused one.
     #[serde(default)]
-    windows: Vec<View>,
+    windows: Vec<Window>,
 }
 
-/// A saved session: the sidebar, and what the other windows show of it.
-pub type Session = (Sidebar, Vec<View>);
+/// A saved session: the sidebar, where the focused window is, and the other windows.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Session {
+    pub sidebar: Sidebar,
+    pub place: Option<Place>,
+    pub windows: Vec<Window>,
+}
+
+/// A window but the focused one: what it shows of the sidebar, and where it is.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Window {
+    #[serde(flatten)]
+    pub view: View,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub place: Option<Place>,
+}
+
+/// Where a window is: its screen, by the display's UUID, which outlives reconnecting it, and its
+/// frame from that screen's top left corner, in points; full screen, its frame once it leaves it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Place {
+    pub screen: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    #[serde(default)]
+    pub full_screen: bool,
+}
 
 #[derive(Debug)]
 pub enum LoadError {
@@ -37,13 +69,13 @@ pub enum LoadError {
     Inconsistent(String),
 }
 
-/// Writes the sidebar and the other windows' views atomically: a crash while saving leaves the
-/// previous file intact.
-pub fn save(sidebar: &Sidebar, windows: &[View], path: &Path) -> io::Result<()> {
+/// Writes the session atomically: a crash while saving leaves the previous file intact.
+pub fn save(session: &Session, path: &Path) -> io::Result<()> {
     let saved = Saved {
         version: VERSION,
-        sidebar: sidebar.saved(),
-        windows: windows.to_vec(),
+        sidebar: session.sidebar.saved(),
+        place: session.place.clone(),
+        windows: session.windows.clone(),
     };
     let json = serde_json::to_vec_pretty(&saved).map_err(io::Error::other)?;
     write_atomically(path, &json)
@@ -78,7 +110,11 @@ pub fn load(path: &Path) -> Result<Option<Session>, LoadError> {
         .sidebar
         .check_invariants()
         .map_err(LoadError::Inconsistent)?;
-    Ok(Some((saved.sidebar, saved.windows)))
+    Ok(Some(Session {
+        sidebar: saved.sidebar,
+        place: saved.place,
+        windows: saved.windows,
+    }))
 }
 
 /// Moves a file that cannot be loaded out of the way, so the next save does not overwrite it:
@@ -117,10 +153,39 @@ mod tests {
         sidebar.set_space_emoji(work, "💼").unwrap();
         sidebar.set_space_theme(work, Color::Green.into()).unwrap();
 
-        let windows = vec![sidebar.new_window_view()];
-        save(&sidebar, &windows, &path).unwrap();
-        assert_eq!(load(&path).unwrap(), Some((sidebar, windows)));
+        let place = |screen: &str| Place {
+            screen: screen.into(),
+            x: 10.0,
+            y: 20.0,
+            width: 1280.0,
+            height: 820.0,
+            full_screen: screen == "B",
+        };
+        let session = Session {
+            place: Some(place("A")),
+            windows: vec![Window {
+                view: sidebar.new_window_view(),
+                place: Some(place("B")),
+            }],
+            sidebar,
+        };
+        save(&session, &path).unwrap();
+        assert_eq!(load(&path).unwrap(), Some(session));
         assert!(!path.with_extension("tmp").exists());
+    }
+
+    #[test]
+    fn loads_the_windows_of_a_file_without_places() {
+        let dir = TestDir::new("store-without-places");
+        let path = dir.0.join("sidebar.json");
+        let sidebar = Sidebar::default();
+        let view = sidebar.new_window_view();
+        let json =
+            serde_json::json!({ "version": 1, "sidebar": sidebar.saved(), "windows": [view] });
+        fs::write(&path, json.to_string()).unwrap();
+        let session = load(&path).unwrap().unwrap();
+        assert_eq!(session.place, None);
+        assert_eq!(session.windows, vec![Window { view, place: None }]);
     }
 
     #[test]
@@ -144,7 +209,7 @@ mod tests {
     fn rejects_an_unknown_version() {
         let dir = TestDir::new("store-version");
         let path = dir.0.join("sidebar.json");
-        save(&Sidebar::default(), &[], &path).unwrap();
+        save(&Session::default(), &path).unwrap();
         let json = fs::read_to_string(&path)
             .unwrap()
             .replace("\"version\": 1", "\"version\": 99");
@@ -170,7 +235,14 @@ mod tests {
         let mut sidebar = Sidebar::default();
         let home = sidebar.spaces()[0].clone();
         let tab = sidebar.open_tab(home.id, "https://example.com/").unwrap();
-        save(&sidebar, &[], &path).unwrap();
+        save(
+            &Session {
+                sidebar,
+                ..Session::default()
+            },
+            &path,
+        )
+        .unwrap();
         let mut json: serde_json::Value =
             serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         let tab = serde_json::to_value(tab).unwrap().to_string();

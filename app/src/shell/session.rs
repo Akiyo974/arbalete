@@ -3,16 +3,31 @@
 
 use super::*;
 
-/// What the windows but the focused one show of the sidebar.
-pub(super) fn other_windows() -> Vec<WindowView> {
+/// Where the focused window is, and the windows but it: what they show of the sidebar, and
+/// where they are.
+pub(super) fn saved_windows() -> (Option<Place>, Vec<store::Window>) {
     let focused = FOCUSED.get();
     WINDOWS.with_borrow(|windows| {
-        windows
+        let others = windows
             .iter()
             .filter(|win| win.id != focused && win.incognito.get().is_none())
-            .filter_map(|win| win.view.with_borrow(Clone::clone))
-            .collect()
+            .filter_map(|win| {
+                Some(store::Window {
+                    view: win.view.with_borrow(Clone::clone)?,
+                    place: place_of(win),
+                })
+            })
+            .collect();
+        (place_of(&win()), others)
     })
+}
+
+/// Where the window is, but an incognito one, which the session forgets.
+fn place_of(win: &Win) -> Option<Place> {
+    if win.incognito.get().is_some() {
+        return None;
+    }
+    win.window.with_borrow(|window| window.as_ref()?.place())
 }
 
 /// How long a change waits to be written, at most: a page changing its title many times a
@@ -31,6 +46,15 @@ pub(super) fn save_session() {
     } else {
         save_later();
     }
+}
+
+/// Writes the session right away as quitting starts, with where the windows are, which moving
+/// or resizing them does not save.
+pub(super) fn save_at_quit() {
+    if SESSION_FILE.with_borrow(Option::is_some) {
+        SESSION_CHANGED.set(true);
+    }
+    save_pending();
 }
 
 /// Writes the changes waiting to be in a moment, unless it is already planned.
@@ -66,10 +90,15 @@ fn write_session() {
         return;
     };
     // Quitting closes the windows one by one: the session keeps them all.
-    let windows = QUIT_WINDOWS
+    let (place, windows) = QUIT_WINDOWS
         .with_borrow(Clone::clone)
-        .unwrap_or_else(other_windows);
-    if let Err(error) = STATE.with_borrow(|state| store::save(&state.sidebar, &windows, &path)) {
+        .unwrap_or_else(saved_windows);
+    let session = STATE.with_borrow(|state| store::Session {
+        sidebar: state.sidebar.clone(),
+        place,
+        windows,
+    });
+    if let Err(error) = store::save(&session, &path) {
         eprintln!("cannot save the session: {error}");
     }
 }
@@ -87,11 +116,12 @@ pub fn keep_broken(path: &Path) {
 /// instead of the start page.
 pub(super) fn restore(path: PathBuf) {
     match store::load(&path) {
-        Ok(Some((sidebar, windows))) => {
-            STATE.with_borrow_mut(|state| state.sidebar = sidebar);
-            // The other windows open again with the first one.
+        Ok(Some(session)) => {
+            STATE.with_borrow_mut(|state| state.sidebar = session.sidebar);
+            // The first window opens where the focused one was, the others with it.
             if app_settings().restore_session {
-                RESTORED_WINDOWS.set(windows);
+                win().place.replace(session.place);
+                RESTORED_WINDOWS.set(session.windows);
             }
         }
         Ok(None) => {}
