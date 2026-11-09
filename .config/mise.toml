@@ -169,7 +169,7 @@ run = [
 description = "Bundle an optimized app, signed with ARBALETE_SIGN_IDENTITY, in a disk image"
 # bundle-cef-app builds the dev profile only: optimized here, in a folder of its own, so that
 # the development build stays as it is.
-env = { ARBALETE_BUNDLE_ID = "io.github.amenophis.arbalete", ARBALETE_BUNDLE_NAME = "Arbalete", ARBALETE_FEED_URL = "https://arbalete.co/appcast.xml", ARBALETE_ICON = "app/resources/mac/arbalete.icns", CARGO_TARGET_DIR = "target/release-build", CARGO_PROFILE_DEV_OPT_LEVEL = "3", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_DEV_DEBUG_ASSERTIONS = "false", CARGO_PROFILE_DEV_OVERFLOW_CHECKS = "false", CARGO_PROFILE_DEV_INCREMENTAL = "false" }
+env = { ARBALETE_BUNDLE_ID = "io.github.amenophis.arbalete", ARBALETE_BUNDLE_NAME = "Arbalete", ARBALETE_FEED_URL = "https://arbalete.co/appcast.xml", ARBALETE_ICON = "app/resources/mac/arbalete.icns", CARGO_TARGET_DIR = "target/release-build", CARGO_PROFILE_DEV_OPT_LEVEL = "3", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_DEV_BUILD_OVERRIDE_DEBUG = "false", CARGO_PROFILE_DEV_DEBUG_ASSERTIONS = "false", CARGO_PROFILE_DEV_OVERFLOW_CHECKS = "false", CARGO_PROFILE_DEV_INCREMENTAL = "false" }
 run = [
   "mise run app",
   # The app beside a link to Applications, to drag it onto (packaging/dmg).
