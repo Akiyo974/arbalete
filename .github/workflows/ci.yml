@@ -36,8 +36,8 @@ jobs:
             -e '^\.github/workflows/(website|release)\.yml$' || true)
           echo "app=$([ -n "$others" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
-  # macOS only for now: Linux and Windows are added when the app targets them.
-  # Skipped for those changes alone, which a required check counts as passed.
+  # On macOS and Linux, the platforms the app targets. Skipped for those changes alone, which a
+  # required check counts as passed.
   check:
     needs: changes
     if: needs.changes.outputs.app == 'true'
@@ -67,6 +67,34 @@ jobs:
           # The workspace's Cargo.toml sets CEF's version, and almost nothing else. Named apart from
           # the official CEF cached before.
           key: cef-codecs-${{ hashFiles('Cargo.toml') }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Export CEF
+        if: steps.cef-cache.outputs.cache-hit != 'true'
+        run: mise run cef
+
+      - run: mise run check
+
+  # Linux's interface is GTK 4 (docs/decisions/0011-linux-interface.md), whose headers the app
+  # builds against.
+  check-linux:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: cef-${{ hashFiles('Cargo.toml') }}
+          save-if: true
+
+      - name: Cache CEF
+        id: cef-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/cef
+          key: cef-${{ hashFiles('Cargo.toml') }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Export CEF
         if: steps.cef-cache.outputs.cache-hit != 'true'
