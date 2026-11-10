@@ -80,7 +80,6 @@ pub(super) fn forget_auth(browser: &Browser) {
 
 /// Shows the window the first request to sign in of a page it shows in the sign-in prompt, at the
 /// top of the card, over the page; or hides it. The requests of closed pages go.
-#[cfg(target_os = "macos")]
 pub(super) fn sync_auth_prompt() {
     AUTH_REQUESTS.with_borrow_mut(|requests| {
         requests.retain(|request| request.browser.is_valid() == 1);

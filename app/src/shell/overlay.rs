@@ -221,22 +221,19 @@ fn open_overlay(visible: bool, tab: Option<(String, Option<String>)>) {
     if win().overlay_min_width.replace(min_width) != min_width
         && let Some(window) = window
     {
-        #[cfg(target_os = "macos")]
-        crate::mac::set_min_size(
+        crate::system::set_min_size(
             window.window_handle(),
             min_width.unwrap_or(MIN_WINDOW_WIDTH),
             MIN_WINDOW_HEIGHT,
         );
     }
     overlay.set_visible(visible.into());
-    #[cfg(target_os = "macos")]
     round_overlay();
 }
 
 /// Shows the Command Bar where the app placed it, again after it changes size: the native one,
 /// on macOS, over the web one, which stays out of sight.
 pub(super) fn round_overlay() {
-    #[cfg(target_os = "macos")]
     sync_native_surfaces();
 }
 

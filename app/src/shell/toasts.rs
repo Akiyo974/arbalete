@@ -7,7 +7,6 @@ use super::*;
 /// an SF Symbol; `keys` drawn as keycaps after the text, and the `trailing` words after them; a
 /// `sublabel`; a `button`, with a `buttonIcon`; `error`; and the `commands` a click runs.
 pub(super) fn toast(toast: serde_json::Value) {
-    #[cfg(target_os = "macos")]
     if let Some(page) = page_frame().or_else(card_rect) {
         crate::native::toast(win().id, &page, &toast.to_string());
     }

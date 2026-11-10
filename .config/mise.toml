@@ -22,12 +22,25 @@ MONACO_PATH = "{{env.HOME}}/monaco/0.57.0"
 # bundling tool to install. The official CEF leaves out Chromium's proprietary codecs (H.264, AAC),
 # which sites like Twitch need: amenophis/cef-codecs builds the same CEF with them.
 [tasks.cef]
-description = "Download CEF, with Chromium's proprietary codecs, to CEF_PATH"
+description = "Download CEF, with Chromium's proprietary codecs on macOS, to CEF_PATH"
 run = """
 version=$(sed -n 's/^cef = "=\\(.*\\)"/\\1/p' Cargo.toml)
 cargo install --locked export-cef-dir --version "=$version"
 # The crate 156.0.0+156.0.7 takes CEF 156.0.7, named in full in CEF's index.
 cef=$(sed -n '/^name = "cef"$/{n;s/^version = ".*+\\(.*\\)"/\\1/p;}' Cargo.lock)
+# Linux takes CEF's own build, checked against its SHA-1: amenophis/cef-codecs builds macOS only
+# (docs/decisions/0011-linux-interface.md).
+if [ "$(uname -s)" = Linux ]; then
+  name=$(curl -fsSL https://cef-builds.spotifycdn.com/index.json | grep -o "cef_binary_$cef+[^\\"]*_linux64_minimal.tar.bz2" | head -1)
+  [ -n "$name" ] || { echo "CEF $cef is not in CEF's index" >&2; exit 1; }
+  url="https://cef-builds.spotifycdn.com/$(echo "$name" | sed 's/+/%2B/g')"
+  download=$(mktemp -d)
+  curl -fsSL -o "$download/$name" "$url"
+  echo "$(curl -fsSL "$url.sha1")  $download/$name" | sha1sum -c
+  export-cef-dir --force --archive "$download/$name" "$CEF_PATH"
+  rm -rf "$download"
+  exit 0
+fi
 name=$(curl -fsSL https://cef-builds.spotifycdn.com/index.json | grep -o "cef_binary_$cef+[^\\"]*_macosarm64_minimal.tar.bz2" | head -1)
 [ -n "$name" ] || { echo "CEF $cef is not in CEF's index" >&2; exit 1; }
 release=$(sed -n 's/^cef-codecs = "\\(.*\\)"$/\\1/p' Cargo.toml)
@@ -42,16 +55,18 @@ rm -rf "$download"
 """
 
 [tasks.cef-bundler]
-description = "Install bundle-cef-app, the CEF bundling tool"
+description = "Install bundle-cef-app, the CEF bundling tool, on macOS"
 run = """
+[ "$(uname -s)" = Darwin ] || exit 0
 version=$(sed -n 's/^cef = "=\\(.*\\)"/\\1/p' Cargo.toml)
 cargo install --locked cef --version "=$version" --features build-util --bin bundle-cef-app
 """
 
 # Sparkle's release archive, checked against its checksum, once per version.
 [tasks.sparkle]
-description = "Download Sparkle to SPARKLE_PATH"
+description = "Download Sparkle to SPARKLE_PATH, on macOS"
 run = """
+[ "$(uname -s)" = Darwin ] || exit 0
 [ -d "$SPARKLE_PATH/Sparkle.framework" ] && exit 0
 version=$(basename "$SPARKLE_PATH")
 archive=$(mktemp)
@@ -147,7 +162,7 @@ run = [
   # The helper extension, loaded in every profile (app/src/extensions.rs).
   "cp -R app/extension target/bundle/Arbalete.app/Contents/Resources/arbalete-helper",
   # A browser opens web links: macOS offers it as the default browser, which other apps' links
-  # then open in (mac::watch_links).
+  # then open in (system::watch_links).
   "plutil -insert CFBundleURLTypes -json '[{\"CFBundleURLName\":\"Web site URL\",\"CFBundleURLSchemes\":[\"http\",\"https\"]}]' target/bundle/Arbalete.app/Contents/Info.plist",
   # System Settings lists, as default browsers, only the apps that also view web pages.
   "plutil -insert CFBundleDocumentTypes -json '[{\"CFBundleTypeName\":\"HTML document\",\"CFBundleTypeRole\":\"Viewer\",\"LSItemContentTypes\":[\"public.html\",\"public.xhtml\"]}]' target/bundle/Arbalete.app/Contents/Info.plist",
@@ -176,6 +191,28 @@ run = [
   "rm -rf target/dmg && mkdir -p target/dmg",
   "version=$(sed -n 's/^version = \"\\(.*\\)\"/\\1/p' app/Cargo.toml) && dmgbuild -s packaging/dmg/settings.py -D app=target/bundle/Arbalete.app Arbalete \"target/dmg/Arbalete-$version-arm64.dmg\" && cd target/dmg && shasum -a 256 \"Arbalete-$version-arm64.dmg\" | tee \"Arbalete-$version-arm64.dmg.sha256\"",
 ]
+
+# Linux: the app, its helper and CEF side by side, the app finding CEF beside it (app/build.rs).
+[tasks.linux-app]
+description = "Bundle the app for Linux in target/bundle/linux/arbalete"
+run = [
+  "cargo build -p arbalete --bins",
+  # Updated in place: the sandbox's helper keeps the owner and mode the README gives it.
+  "mkdir -p target/bundle/linux/arbalete",
+  "cp target/debug/arbalete target/debug/arbalete_helper target/bundle/linux/arbalete/",
+  "cd \"$CEF_PATH\" && cp -R *.so* *.pak *.dat *.bin *.json locales \"$OLDPWD/target/bundle/linux/arbalete/\"",
+  "[ -e target/bundle/linux/arbalete/chrome-sandbox ] || cp \"$CEF_PATH/chrome-sandbox\" target/bundle/linux/arbalete/",
+  # The helper extension, loaded in every profile (app/src/extensions.rs).
+  "rm -rf target/bundle/linux/arbalete/arbalete-helper && cp -R app/extension target/bundle/linux/arbalete/arbalete-helper",
+  # Arbalete's license, and Chromium's, CEF's and the Rust crates', which redistributing them requires.
+  "cp LICENSE \"$CEF_PATH/CREDITS.html\" target/bundle/linux/arbalete/",
+  "cargo about generate --locked -o target/bundle/linux/arbalete/Rust-CREDITS.html about.hbs",
+]
+
+[tasks.linux-run]
+description = "Build and run the app on Linux"
+depends = ["linux-app"]
+run = "target/bundle/linux/arbalete/arbalete"
 
 [tasks.website]
 description = "Build the website into website/dist"

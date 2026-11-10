@@ -11,7 +11,7 @@ accepted = [
   "bzip2-1.0.6",
   "CDLA-Permissive-2.0",
 ]
-# Only what ships in the app, on the one platform it is built for.
-targets = ["aarch64-apple-darwin"]
+# Only what ships in the app, on the platforms it is built for.
+targets = ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"]
 ignore-build-dependencies = true
 ignore-dev-dependencies = true

@@ -83,10 +83,8 @@ pub(super) fn download_command(action: DownloadAction, id: u32) {
             });
             send_downloads();
         }
-        #[cfg(target_os = "macos")]
-        DownloadAction::Open => crate::mac::open_file(&path),
-        #[cfg(target_os = "macos")]
-        DownloadAction::Show => crate::mac::show_file(&path),
+        DownloadAction::Open => crate::system::open_file(&path),
+        DownloadAction::Show => crate::system::show_file(&path),
         DownloadAction::Remove => {
             DOWNLOADS.with_borrow_mut(|downloads| downloads.retain(|download| download.id != id));
             save_downloads();

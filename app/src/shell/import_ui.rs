@@ -46,7 +46,6 @@ pub(super) fn show_import() {
     // A page still loading asks for them once it listens (Command::ImportReady).
     send_sources();
     // At launch too, out of any command.
-    #[cfg(target_os = "macos")]
     sync_native_surfaces();
 }
 
@@ -102,7 +101,6 @@ fn hide_import() {
         controller.set_visible(0);
     }
     // Once the import is done too, out of any command.
-    #[cfg(target_os = "macos")]
     sync_native_surfaces();
 }
 

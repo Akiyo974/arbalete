@@ -121,7 +121,6 @@ fn open_window_at(view: WindowView, fresh: bool, incognito: Option<SpaceId>, pla
     window.fresh.set(fresh);
     WINDOWS.with_borrow_mut(|windows| windows.push(Rc::new(window)));
     save_session();
-    #[cfg(target_os = "macos")]
     open_main_window(id);
 }
 
@@ -152,7 +151,6 @@ pub(super) fn close_window() {
 /// Moves the pages of the window `id`, which closes, into another window, hidden.
 fn hand_pages_over(id: u32) {
     // Their containers, out of the window closing with them.
-    #[cfg(target_os = "macos")]
     if let Some(to) =
         WINDOWS.with_borrow(|windows| windows.iter().find(|win| win.id != id).map(|win| win.id))
     {
@@ -213,9 +211,8 @@ pub fn close() {
 
 /// Quits from the macOS app menu, once the user confirms it if the settings ask to warn before
 /// quitting.
-#[cfg(target_os = "macos")]
 pub fn quit() {
-    if app_settings().warn_before_quit && !crate::mac::confirm("Quit Arbalete?", "", "Quit") {
+    if app_settings().warn_before_quit && !crate::system::confirm("Quit Arbalete?", "", "Quit") {
         return;
     }
     close();
@@ -229,8 +226,16 @@ wrap_app! {
     impl App {
         fn on_before_command_line_processing(&self, _process_type: Option<&CefString>, command_line: Option<&mut CommandLine>) {
             let Some(command_line) = command_line else { return };
-            #[cfg(target_os = "macos")]
-            if crate::mac::mock_keychain() {
+            // Chromium loads the GTK the interface runs, and draws on X11 like it (app/src/gtk.rs):
+            // two GTK versions in one process crash.
+            #[cfg(target_os = "linux")]
+            for (switch, value) in [("gtk-version", "4"), ("ozone-platform", "x11")] {
+                command_line.append_switch_with_value(
+                    Some(&CefString::from(switch)),
+                    Some(&CefString::from(value)),
+                );
+            }
+            if crate::system::mock_keychain() {
                 command_line.append_switch(Some(&CefString::from("use-mock-keychain")));
             }
             // Sites asking to sign in reach the sign-in prompt (auth_credentials): Chrome's own
@@ -276,7 +281,6 @@ wrap_browser_process_handler! {
             check_archive();
             DOWNLOADS.set(downloads::load(&self.data_dir.join(downloads::FILE_NAME)));
             make_bridge();
-            #[cfg(target_os = "macos")]
             open_main_window(0);
         }
 
@@ -288,7 +292,6 @@ wrap_browser_process_handler! {
 
 /// Opens the main window `id` on macOS, the native interface making it, then makes it usable
 /// (window_ready).
-#[cfg(target_os = "macos")]
 fn open_main_window(id: u32) {
     focus(id);
     let place = win().place.take();
@@ -303,8 +306,7 @@ fn open_main_window(id: u32) {
 /// Makes the window just made usable: its panels' places, its interface's state, its card and
 /// sidebar, then its selected tab's page, the links and windows waiting for it.
 fn window_ready(window: MainWindow) {
-    #[cfg(target_os = "macos")]
-    crate::mac::toolbar_shown(app_settings().show_toolbar);
+    crate::system::toolbar_shown(app_settings().show_toolbar);
     // Below the overlay, which is added after it.
     let reveal = place_view(no_width, 1);
     let controller = Spot::default();
@@ -324,7 +326,6 @@ fn window_ready(window: MainWindow) {
     if !onboarding {
         window.show();
     }
-    #[cfg(target_os = "macos")]
     {
         // What the web sidebar asks for once ready (Command::Ready).
         send_state();
@@ -356,12 +357,11 @@ fn window_ready(window: MainWindow) {
 pub fn window_resized(id: u32) {
     focus(id);
     // Leaving the window's full screen, as by its green button, the page leaves its own.
-    #[cfg(target_os = "macos")]
     if page_full_screen()
         && let Some(window) = win()
             .window
             .with_borrow(|w| w.as_ref().map(|w| w.window_handle()))
-        && !crate::mac::full_screen(window)
+        && !crate::system::full_screen(window)
     {
         leave_page_full_screen();
     }
@@ -379,7 +379,6 @@ pub fn window_resized(id: u32) {
     send_window_width();
     place_theme_picker();
     place_peek();
-    #[cfg(target_os = "macos")]
     sync_native_surfaces();
 }
 
@@ -433,7 +432,6 @@ pub fn window_can_close(id: u32) -> bool {
 /// Forgets the window `id`, which closed; the last one closing quits.
 pub fn window_closed(id: u32) {
     WINDOWS.with_borrow_mut(|windows| windows.retain(|win| win.id != id));
-    #[cfg(target_os = "macos")]
     crate::native::detach(id);
     if let Some(next) = WINDOWS.with_borrow(|windows| windows.first().map(|win| win.id)) {
         focus(next);

@@ -7,7 +7,6 @@ use super::*;
 /// import from once it listens (Command::OnboardingReady).
 pub(super) fn show_onboarding() {
     ONBOARDING_SHOWN.set(true);
-    #[cfg(target_os = "macos")]
     crate::native::onboarding(true);
     send_onboarding();
 }
@@ -45,7 +44,6 @@ pub(super) fn add_work_space() {
 }
 
 fn event(name: &str, detail: &serde_json::Value) {
-    #[cfg(target_os = "macos")]
     crate::native::event(win().id, "onboarding", name, &detail.to_string());
 }
 
@@ -64,7 +62,6 @@ pub(super) fn finish_onboarding() {
 /// Closes the welcome flow's window and brings the main one, which waited behind it at the first
 /// launch, as it would have been without it: with the start page when it has no tab.
 pub(super) fn close_onboarding() {
-    #[cfg(target_os = "macos")]
     crate::native::onboarding(false);
     if STATE.with_borrow_mut(|state| active_tab(&mut state.sidebar).is_none()) {
         open_tab(START_URL);

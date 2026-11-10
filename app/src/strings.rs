@@ -29,15 +29,26 @@ pub fn chromium_with(english: &str, values: &[&str]) -> String {
 
 /// The system language's strings by their English text, from CEF's locale files.
 fn load() -> Option<HashMap<String, String>> {
-    let resources = resources_dir()?;
-    #[cfg(target_os = "macos")]
-    let locale = crate::mac::chromium_locale().replace('-', "_");
-    let english = read_pack(&resources.join("en.lproj/locale.pak"))?;
-    let local = read_pack(&resources.join(format!("{locale}.lproj/locale.pak")))?;
+    let locale = crate::system::chromium_locale();
+    let english = read_pack(&english_pack()?)?;
+    let local = read_pack(&locale_pack(&locale)?)?;
     Some(translations(&english, &local))
 }
 
+/// The English locale file in CEF's framework in the bundle.
+#[cfg(target_os = "macos")]
+fn english_pack() -> Option<PathBuf> {
+    Some(resources_dir()?.join("en.lproj/locale.pak"))
+}
+
+#[cfg(target_os = "macos")]
+fn locale_pack(locale: &str) -> Option<PathBuf> {
+    let name = locale.replace('-', "_");
+    Some(resources_dir()?.join(format!("{name}.lproj/locale.pak")))
+}
+
 /// The resources folder of CEF's framework in the bundle.
+#[cfg(target_os = "macos")]
 fn resources_dir() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe
@@ -45,6 +56,43 @@ fn resources_dir() -> Option<PathBuf> {
         .parent()?
         .join("Frameworks/Chromium Embedded Framework.framework/Resources");
     dir.exists().then_some(dir)
+}
+
+/// The English locale file of CEF's, in its `locales` folder beside the app.
+#[cfg(target_os = "linux")]
+fn english_pack() -> Option<PathBuf> {
+    locale_pack("en-US")
+}
+
+#[cfg(target_os = "linux")]
+fn locale_pack(locale: &str) -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    Some(exe.with_file_name("locales").join(format!("{locale}.pak")))
+}
+
+/// Chromium's locale for a BCP 47 language tag, like "fr-FR" or "zh-Hans-CN".
+pub fn chromium_locale_of(tag: &str) -> String {
+    let parts: Vec<&str> = tag.split('-').collect();
+    let language = parts.first().copied().unwrap_or("en");
+    let region = parts
+        .iter()
+        .skip(1)
+        .find(|part| part.len() == 2 || part.len() == 3);
+    match (language, region.copied()) {
+        ("en", Some("GB" | "AU" | "NZ" | "IE" | "IN" | "ZA")) => "en-GB".to_string(),
+        ("en", _) => "en-US".to_string(),
+        ("pt", Some("PT")) => "pt-PT".to_string(),
+        ("pt", _) => "pt-BR".to_string(),
+        ("es", Some("ES") | None) => "es".to_string(),
+        ("es", _) => "es-419".to_string(),
+        ("zh", _)
+            if tag.contains("Hant") || matches!(region.copied(), Some("TW" | "HK" | "MO")) =>
+        {
+            "zh-TW".to_string()
+        }
+        ("zh", _) => "zh-CN".to_string(),
+        (language, _) => language.to_string(),
+    }
 }
 
 /// Each English string's translation, the first of its ids when it has several.
@@ -150,5 +198,21 @@ mod tests {
             "Open Link in New Tab"
         );
         assert_eq!(without_mnemonics("Copy && Paste"), "Copy & Paste");
+    }
+}
+
+#[cfg(test)]
+mod locale_tests {
+    use super::chromium_locale_of;
+
+    #[test]
+    fn names_chromium_locales() {
+        assert_eq!(chromium_locale_of("fr-FR"), "fr");
+        assert_eq!(chromium_locale_of("en-FR"), "en-US");
+        assert_eq!(chromium_locale_of("en-GB"), "en-GB");
+        assert_eq!(chromium_locale_of("pt-PT"), "pt-PT");
+        assert_eq!(chromium_locale_of("es-MX"), "es-419");
+        assert_eq!(chromium_locale_of("zh-Hant-TW"), "zh-TW");
+        assert_eq!(chromium_locale_of("de"), "de");
     }
 }

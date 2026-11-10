@@ -19,7 +19,11 @@ use std::sync::Mutex;
 /// bundle run without it.
 pub fn helper_dir() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
+    #[cfg(target_os = "macos")]
     let dir = exe.parent()?.parent()?.join("Resources/arbalete-helper");
+    // Beside the app on Linux.
+    #[cfg(target_os = "linux")]
+    let dir = exe.with_file_name("arbalete-helper");
     dir.join("manifest.json").exists().then_some(dir)
 }
 

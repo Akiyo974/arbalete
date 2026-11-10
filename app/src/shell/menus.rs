@@ -11,8 +11,7 @@ pub(super) fn show_menu(target: Target) {
     let Some(entries) = STATE.with_borrow(|state| menu::build(&state.sidebar, target)) else {
         return;
     };
-    #[cfg(target_os = "macos")]
-    crate::mac::pop_up(entries);
+    crate::system::pop_up(entries);
 }
 
 /// Shows the developer bar's extensions menu at the pointer, like Arc's: the displayed Space's
@@ -24,8 +23,7 @@ pub(super) fn show_extensions_menu() {
         .map(|extension| (extension.id, extension.name))
         .collect();
     let entries = menu::extensions_menu(&extensions);
-    #[cfg(target_os = "macos")]
-    crate::mac::pop_up(entries);
+    crate::system::pop_up(entries);
 }
 
 /// The profile whose extensions act: the Little Arbalete window's in front last, if any, else the
@@ -54,8 +52,7 @@ pub(super) fn show_extension_menu(id: Option<&String>) {
         extension.options.is_some(),
         pinned,
     );
-    #[cfg(target_os = "macos")]
-    crate::mac::pop_up(entries);
+    crate::system::pop_up(entries);
 }
 
 /// Runs an item of a row's menu, as if it was picked.
@@ -72,25 +69,21 @@ pub fn perform(action: Action) {
         Action::Run(command) => run(command),
         Action::RunEach(commands) => commands.into_iter().for_each(run),
         Action::Ask(event, detail) => ask(event, &detail),
-        #[cfg(target_os = "macos")]
-        Action::CopyLink(url) => crate::mac::copy(&url),
-        #[cfg(target_os = "macos")]
-        Action::Share(url) => crate::mac::share(&url),
-        #[cfg(target_os = "macos")]
+        Action::CopyLink(url) => crate::system::copy(&url),
+        Action::Share(url) => crate::system::share(&url),
         Action::EditPinnedUrl { tab, url } => {
             let detail = "This is what opens first when you click this tab.";
-            if let Some(url) = crate::mac::prompt("Edit Pinned URL", detail, &url, "Save") {
+            if let Some(url) = crate::system::prompt("Edit Pinned URL", detail, &url, "Save") {
                 run(Command::SetPinnedUrl(tab, url));
             }
         }
-        #[cfg(target_os = "macos")]
         Action::Confirm {
             question,
             detail,
             button,
             command,
         } => {
-            if crate::mac::confirm(&question, detail, button) {
+            if crate::system::confirm(&question, detail, button) {
                 run(command);
             }
         }
@@ -106,6 +99,7 @@ pub(super) fn ask(event: &str, detail: &serde_json::Value) {
 }
 
 /// The sidebar views a right-click may land on.
+#[cfg(any(target_os = "macos", test))]
 #[derive(Debug, PartialEq)]
 enum SidebarView {
     Docked,
@@ -115,6 +109,7 @@ enum SidebarView {
 
 /// The sidebar view under a point of a window of `size`, in points from its top left corner,
 /// with the point in the view's coordinates.
+#[cfg(any(target_os = "macos", test))]
 fn sidebar_point(
     mode: SidebarMode,
     size: &Size,
@@ -140,6 +135,7 @@ fn sidebar_point(
 }
 
 /// The target under a point of a sidebar view, if any.
+#[cfg(any(target_os = "macos", test))]
 pub(super) fn target_at(targets: &[HitTarget], x: f64, y: f64) -> Option<Target> {
     let target = targets.iter().find(|target| target.contains(x, y));
     target.map(|target| target.target)
@@ -152,6 +148,7 @@ pub(super) fn target_at(targets: &[HitTarget], x: f64, y: f64) -> Option<Target>
 /// (Command::MenuTargets).
 #[cfg(target_os = "macos")]
 pub fn menu_at(x: f64, y: f64) -> bool {
+    use crate::command::ButtonView;
     let Some(size) = win()
         .window
         .with_borrow(|window| window.as_ref().map(|w| w.size()))

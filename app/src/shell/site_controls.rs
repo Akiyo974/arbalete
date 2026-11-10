@@ -212,7 +212,6 @@ pub(super) fn show_certificate() {
             bytes
         })
         .collect();
-    #[cfg(target_os = "macos")]
     crate::native::certificate(win().id, &chain);
 }
 
@@ -254,22 +253,15 @@ pub(super) fn open_extension_popup(id: &str) {
 /// `button`, or without one over the main window's middle, once its page has a size
 /// (show_extension_popup).
 fn open_extension_window(profile: ProfileId, id: String, url: String, button: Option<Rect>) {
-    #[cfg(target_os = "macos")]
-    let info = WindowInfo {
-        parent_view: match crate::native::extension_popup_view(win().id) {
+    // The page's own size, once it has one.
+    let info = crate::native::page_in(
+        match crate::native::extension_popup_view(win().id) {
             Some(view) => view,
             None => return,
         },
-        // The page's own size, once it has one.
-        bounds: Rect {
-            x: 0,
-            y: 0,
-            width: 25,
-            height: 25,
-        },
-        runtime_style: RuntimeStyle::ALLOY,
-        ..Default::default()
-    };
+        25,
+        25,
+    );
     let Some(browser) = browser_host_create_browser_sync(
         Some(&info),
         Some(&mut PopupClient::new(profile, url)),
@@ -317,7 +309,6 @@ fn show_extension_popup(size: &Size) {
     }) else {
         return;
     };
-    #[cfg(target_os = "macos")]
     crate::native::extension_popup_show(win().id, button.as_ref(), size);
     if let Some(host) = browser.host() {
         host.set_focus(1);
@@ -461,8 +452,7 @@ wrap_task! {
                 win().extension_popup.set(None);
                 extensions::popup_closed();
             }
-            #[cfg(target_os = "macos")]
-            crate::native::extension_popup_closed(self.view as *mut std::ffi::c_void);
+            crate::native::extension_popup_closed(self.view as crate::native::View);
         }
     }
 }

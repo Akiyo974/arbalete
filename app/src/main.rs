@@ -1,11 +1,10 @@
 mod command;
 mod downloads;
 mod extensions;
-#[cfg(target_os = "macos")]
-mod mac;
 mod menu;
 mod motion;
-#[cfg(target_os = "macos")]
+/// The interface: SwiftUI on macOS (app/macos), GTK on Linux.
+#[cfg_attr(target_os = "linux", path = "gtk.rs")]
 mod native;
 mod permissions;
 mod settings;
@@ -13,6 +12,10 @@ mod shell;
 mod strings;
 #[cfg(target_os = "macos")]
 mod swipe;
+/// What the interface needs of the OS: menus, dialogs, the clipboard, opening files.
+#[cfg_attr(target_os = "macos", path = "mac.rs")]
+#[cfg_attr(target_os = "linux", path = "linux.rs")]
+mod system;
 
 use cef::*;
 use std::path::PathBuf;
@@ -25,8 +28,7 @@ fn main() {
         loader
     };
     let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
-    #[cfg(target_os = "macos")]
-    mac::setup_application();
+    system::setup_application();
 
     let args = args::Args::new();
     if execute_process(Some(args.as_main_args()), None, std::ptr::null_mut()) >= 0 {
@@ -43,8 +45,16 @@ fn main() {
         // app/src/shell/chrome_pages.rs).
         windowless_rendering_enabled: 1,
         // Like Arc's, Chromium's own menus, pages and dialogs speak the system's language.
-        #[cfg(target_os = "macos")]
-        locale: CefString::from(mac::chromium_locale().as_str()),
+        locale: CefString::from(system::chromium_locale().as_str()),
+        // Beside the app, as a macOS bundle's helpers are in it.
+        #[cfg(target_os = "linux")]
+        browser_subprocess_path: CefString::from(
+            std::env::current_exe()
+                .unwrap()
+                .with_file_name("arbalete_helper")
+                .to_str()
+                .unwrap(),
+        ),
         ..Default::default()
     };
     let mut app = shell::ArbaleteApp::new(root.clone());
@@ -57,12 +67,9 @@ fn main() {
         ),
         1
     );
-    #[cfg(target_os = "macos")]
-    mac::setup_menu();
-    #[cfg(target_os = "macos")]
-    mac::watch_events();
-    #[cfg(target_os = "macos")]
-    mac::watch_low_power();
+    system::setup_menu();
+    system::watch_events();
+    system::watch_low_power();
 
     run_message_loop();
     shutdown();
@@ -79,21 +86,12 @@ fn data_dir() -> PathBuf {
 
 fn default_data_dir() -> PathBuf {
     let home = home();
-    // Decided by what runs, like the keychain (mac::mock_keychain): only a bundle under a release
+    // Decided by what runs, like the keychain (system::mock_keychain): only a bundle under a release
     // identifier reads an installed Arbalete's data, never a development one or a bare binary.
-    #[cfg(target_os = "macos")]
-    let dev = !mac::release_bundle();
-    #[cfg(not(target_os = "macos"))]
-    let dev = cfg!(debug_assertions);
+    let dev = !system::release_bundle();
     if cfg!(target_os = "macos") {
         home.join("Library/Application Support")
             .join(if dev { "Arbalete Dev" } else { "Arbalete" })
-    } else if cfg!(target_os = "windows") {
-        PathBuf::from(std::env::var_os("APPDATA").unwrap()).join(if dev {
-            "Arbalete Dev"
-        } else {
-            "Arbalete"
-        })
     } else {
         std::env::var_os("XDG_DATA_HOME")
             .map_or_else(|| home.join(".local/share"), PathBuf::from)

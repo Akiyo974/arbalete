@@ -156,19 +156,12 @@ fn make_page(
     url: &str,
     context: &mut RequestContext,
 ) -> Option<Browser> {
-    #[cfg(target_os = "macos")]
-    let info = WindowInfo {
-        parent_view: crate::native::page_view(win().id, tab_number(tab))?,
-        // Any size: the container gives the page its own.
-        bounds: Rect {
-            x: 0,
-            y: 0,
-            width: 800,
-            height: 600,
-        },
-        runtime_style: RuntimeStyle::ALLOY,
-        ..Default::default()
-    };
+    // Any size: the container gives the page its own.
+    let info = crate::native::page_in(
+        crate::native::page_view(win().id, tab_number(tab))?,
+        800,
+        600,
+    );
     browser_host_create_browser_sync(
         Some(&info),
         Some(&mut ContentClient::new(profile, false, None)),
@@ -189,14 +182,12 @@ pub(super) fn tab_number(tab: NodeId) -> i64 {
 
 /// Gives a tab's page the keyboard, and its window, if it shows.
 pub(super) fn focus_page(tab: NodeId) {
-    #[cfg(target_os = "macos")]
     if has_easel_view(tab) {
         return crate::native::focus_page(tab_number(tab));
     }
     let Some(host) = PAGES.with_borrow(|pages| pages.get(&tab)?.browser.host()) else {
         return;
     };
-    #[cfg(target_os = "macos")]
     crate::native::focus_page(tab_number(tab));
     host.set_focus(1);
 }
@@ -232,7 +223,6 @@ pub(super) fn mute_page(tab: NodeId) {
 pub(super) fn content_created(profile: ProfileId, browser: Option<&mut Browser>) {
     let Some(browser) = browser else { return };
     extensions::page_created(profile, browser);
-    #[cfg(target_os = "macos")]
     cover_revived(Some(browser), true);
     // Made in page(), it is not one of the pages yet, which mutes it once it is.
     let Some(tab) = page_tab(browser) else { return };
@@ -273,11 +263,10 @@ pub(super) fn take_page(tab: NodeId) {
     for other in others {
         let shown = other.shown.take();
         *other.split.borrow_mut() = Default::default();
-        #[cfg(target_os = "macos")]
         if let (Some(card), Some(shown)) = (other.card_view.get(), shown)
             && let Some(jpeg) = SNAPSHOTS.with_borrow(|snapshots| snapshots.get(&shown).cloned())
         {
-            crate::mac::cover_page(card, &jpeg, Some(space_tint(shown)));
+            crate::system::cover_page(card, &jpeg, Some(space_tint(shown)));
         }
     }
 }
@@ -312,7 +301,6 @@ pub(super) fn shown_on_card(tab: NodeId) {
 
 /// The color dimming a picture of a tab's page in a window that does not show it: its Space's
 /// leading one, or gray.
-#[cfg(target_os = "macos")]
 fn space_tint(tab: NodeId) -> u32 {
     STATE
         .with_borrow(|state| {
@@ -368,9 +356,8 @@ pub(super) fn hide_content() {
         send_panes();
     }
     // A picture of a page another window took no longer stands in for it.
-    #[cfg(target_os = "macos")]
     if let Some(card) = win().card_view.get() {
-        crate::mac::uncover_page(card);
+        crate::system::uncover_page(card);
     }
     if let Some(tab) = win().shown.take() {
         PAGES.with_borrow_mut(|pages| {
@@ -431,8 +418,7 @@ wrap_task! {
         /// Takes a closing page's view out of the interface with its container, which destroys
         /// its browser.
         fn execute(&self) {
-            #[cfg(target_os = "macos")]
-            crate::native::page_closed(self.view as *mut std::ffi::c_void);
+            crate::native::page_closed(self.view as crate::native::View);
         }
     }
 }
@@ -445,7 +431,6 @@ wrap_task! {
     impl Task {
         /// Takes Peek's closing page's view out of its card, which destroys its browser.
         fn execute(&self) {
-            #[cfg(target_os = "macos")]
             crate::native::peek_closed(self.window);
         }
     }

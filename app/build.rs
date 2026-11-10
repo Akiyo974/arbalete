@@ -1,5 +1,5 @@
 //! Compiles the native macOS interface (app/macos, in Swift) into a static library linked into
-//! the app.
+//! the app; on Linux, has the app find CEF beside it.
 
 use std::env;
 use std::ffi::OsStr;
@@ -9,6 +9,10 @@ use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
 fn main() {
+    // On Linux, the app and its helper find CEF's library beside them, where the bundle puts it.
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN");
+    }
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
         return;
     }

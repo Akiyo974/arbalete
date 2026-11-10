@@ -99,23 +99,11 @@ fn open_inspector(tab: NodeId, panel: Option<&str>, then: Option<InspectorAction
         Some(panel) => format!("{INSPECTOR_URL}&panel={panel}"),
         None => INSPECTOR_URL.to_string(),
     };
-    #[cfg(target_os = "macos")]
     let Some(parent) = crate::native::tools_view(tab_number(tab)) else {
         return;
     };
-    let info = WindowInfo {
-        #[cfg(target_os = "macos")]
-        parent_view: parent,
-        // Any size: the container gives the front end its own.
-        bounds: Rect {
-            x: 0,
-            y: 0,
-            width: 800,
-            height: 600,
-        },
-        runtime_style: RuntimeStyle::ALLOY,
-        ..Default::default()
-    };
+    // Any size: the container gives the front end its own.
+    let info = crate::native::page_in(parent, 800, 600);
     let Some(frontend) = browser_host_create_browser_sync(
         Some(&info),
         Some(&mut InspectorClient::new(tab)),
@@ -217,7 +205,6 @@ fn inspector_asked(tab: NodeId, kind: &str, data: &str) {
                 width: f64,
                 height: f64,
             }
-            #[cfg(target_os = "macos")]
             if let Ok(room) = serde_json::from_str::<Room>(data) {
                 crate::native::tools_room(tab_number(tab), room.x, room.y, room.width, room.height);
             }
@@ -228,7 +215,6 @@ fn inspector_asked(tab: NodeId, kind: &str, data: &str) {
                 return;
             }
             inspector.docked.set(docked);
-            #[cfg(target_os = "macos")]
             crate::native::tools_docked(tab_number(tab), docked);
         }
         "ready" => {
@@ -320,8 +306,7 @@ wrap_task! {
     impl Task {
         /// Takes a closing front end's view out of the interface, which destroys its browser.
         fn execute(&self) {
-            #[cfg(target_os = "macos")]
-            crate::native::tools_closed(self.view as *mut std::ffi::c_void);
+            crate::native::tools_closed(self.view as crate::native::View);
         }
     }
 }

@@ -9,7 +9,6 @@ pub(super) struct Little {
     pub(super) id: u32,
     pub(super) profile: ProfileId,
     /// Its page, in a view of the native window.
-    #[cfg(target_os = "macos")]
     browser: Browser,
     pub(super) url: String,
     pub(super) title: String,
@@ -18,8 +17,7 @@ pub(super) struct Little {
 impl Little {
     /// Its page's browser, once made.
     pub(super) fn browser(&self) -> Option<Browser> {
-        #[cfg(target_os = "macos")]
-        return Some(self.browser.clone());
+        Some(self.browser.clone())
     }
 }
 
@@ -71,7 +69,6 @@ pub(super) fn open_little(url: Option<String>) {
     let id = next_little();
     let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
     let url = url.unwrap_or_default();
-    #[cfg(target_os = "macos")]
     {
         let Some(view) = crate::native::open_little(id, None) else {
             return;
@@ -101,14 +98,12 @@ fn next_little() -> u32 {
 /// Opens a Little Arbalete window for a page's popup, its page `size` if it asks for one, like
 /// Arc's: CEF makes the popup in the view returned, keeping its opener, which a sign-in popup
 /// sends its result to before closing.
-#[cfg(target_os = "macos")]
-pub(super) fn open_popup(size: Option<(i32, i32)>) -> Option<(u32, *mut std::ffi::c_void)> {
+pub(super) fn open_popup(size: Option<(i32, i32)>) -> Option<(u32, crate::native::View)> {
     let id = next_little();
     Some((id, crate::native::open_little(id, size)?))
 }
 
 /// Makes a popup CEF made its Little Arbalete window's page, with the keyboard.
-#[cfg(target_os = "macos")]
 pub(super) fn popup_created(id: u32, profile: ProfileId, browser: &Browser) {
     if let Some(host) = browser.host() {
         host.set_focus(1);
@@ -128,20 +123,9 @@ pub(super) fn popup_created(id: u32, profile: ProfileId, browser: &Browser) {
 
 /// Makes a Little Arbalete window's page, in `profile`, on `url`, in its window's `view`, with
 /// the keyboard.
-#[cfg(target_os = "macos")]
-fn little_page(view: *mut std::ffi::c_void, profile: ProfileId, url: &str) -> Option<Browser> {
-    let info = WindowInfo {
-        parent_view: view,
-        // Any size: the window gives the page its own.
-        bounds: Rect {
-            x: 0,
-            y: 0,
-            width: 800,
-            height: 600,
-        },
-        runtime_style: RuntimeStyle::ALLOY,
-        ..Default::default()
-    };
+fn little_page(view: crate::native::View, profile: ProfileId, url: &str) -> Option<Browser> {
+    // Any size: the window gives the page its own.
+    let info = crate::native::page_in(view, 800, 600);
     let start = if url.is_empty() { "about:blank" } else { url };
     let browser = browser_host_create_browser_sync(
         Some(&info),
@@ -167,7 +151,6 @@ fn little_browser(id: u32) -> Option<Browser> {
 /// Closes a Little Arbalete window, its page first, which may ask to stay: on macOS, the page
 /// closing closes the window (RemoveLittle).
 pub(super) fn close_little(id: u32) {
-    #[cfg(target_os = "macos")]
     if let Some(host) = little_browser(id).and_then(|browser| browser.host()) {
         host.close_browser(0);
     }
@@ -185,7 +168,6 @@ pub fn little_can_close(id: u32) -> bool {
 }
 
 /// The Little Arbalete window whose page is `browser`, if any.
-#[cfg(target_os = "macos")]
 pub(super) fn little_of(browser: &Browser) -> Option<u32> {
     LITTLE.with_borrow(|littles| {
         littles
@@ -225,7 +207,6 @@ pub(super) fn little_action(id: u32, action: LittleAction) {
 /// Opens a Little Arbalete window's page again in `profile`, at the same address, like Little
 /// Arc's profile menu: the new page takes the old one's place, which closes.
 fn set_little_profile(id: u32, profile: ProfileId) {
-    #[cfg(target_os = "macos")]
     {
         let found = LITTLE.with_borrow(|littles| {
             let little = littles
@@ -317,7 +298,6 @@ fn send_little(id: u32) {
         Some(detail)
     });
     if let Some(detail) = found {
-        #[cfg(target_os = "macos")]
         crate::native::event(
             win().id,
             &format!("little/{id}"),
@@ -329,11 +309,9 @@ fn send_little(id: u32) {
 
 /// The Little Arbalete window that has the keyboard, if any: ⌘W closes it, ⌘O moves its page.
 pub(super) fn focused_little() -> Option<u32> {
-    #[cfg(target_os = "macos")]
-    return crate::native::focused_little();
+    crate::native::focused_little()
 }
 
-#[cfg(target_os = "macos")]
 wrap_task! {
     pub(super) struct RemoveLittlePage {
         view: usize,
@@ -343,12 +321,11 @@ wrap_task! {
         /// Takes a Little Arbalete window's page out of it, another profile's having taken its
         /// place, which destroys its browser.
         fn execute(&self) {
-            crate::native::little_page_closed(self.view as *mut std::ffi::c_void);
+            crate::native::little_page_closed(self.view as crate::native::View);
         }
     }
 }
 
-#[cfg(target_os = "macos")]
 wrap_task! {
     pub(super) struct RemoveLittle {
         id: u32,

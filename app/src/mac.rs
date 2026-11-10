@@ -1060,11 +1060,18 @@ thread_local! {
     static LAST_SHORTCUT: RefCell<Option<(String, f64)>> = const { RefCell::new(None) };
 }
 
+/// The key event CEF gives as AppKit's, an NSEvent.
+pub type OsEvent<'a> = *mut u8;
+
 /// Runs the menu's shortcut a key event is, before the page has it, if its priority says
 /// Arbalete takes it first; whether it did.
-pub fn take_shortcut(event: *mut NSEvent, priority: impl Fn(&str) -> Priority) -> bool {
-    // SAFETY: CEF gives the event it handles.
-    let Some(event) = (unsafe { event.as_ref() }) else {
+pub fn take_shortcut(
+    _event: &cef::KeyEvent,
+    os_event: OsEvent,
+    priority: impl Fn(&str) -> Priority,
+) -> bool {
+    // SAFETY: CEF gives the NSEvent it handles, or none.
+    let Some(event) = (unsafe { os_event.cast::<NSEvent>().as_ref() }) else {
         return false;
     };
     let mtm = MainThreadMarker::new().expect("main thread");
@@ -1992,32 +1999,7 @@ pub fn chromium_locale() -> String {
     let Some(first) = preferred.firstObject().map(|tag| tag.to_string()) else {
         return "en-US".to_string();
     };
-    chromium_locale_of(&first)
-}
-
-/// Chromium's locale for a BCP 47 language tag, like "fr-FR" or "zh-Hans-CN".
-fn chromium_locale_of(tag: &str) -> String {
-    let parts: Vec<&str> = tag.split('-').collect();
-    let language = parts.first().copied().unwrap_or("en");
-    let region = parts
-        .iter()
-        .skip(1)
-        .find(|part| part.len() == 2 || part.len() == 3);
-    match (language, region.copied()) {
-        ("en", Some("GB" | "AU" | "NZ" | "IE" | "IN" | "ZA")) => "en-GB".to_string(),
-        ("en", _) => "en-US".to_string(),
-        ("pt", Some("PT")) => "pt-PT".to_string(),
-        ("pt", _) => "pt-BR".to_string(),
-        ("es", Some("ES") | None) => "es".to_string(),
-        ("es", _) => "es-419".to_string(),
-        ("zh", _)
-            if tag.contains("Hant") || matches!(region.copied(), Some("TW" | "HK" | "MO")) =>
-        {
-            "zh-TW".to_string()
-        }
-        ("zh", _) => "zh-CN".to_string(),
-        (language, _) => language.to_string(),
-    }
+    crate::strings::chromium_locale_of(&first)
 }
 
 /// Whether Chromium keeps its keys in a mock keychain rather than the real one: for a development
@@ -2090,21 +2072,5 @@ mod keychain_tests {
             "io.github.amenophis.arbalete.helper.renderer"
         )));
         assert!(!is_development_bundle(None));
-    }
-}
-
-#[cfg(test)]
-mod locale_tests {
-    use super::chromium_locale_of;
-
-    #[test]
-    fn names_chromium_locales() {
-        assert_eq!(chromium_locale_of("fr-FR"), "fr");
-        assert_eq!(chromium_locale_of("en-FR"), "en-US");
-        assert_eq!(chromium_locale_of("en-GB"), "en-GB");
-        assert_eq!(chromium_locale_of("pt-PT"), "pt-PT");
-        assert_eq!(chromium_locale_of("es-MX"), "es-419");
-        assert_eq!(chromium_locale_of("zh-Hant-TW"), "zh-TW");
-        assert_eq!(chromium_locale_of("de"), "de");
     }
 }

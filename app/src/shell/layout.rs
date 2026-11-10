@@ -4,14 +4,13 @@ use super::*;
 
 /// Whether the card is square, without margins: a page alone in full screen, like Arc's.
 pub(super) fn square_card() -> bool {
-    #[cfg(target_os = "macos")]
     return page_full_screen()
         || win().shown.get().is_some()
             && win().split.borrow().0.is_empty()
             && win()
                 .window
                 .with_borrow(|window| window.as_ref().map(|w| w.window_handle()))
-                .is_some_and(crate::mac::full_screen);
+                .is_some_and(crate::system::full_screen);
 }
 
 /// Whether the shown page fills the window, gone full screen like a video.
@@ -23,27 +22,26 @@ pub(super) fn page_full_screen() -> bool {
 /// screen with it, out of the sidebar's way and the card's margins, and back as the page leaves
 /// it. Chromium only fills the page's view with it.
 pub(super) fn fill_with_page(full: bool) {
-    #[cfg(target_os = "macos")]
     {
         let window = win()
             .window
             .with_borrow(|window| window.as_ref().map(|w| w.window_handle()));
         let Some(window) = window else { return };
-        let window_full = crate::mac::full_screen(window);
+        let window_full = crate::system::full_screen(window);
         if full {
             if page_full_screen() {
                 return;
             }
             win().page_full_screen.set(Some(!window_full));
             if !window_full {
-                crate::mac::toggle_full_screen(window);
+                crate::system::toggle_full_screen(window);
             }
         } else {
             let Some(entered) = win().page_full_screen.take() else {
                 return;
             };
             if entered && window_full {
-                crate::mac::toggle_full_screen(window);
+                crate::system::toggle_full_screen(window);
             }
         }
         place_card();
@@ -137,11 +135,8 @@ pub(super) fn resize_sidebar(x: f64) {
     }
     SETTINGS.with_borrow_mut(|settings| settings.sidebar_width = width);
     in_each_window(|| {
-        #[cfg(target_os = "macos")]
-        {
-            place_native_sidebar();
-            place_card();
-        }
+        place_native_sidebar();
+        place_card();
     });
 }
 
@@ -186,8 +181,7 @@ pub(super) fn toggle_toolbar() {
     });
     save_settings();
     sync_page_toolbar();
-    #[cfg(target_os = "macos")]
-    crate::mac::toolbar_shown(shown);
+    crate::system::toolbar_shown(shown);
     send_state();
 }
 
@@ -224,8 +218,7 @@ pub(super) fn set_sidebar(mode: SidebarMode) {
         return;
     };
     // Like Arc's, a drag of the sidebar's edge hides and shows it at once, under the pointer.
-    #[cfg(target_os = "macos")]
-    let duration = if crate::mac::reduce_motion() || SIDEBAR_DRAG.get().is_some() {
+    let duration = if crate::system::reduce_motion() || SIDEBAR_DRAG.get().is_some() {
         0
     } else {
         slide_duration(before, mode)
@@ -239,7 +232,6 @@ pub(super) fn set_sidebar(mode: SidebarMode) {
     let floating = |mode| matches!(mode, SidebarMode::Revealed | SidebarMode::Floating);
     if floating(mode) && !floating(before) {
         reveal.set_bounds(Some(&mode.layout(&size).reveal));
-        reveal.set_visible((!cfg!(target_os = "macos")).into());
     }
     let from = Layout {
         card,
@@ -319,7 +311,6 @@ fn step_slide() {
     place_card();
     if docking && let Some(reveal) = win().reveal.with_borrow(Clone::clone) {
         reveal.set_bounds(Some(&lerp_rect(&from.reveal, &to.reveal, eased)));
-        #[cfg(target_os = "macos")]
         place_native_sidebar();
     }
     post_delayed_task(ThreadId::UI, Some(&mut StepSlide::new()), FRAME_MS);
@@ -350,15 +341,11 @@ fn lerp_rect(from: &Rect, to: &Rect, t: f64) -> Rect {
 fn settle_sidebar() {
     let mode = win().sidebar_mode.get();
     let docked = mode == SidebarMode::Shown;
-    if let Some(sidebar) = win().sidebar.with_borrow(Clone::clone) {
-        sidebar.set_visible((docked && !cfg!(target_os = "macos")).into());
-    }
     place_card();
     place_reveal();
-    #[cfg(target_os = "macos")]
     {
         if let Some(window) = win().window.with_borrow(Clone::clone) {
-            crate::mac::sidebar_shown(window.window_handle(), docked);
+            crate::system::sidebar_shown(window.window_handle(), docked);
         }
     }
 }
@@ -390,9 +377,8 @@ pub(super) fn shift_card(offset: u32) {
         return;
     }
     widen_for_library(false);
-    #[cfg(target_os = "macos")]
     if let Some(view) = card_window() {
-        crate::mac::shift(view, f64::from(offset));
+        crate::system::shift(view, f64::from(offset));
     }
 }
 
@@ -402,9 +388,8 @@ pub(super) fn show_library() {
         return;
     }
     widen_for_library(true);
-    #[cfg(target_os = "macos")]
     if let Some(view) = card_window() {
-        crate::mac::shift(view, 0.0);
+        crate::system::shift(view, 0.0);
     }
 }
 
@@ -438,14 +423,12 @@ fn relayout_library() {
     if let Some(sidebar) = win().sidebar.with_borrow(Clone::clone) {
         sidebar.invalidate_layout();
     }
-    #[cfg(target_os = "macos")]
     place_native_sidebar();
     place_card();
 }
 
 /// The native card holding the pages, once the card has shown (send_panes).
-#[cfg(target_os = "macos")]
-fn card_window() -> Option<*mut std::ffi::c_void> {
+fn card_window() -> Option<crate::native::View> {
     win().card_view.get()
 }
 
@@ -461,14 +444,11 @@ pub(super) fn place_reveal() {
         .with_borrow(|window| window.as_ref().map(|w| w.size()));
     let Some(size) = size else { return };
     reveal.set_bounds(Some(&mode.layout(&size).reveal));
-    reveal.set_visible((mode != SidebarMode::Shown && !cfg!(target_os = "macos")).into());
-    #[cfg(target_os = "macos")]
     place_native_sidebar();
 }
 
 /// Puts the native sidebar where the web one would be: docked at the window's left edge, or
 /// floating above the page; in neither while hidden.
-#[cfg(target_os = "macos")]
 fn place_native_sidebar() {
     let (Some(size), Some(reveal)) = (
         win()
@@ -547,8 +527,7 @@ fn slide_card(from: Option<Rect>) {
     let (Some(from), Some(reveal)) = (from, win().reveal.with_borrow(Clone::clone)) else {
         return;
     };
-    #[cfg(target_os = "macos")]
-    if crate::mac::reduce_motion() {
+    if crate::system::reduce_motion() {
         return;
     }
     let slide = Slide {
@@ -595,7 +574,6 @@ pub(super) fn set_window_colors(card_color: u32, grain: f64, colors: &[u32]) {
 /// Tells the native interface where the card is, which shades the window around it and washes it
 /// while it shows no page; a split's pages are cards of their own.
 pub(super) fn send_empty_card() {
-    #[cfg(target_os = "macos")]
     {
         let alone = !fills_window() && split_shown().is_none();
         crate::native::card(

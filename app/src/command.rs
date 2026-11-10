@@ -629,6 +629,7 @@ pub struct HitTarget {
 }
 
 impl HitTarget {
+    #[cfg(any(target_os = "macos", test))]
     pub fn contains(&self, x: f64, y: f64) -> bool {
         (self.x..self.x + self.width).contains(&x) && (self.y..self.y + self.height).contains(&y)
     }

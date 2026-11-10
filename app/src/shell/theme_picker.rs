@@ -23,8 +23,7 @@ pub(super) fn show_theme_picker(id: SpaceId, beside: Option<(i32, i32)>) {
     };
     let detail = json!({ "space": id, "theme": theme });
     dispatch(&win().theme_view, "arbalete:theme", &detail.to_string());
-    #[cfg(target_os = "macos")]
-    win().theme_at.set(crate::mac::pointer_y());
+    win().theme_at.set(crate::system::pointer_y());
     win().theme_beside.set(beside);
     controller.set_visible(1);
     place_theme_picker();

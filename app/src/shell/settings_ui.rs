@@ -43,7 +43,6 @@ pub(super) fn set_developer_mode(site: String, on: bool) {
 /// front when it is already open. Its page asks for the settings once it listens
 /// (Command::SettingsReady).
 pub(super) fn show_settings(pane: Option<&str>) {
-    #[cfg(target_os = "macos")]
     {
         crate::native::settings(true, pane);
         send_settings();
@@ -52,7 +51,6 @@ pub(super) fn show_settings(pane: Option<&str>) {
 
 /// Closes the settings window, if it is open.
 pub(super) fn close_settings() {
-    #[cfg(target_os = "macos")]
     crate::native::settings(false, None);
 }
 
@@ -93,8 +91,7 @@ pub(super) fn send_settings() {
     });
     // Like Arc's, the setting says when another app has ⌥⌘N.
     let taken = settings.little_hotkey && !LITTLE_HOTKEY.get();
-    #[cfg(target_os = "macos")]
-    let defaults = crate::mac::default_shortcuts();
+    let defaults = crate::system::default_shortcuts();
     let priorities: std::collections::BTreeMap<_, _> = defaults
         .keys()
         .map(|id| (id.clone(), settings::default_priority(id)))
@@ -105,8 +102,7 @@ pub(super) fn send_settings() {
 
 /// Gives the menu's shortcuts the keys the settings changed.
 pub fn apply_shortcuts() {
-    #[cfg(target_os = "macos")]
-    crate::mac::apply_shortcuts(&app_settings());
+    crate::system::apply_shortcuts(&app_settings());
 }
 
 /// Changes a shortcut from the settings, saves it, and applies it to the menu.
@@ -143,7 +139,6 @@ pub(super) fn edit_shortcut(edit: ShortcutEdit) {
 
 /// Registers ⌥⌘N as the setting says, which another app may already have.
 pub(super) fn apply_little_hotkey() {
-    #[cfg(target_os = "macos")]
     LITTLE_HOTKEY.set(crate::native::little_hotkey(app_settings().little_hotkey));
 }
 

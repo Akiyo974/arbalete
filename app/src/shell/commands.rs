@@ -9,7 +9,6 @@ pub fn post(command: Command) {
 
 /// Runs a command from the UI or a menu, on the UI thread.
 /// Runs a command from the window `window`.
-#[cfg(target_os = "macos")]
 pub fn run_in(window: u32, command: Command) {
     focus(window);
     run(command);
@@ -17,7 +16,6 @@ pub fn run_in(window: u32, command: Command) {
 
 pub fn run(command: Command) {
     run_command(command);
-    #[cfg(target_os = "macos")]
     sync_native_surfaces();
 }
 
@@ -179,7 +177,7 @@ fn run_command(command: Command) {
             let url = STATE
                 .with_borrow_mut(|state| active_tab(&mut state.sidebar).map(|tab| tab.url.clone()));
             if let Some(url) = url {
-                crate::mac::copy(&shown_url(&url));
+                crate::system::copy(&shown_url(&url));
                 toast(json!({ "text": "Copied Current URL", "icon": "link" }));
             }
         }
@@ -200,7 +198,7 @@ fn run_command(command: Command) {
                 active_tab(&mut state.sidebar).map(|tab| format!("[{}]({})", tab.label(), tab.url))
             });
             if let Some(link) = link {
-                crate::mac::copy(&link);
+                crate::system::copy(&link);
                 toast(json!({ "text": "Copied Current URL", "icon": "link" }));
             }
         }
@@ -218,8 +216,7 @@ fn run_command(command: Command) {
         (Command::Menu(target), _) => show_menu(target),
         (Command::TabsMenu(ids), _) => {
             let entries = STATE.with_borrow(|state| menu::tabs_menu(&state.sidebar, &ids));
-            #[cfg(target_os = "macos")]
-            crate::mac::pop_up(entries);
+            crate::system::pop_up(entries);
         }
         (Command::MenuTargets { view, targets }, _) => {
             win()
@@ -315,7 +312,6 @@ fn run_command(command: Command) {
         (Command::ShowSettings(pane), _) => show_settings(pane.as_deref()),
         (Command::ToggleToolbar, _) => toggle_toolbar(),
         // Like Arc's, the menu opens a Command Bar of its own, which opens the window.
-        #[cfg(target_os = "macos")]
         (Command::NewLittle(None), _) => crate::native::little_bar(),
         (Command::NewLittle(url), _) => open_link(url),
         (Command::NewWindow, _) => new_window(),
@@ -495,11 +491,10 @@ fn run_command(command: Command) {
             let extension = extensions::list(profile).into_iter().find(|e| e.id == id);
             let Some(extension) = extension else { return };
             // Chromium confirms it otherwise.
-            #[cfg(target_os = "macos")]
             if extensions::removes_itself(profile, &id) {
                 let question = format!("Remove “{}”?", extension.name);
                 let detail = "Its data in this profile is deleted too.";
-                if !crate::mac::confirm(&question, detail, "Remove") {
+                if !crate::system::confirm(&question, detail, "Remove") {
                     return;
                 }
             }

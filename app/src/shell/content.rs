@@ -62,7 +62,7 @@ wrap_keyboard_handler! {
     struct ContentKeyboard {}
 
     impl KeyboardHandler {
-        fn on_pre_key_event(&self, browser: Option<&mut Browser>, event: Option<&KeyEvent>, os_event: *mut u8, _is_keyboard_shortcut: Option<&mut i32>) -> i32 {
+        fn on_pre_key_event(&self, browser: Option<&mut Browser>, event: Option<&KeyEvent>, os_event: crate::system::OsEvent<'_>, _is_keyboard_shortcut: Option<&mut i32>) -> i32 {
             let Some(event) = event else { return 0 };
             if event.type_ != KeyEventType::RAWKEYDOWN {
                 return 0;
@@ -75,15 +75,11 @@ wrap_keyboard_handler! {
                 host.exit_fullscreen(1);
                 return 1;
             }
-            if os_event.is_null() {
-                return 0;
-            }
-            #[cfg(target_os = "macos")]
-            return crate::mac::take_shortcut(os_event.cast(), shortcut_priority).into();
+            crate::system::take_shortcut(event, os_event, shortcut_priority).into()
         }
 
         /// The page left the key: a shortcut it was offered goes to the menu.
-        fn on_key_event(&self, _browser: Option<&mut Browser>, event: Option<&KeyEvent>, _os_event: *mut u8) -> i32 {
+        fn on_key_event(&self, _browser: Option<&mut Browser>, event: Option<&KeyEvent>, _os_event: crate::system::OsEvent<'_>) -> i32 {
             if event.is_some_and(|event| event.type_ == KeyEventType::RAWKEYDOWN) {
                 OFFERED_SHORTCUT.take();
             }
@@ -119,8 +115,7 @@ fn press_again() {
         return;
     };
     // As long as the toast shows (app/macos/Toast.swift).
-    #[cfg(target_os = "macos")]
-    crate::mac::wait_second_press(5.0);
+    crate::system::wait_second_press(5.0);
     toast(json!({
         "key": "press-again",
         "text": format!("Press Again to {}", action.trim_end_matches('…')),
@@ -520,8 +515,7 @@ wrap_context_menu_handler! {
                 COPY_LINK => perform(Action::CopyLink(link)),
                 OPEN_IMAGE => perform(Action::Run(Command::Open(image))),
                 SAVE_IMAGE => download(image),
-                #[cfg(target_os = "macos")]
-                COPY_IMAGE => crate::mac::copy_image(&image),
+                COPY_IMAGE => crate::system::copy_image(&image),
                 COPY_IMAGE_ADDRESS => perform(Action::CopyLink(image)),
                 SEARCH_IMAGE => {
                     let url = format!("https://lens.google.com/uploadbyurl?url={}", arbalete_core::search::encode(&image));
@@ -886,7 +880,6 @@ wrap_load_handler! {
                 }
                 return send_peek();
             }
-            #[cfg(target_os = "macos")]
             cover_revived(browser.as_deref(), is_loading == 1);
             if let Some(tab) = browser.as_deref().and_then(page_tab) {
                 pane_changed(tab);
@@ -928,8 +921,7 @@ wrap_focus_handler! {
             let Some(tab) = browser.and_then(|browser| page_tab(browser)) else {
                 return;
             };
-            #[cfg(target_os = "macos")]
-            if !crate::mac::mouse_down() {
+            if !crate::system::mouse_down() {
                 return;
             }
             if win().shown.get() != Some(tab) && win().split.borrow().0.contains(&tab) {
@@ -951,8 +943,7 @@ wrap_focus_handler! {
             if source != FocusSource::SYSTEM || !hidden || selected {
                 return 0;
             }
-            #[cfg(target_os = "macos")]
-            crate::mac::activate();
+            crate::system::activate();
             select_tab(tab);
             focus_page(tab);
             1
@@ -993,7 +984,6 @@ wrap_life_span_handler! {
             let Some(url) = target_url.map(CefString::to_string).filter(|url| popup_allowed(user_gesture) && page_may_open(&frame_url(frame), url)) else {
                 return 1;
             };
-            #[cfg(target_os = "macos")]
             if let (Some(profile), Some(window_info), Some(client)) = (self.opener, window_info, client)
                 && target_disposition == WindowOpenDisposition::NEW_POPUP
                 && !is_chrome_page(&url)
@@ -1001,17 +991,14 @@ wrap_life_span_handler! {
                 let size = popup_features
                     .filter(|features| features.width_set == 1 && features.height_set == 1)
                     .map(|features| (features.width, features.height));
-                let Some((id, view)) = open_popup(size) else { return 1 };
-                let (width, height) = size.unwrap_or((800, 600));
-                *window_info = WindowInfo {
-                    parent_view: view,
-                    bounds: Rect { x: 0, y: 0, width, height },
-                    runtime_style: RuntimeStyle::ALLOY,
-                    ..Default::default()
-                };
-                *client = Some(ContentClient::new(profile, true, Some(id)));
-                OPENING_POPUPS.with_borrow_mut(|popups| popups.push((popup_id, id)));
-                return 0;
+                // Without a Little Arbalete window for it, it opens as a tab.
+                if let Some((id, view)) = open_popup(size) {
+                    let (width, height) = size.unwrap_or((800, 600));
+                    *window_info = crate::native::page_in(view, width, height);
+                    *client = Some(ContentClient::new(profile, true, Some(id)));
+                    OPENING_POPUPS.with_borrow_mut(|popups| popups.push((popup_id, id)));
+                    return 0;
+                }
             }
             if target_disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB {
                 open_background_tab(&url);
@@ -1027,7 +1014,6 @@ wrap_life_span_handler! {
                 let at = popups.iter().position(|&(id, _)| id == popup_id)?;
                 Some(popups.remove(at).1)
             });
-            #[cfg(target_os = "macos")]
             if let Some(little) = popup {
                 crate::native::little_closed(little);
             }
@@ -1035,7 +1021,6 @@ wrap_life_span_handler! {
 
         fn on_after_created(&self, browser: Option<&mut Browser>) {
             OPEN_BROWSERS.set(OPEN_BROWSERS.get() + 1);
-            #[cfg(target_os = "macos")]
             if let (Some(id), Some(profile), Some(browser)) = (self.popup, self.opener, browser.as_deref()) {
                 OPENING_POPUPS.with_borrow_mut(|popups| popups.retain(|&(_, little)| little != id));
                 popup_created(id, profile, browser);
@@ -1049,7 +1034,6 @@ wrap_life_span_handler! {
         fn do_close(&self, browser: Option<&mut Browser>) -> i32 {
             if self.profile.is_none() {
                 // A Little Arbalete window's page closes its window; Peek's leaves its card.
-                #[cfg(target_os = "macos")]
                 if let Some(browser) = browser.as_deref() {
                     let replaced = REPLACED_LITTLE_PAGES.with_borrow_mut(|pages| {
                         let at = pages.iter().position(|&page| page == browser.identifier())?;

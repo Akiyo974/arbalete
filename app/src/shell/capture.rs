@@ -178,7 +178,6 @@ fn capture_answered(message: &str) {
     else {
         return;
     };
-    #[cfg(target_os = "macos")]
     if let Some(frame) = page_frame() {
         crate::native::captured(win().id, &picture, mode as u32, &frame, &blocks);
     }

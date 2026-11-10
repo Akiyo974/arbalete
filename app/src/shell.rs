@@ -4,8 +4,8 @@
 //! relies on is implemented explicitly.
 
 use crate::command::{
-    Button, ButtonView, Command, DownloadAction, ExtensionTarget, HitTarget, InspectorPanel,
-    LittleAction, PeekAction, Setting, ShortcutEdit, SiteData, Target, Zoom,
+    Button, Command, DownloadAction, ExtensionTarget, HitTarget, InspectorPanel, LittleAction,
+    PeekAction, Setting, ShortcutEdit, SiteData, Target, Zoom,
 };
 use crate::downloads::{self, Download};
 use crate::extensions;
@@ -82,7 +82,9 @@ use find::*;
 use history_ui::*;
 use import_ui::*;
 use inspector::*;
-pub use layout::*;
+use layout::*;
+#[cfg(target_os = "macos")]
+pub use layout::{is_over_sidebar, scroll};
 pub use little::*;
 pub use menus::*;
 pub use onboarding::onboarding_shown;
@@ -321,7 +323,6 @@ impl Spot {
 
 /// Tells the interface where its panels show, once the current work is done.
 fn surfaces_changed() {
-    #[cfg(target_os = "macos")]
     if !SURFACES_DUE.replace(true) {
         post_task(ThreadId::UI, Some(&mut SyncSurfaces::new()));
     }
@@ -333,7 +334,6 @@ wrap_task! {
     impl Task {
         fn execute(&self) {
             SURFACES_DUE.set(false);
-            #[cfg(target_os = "macos")]
             in_each_window(sync_native_surfaces);
         }
     }
@@ -341,7 +341,6 @@ wrap_task! {
 
 /// What a window holds of its own: its views, the page it shows and its panels' state.
 /// A main window: the native interface's on macOS, CEF's elsewhere.
-#[cfg(target_os = "macos")]
 type MainWindow = crate::native::Window;
 
 struct Win {
@@ -359,7 +358,7 @@ struct Win {
     fresh: Cell<bool>,
     /// The native card holding its pages, once the card has shown (send_panes), which a picture of
     /// the page covers while another window shows it.
-    card_view: Cell<Option<*mut std::ffi::c_void>>,
+    card_view: Cell<Option<crate::native::View>>,
     window: RefCell<Option<MainWindow>>,
     /// Beside the card, at the window's left edge. It must not reach under the card: a web view
     /// below the overlays receives no real mouse event on macOS, only synthesized ones.
@@ -368,7 +367,6 @@ struct Win {
     /// (card_rect).
     sliding_card: RefCell<Option<Rect>>,
     /// Where the pages show, as last sent to the native interface (send_panes).
-    #[cfg(target_os = "macos")]
     panes_sent: RefCell<Option<String>>,
     /// The tab whose page the window shows.
     shown: Cell<Option<NodeId>>,
@@ -462,7 +460,6 @@ impl Win {
             window: RefCell::new(None),
             sidebar: RefCell::new(None),
             sliding_card: RefCell::new(None),
-            #[cfg(target_os = "macos")]
             panes_sent: RefCell::new(None),
             shown: Cell::new(None),
             overlay_view: RefCell::new(None),
@@ -979,14 +976,12 @@ fn show_library_page() {
 /// Gives one of the native interface's surfaces in the window, by name, like the Command Bar's,
 /// "overlay", an event: its name and its JSON detail.
 fn send_surface(surface: &str, name: &str, detail: &str) {
-    #[cfg(target_os = "macos")]
     crate::native::event(win().id, surface, name, detail);
 }
 
 /// Gives the native interface's surface standing for one of the window's places, like the
 /// sidebar's, an event: its name and its JSON detail.
 fn dispatch<T>(view: &RefCell<Option<T>>, name: &str, detail: &str) {
-    #[cfg(target_os = "macos")]
     if let Some(surface) = native_surface(std::ptr::from_ref(view).cast()) {
         crate::native::event(win().id, surface, name, detail);
     }
@@ -995,7 +990,6 @@ fn dispatch<T>(view: &RefCell<Option<T>>, name: &str, detail: &str) {
 /// The native interface's surface that stands for a web view, which gets its events. The
 /// revealed sidebar's events also go to the docked one's (shown_sidebar), which the native
 /// sidebar stands for in every mode.
-#[cfg(target_os = "macos")]
 fn native_surface(view: *const ()) -> Option<&'static str> {
     let current = win();
     let place = |cell: &RefCell<Option<Panel>>| std::ptr::from_ref(cell).cast::<()>();
@@ -1018,7 +1012,6 @@ fn native_surface(view: *const ()) -> Option<&'static str> {
 
 /// Shows the native panels where the app places them (Spot), after every command and layout,
 /// and the pages.
-#[cfg(target_os = "macos")]
 fn sync_native_surfaces() {
     let current = win();
     for (view, overlay) in [
@@ -1041,7 +1034,6 @@ fn sync_native_surfaces() {
 }
 
 /// Shows a native panel where its spot is, if it shows.
-#[cfg(target_os = "macos")]
 fn mirror(view: &RefCell<Option<Panel>>, overlay: &Spot) {
     if let Some(surface) = native_surface(std::ptr::from_ref(view).cast()) {
         crate::native::surface(

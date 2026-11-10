@@ -26,8 +26,7 @@ fn suspend_delays(pressure: MemoryPressure, low_power: bool) -> (i64, i64) {
 
 /// The suspension delays as the system stands now.
 fn current_suspend_delays() -> (i64, i64) {
-    #[cfg(target_os = "macos")]
-    return suspend_delays(crate::mac::memory_pressure(), crate::mac::low_power());
+    suspend_delays(crate::system::memory_pressure(), crate::system::low_power())
 }
 
 /// Like Arc's, a toast tells that battery saving starts or stops, while it pauses hidden pages
@@ -107,7 +106,6 @@ pub(super) fn snapshot_shown() {
 
 /// Covers a page opening again after it was unloaded with its picture as soon as it is made, or
 /// takes the picture away once it has loaded.
-#[cfg(target_os = "macos")]
 pub(super) fn cover_revived(browser: Option<&Browser>, loading: bool) {
     let Some(browser) = browser else { return };
     // A page being made, which its view does not hold yet, is MAKING's.
@@ -116,11 +114,11 @@ pub(super) fn cover_revived(browser: Option<&Browser>, loading: bool) {
         return;
     };
     if !loading {
-        crate::mac::uncover_page(host.window_handle());
+        crate::system::uncover_page(host.window_handle());
     } else if REVIVED.with_borrow_mut(|revived| revived.remove(&tab))
         && let Some(jpeg) = SNAPSHOTS.with_borrow(|snapshots| snapshots.get(&tab).cloned())
     {
-        crate::mac::cover_page(host.window_handle(), &jpeg, None);
+        crate::system::cover_page(host.window_handle(), &jpeg, None);
     }
 }
 

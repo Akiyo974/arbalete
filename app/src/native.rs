@@ -3,7 +3,7 @@
 
 use crate::command::Command;
 use arbalete_core::store::Place;
-use cef::{Rect, Size};
+use cef::{Rect, RuntimeStyle, Size, WindowInfo};
 use std::ffi::{CStr, CString, c_char, c_void};
 
 unsafe extern "C" {
@@ -164,6 +164,24 @@ unsafe extern "C" {
     );
 }
 
+/// What CEF draws a page in: an NSView.
+pub type View = cef::sys::cef_window_handle_t;
+
+/// A browser drawn in the view `view`, `width` by `height` until its container sizes it.
+pub fn page_in(view: View, width: i32, height: i32) -> WindowInfo {
+    WindowInfo {
+        parent_view: view,
+        bounds: Rect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        },
+        runtime_style: RuntimeStyle::ALLOY,
+        ..Default::default()
+    }
+}
+
 /// A main window, which the native interface makes and keeps (app/macos/MainWindow.swift), as
 /// the app knows it, by its id: as CEF's window would, it tells its size and bounds, from the
 /// main screen's top left corner, shows, comes in front and closes.
@@ -260,7 +278,7 @@ impl Window {
     }
 
     /// Its NSWindow, for app/src/mac.rs.
-    pub fn window_handle(&self) -> *mut c_void {
+    pub fn window_handle(&self) -> View {
         // SAFETY: a plain value.
         unsafe { arbalete_ui_window_handle(self.0) }
     }
@@ -363,7 +381,7 @@ pub fn surface(window: u32, name: &str, shown: bool, frame: &Rect) {
 
 /// Opens the Little Arbalete window `id`, with its bar, its page `size` or the usual size, and
 /// returns the view CEF makes its page's browser in.
-pub fn open_little(id: u32, size: Option<(i32, i32)>) -> Option<*mut c_void> {
+pub fn open_little(id: u32, size: Option<(i32, i32)>) -> Option<View> {
     let (width, height) = size.unwrap_or_default();
     // SAFETY: plain values; the view lives until little_closed.
     let view = unsafe { arbalete_ui_open_little(id, width, height) };
@@ -391,14 +409,14 @@ pub fn little_bar() {
 }
 
 /// The view the Little Arbalete window `id`'s page is drawn in, which CEF makes a page in.
-pub fn little_page(id: u32) -> Option<*mut c_void> {
+pub fn little_page(id: u32) -> Option<View> {
     // SAFETY: a plain value; the view lives until little_closed.
     let view = unsafe { arbalete_ui_little_page(id) };
     (!view.is_null()).then_some(view)
 }
 
 /// Takes a Little Arbalete window's page out of it, its browser, whose view is `view`, closing.
-pub fn little_page_closed(view: *mut c_void) {
+pub fn little_page_closed(view: View) {
     // SAFETY: CEF's view of a browser closing, which the call only compares.
     unsafe { arbalete_ui_little_page_closed(view) };
 }
@@ -454,7 +472,7 @@ pub fn split_handles(window: u32, stacked: bool, frames: &[cef::Rect]) {
 
 /// Shows the pages of a window as `panes` (JSON) lays them out: where its card is and where each
 /// page shows in it, with its bar. Returns the card's content view, once the card shows.
-pub fn panes(window: u32, panes: &str) -> Option<*mut std::ffi::c_void> {
+pub fn panes(window: u32, panes: &str) -> Option<View> {
     let panes = CString::new(panes).unwrap_or_default();
     // SAFETY: a C string, which the call reads before returning.
     let card = unsafe { arbalete_ui_panes(window, panes.as_ptr()) };
@@ -463,7 +481,7 @@ pub fn panes(window: u32, panes: &str) -> Option<*mut std::ffi::c_void> {
 
 /// The view a tab's page is drawn in, hidden in the window `window` until it shows, which CEF
 /// makes the page's browser in.
-pub fn page_view(window: u32, tab: i64) -> Option<*mut std::ffi::c_void> {
+pub fn page_view(window: u32, tab: i64) -> Option<View> {
     // SAFETY: plain values; the view lives until page_closed.
     let view = unsafe { arbalete_ui_page_view(window, tab) };
     (!view.is_null()).then_some(view)
@@ -471,7 +489,7 @@ pub fn page_view(window: u32, tab: i64) -> Option<*mut std::ffi::c_void> {
 
 /// Takes a page's container away, its browser, whose view is `view`, closing: the view goes with
 /// it, which destroys the browser.
-pub fn page_closed(view: *mut std::ffi::c_void) {
+pub fn page_closed(view: View) {
     // SAFETY: CEF's view of a browser closing, which the call only compares.
     unsafe { arbalete_ui_page_closed(view) };
 }
@@ -496,14 +514,14 @@ pub fn peek_easel(window: u32, tab: i64, title: &str, easel: &str) -> bool {
 
 /// The view a live capture's page is drawn in, `id` on the Easel `easel`, which the board holds
 /// while it shows it.
-pub fn live_capture_view(easel: i64, id: i64) -> Option<*mut std::ffi::c_void> {
+pub fn live_capture_view(easel: i64, id: i64) -> Option<View> {
     // SAFETY: plain values; the view lives until live_capture_closed.
     let view = unsafe { arbalete_ui_live_capture_view(easel, id) };
     (!view.is_null()).then_some(view)
 }
 
 /// Takes away a live capture's page's view, `view`, its browser closing.
-pub fn live_capture_closed(view: *mut std::ffi::c_void) {
+pub fn live_capture_closed(view: View) {
     // SAFETY: CEF's view of a browser closing, which the call only compares.
     unsafe { arbalete_ui_live_capture_closed(view) };
 }
@@ -523,7 +541,7 @@ pub fn hand_pages_over(from: u32, to: u32) {
 
 /// The view a tab's page's developer tools are drawn in, docked under the page, which CEF makes
 /// their browser in.
-pub fn tools_view(tab: i64) -> Option<*mut std::ffi::c_void> {
+pub fn tools_view(tab: i64) -> Option<View> {
     // SAFETY: a plain value; the view lives until tools_closed.
     let view = unsafe { arbalete_ui_tools_view(tab) };
     (!view.is_null()).then_some(view)
@@ -542,7 +560,7 @@ pub fn tools_docked(tab: i64, docked: bool) {
 }
 
 /// Takes developer tools away, their browser, whose view is `view`, closing.
-pub fn tools_closed(view: *mut std::ffi::c_void) {
+pub fn tools_closed(view: View) {
     // SAFETY: CEF's view of a browser closing, which the call only compares.
     unsafe { arbalete_ui_tools_closed(view) };
 }
@@ -555,7 +573,7 @@ pub fn focus_page(tab: i64) {
 
 /// Shows `text`, a hovered link's address, at the bottom of the page CEF draws at `view`, or hides
 /// it without text: at once when `instant`, as the page goes, or after a moment otherwise.
-pub fn page_status(view: *mut c_void, text: &str, instant: bool) {
+pub fn page_status(view: View, text: &str, instant: bool) {
     let text = CString::new(text).unwrap_or_default();
     // SAFETY: CEF's view of a live browser, and a C string, which the call reads before returning.
     unsafe { arbalete_ui_page_status(view, text.as_ptr(), instant) };
@@ -580,7 +598,7 @@ pub fn peek(window: u32, frame: Option<cef::Rect>) {
 
 /// The view Peek's page is drawn in, in the window `window`, while Peek shows: CEF makes the
 /// page's browser in it.
-pub fn peek_view(window: u32) -> Option<*mut std::ffi::c_void> {
+pub fn peek_view(window: u32) -> Option<View> {
     // SAFETY: a plain value; the view lives until peek_closed.
     let view = unsafe { arbalete_ui_peek_view(window) };
     (!view.is_null()).then_some(view)
@@ -597,7 +615,7 @@ pub fn peek_bar(window: u32, url: &str, color: &str, back: bool, forward: bool, 
 
 /// A new extension popup's view, a window of its own for the window `window`, hidden until
 /// extension_popup_show: CEF makes the page's browser in it.
-pub fn extension_popup_view(window: u32) -> Option<*mut std::ffi::c_void> {
+pub fn extension_popup_view(window: u32) -> Option<View> {
     // SAFETY: a plain value; the view lives until extension_popup_closed.
     let view = unsafe { arbalete_ui_extension_popup_view(window) };
     (!view.is_null()).then_some(view)
@@ -624,7 +642,7 @@ pub fn extension_popup_show(window: u32, button: Option<&Rect>, size: &Size) {
 
 /// Takes away the extension popup whose page's view is `view`, its browser closing, which
 /// destroys it.
-pub fn extension_popup_closed(view: *mut std::ffi::c_void) {
+pub fn extension_popup_closed(view: View) {
     // SAFETY: the interface only compares the address.
     unsafe { arbalete_ui_extension_popup_closed(view) };
 }

@@ -127,7 +127,6 @@ pub(super) fn easel_view(tab: NodeId, number: u64) -> Option<()> {
         return Some(());
     }
     let detail = board_detail(number);
-    #[cfg(target_os = "macos")]
     if !crate::native::easel(win().id, tab_number(tab), &detail.to_string()) {
         return None;
     }
@@ -162,7 +161,6 @@ pub(super) fn peek_easel(tab: NodeId, focus: Option<u64>) {
     else {
         return;
     };
-    #[cfg(target_os = "macos")]
     {
         let title = STATE.with_borrow_mut(|state| {
             let tab = state.sidebar.tab_mut(tab)?;
@@ -188,7 +186,6 @@ pub(super) fn easel_peeked() -> bool {
 /// Closes Peek's Easel, its board given back to its tab: the Easel's tab, if Peek showed one.
 pub(super) fn close_peek_easel() -> Option<NodeId> {
     let tab = PEEK_EASEL.take()?;
-    #[cfg(target_os = "macos")]
     {
         crate::native::peek(win().id, None);
         crate::native::peek_closed(win().id);
@@ -212,7 +209,6 @@ pub(super) fn prune_easel_views() {
     });
     for tab in gone {
         EASEL_VIEWS.with_borrow_mut(|views| views.remove(&tab));
-        #[cfg(target_os = "macos")]
         crate::native::easel_closed(tab_number(tab));
     }
 }
@@ -262,22 +258,15 @@ pub(super) fn show_live_capture(
         tab.and_then(|tab| sidebar.profile_of(tab))
             .unwrap_or(sidebar.displayed().profile)
     });
-    #[cfg(target_os = "macos")]
-    let info = WindowInfo {
-        parent_view: match crate::native::live_capture_view(number as i64, id as i64) {
+    // Any size: the board gives the page the size it was captured at.
+    let info = crate::native::page_in(
+        match crate::native::live_capture_view(number as i64, id as i64) {
             Some(view) => view,
             None => return,
         },
-        // Any size: the board gives the page the size it was captured at.
-        bounds: Rect {
-            x: 0,
-            y: 0,
-            width: 800,
-            height: 600,
-        },
-        runtime_style: RuntimeStyle::ALLOY,
-        ..Default::default()
-    };
+        800,
+        600,
+    );
     // Once the profile's web data is ready, like a tab's page.
     let mut context = match CONTEXTS.with_borrow(|contexts| contexts.get(&profile).cloned()) {
         Some(Some(context)) => context,
@@ -400,8 +389,7 @@ wrap_task! {
         /// Takes a closing live capture's page's view out of the board, which destroys its
         /// browser.
         fn execute(&self) {
-            #[cfg(target_os = "macos")]
-            crate::native::live_capture_closed(self.view as *mut std::ffi::c_void);
+            crate::native::live_capture_closed(self.view as crate::native::View);
         }
     }
 }

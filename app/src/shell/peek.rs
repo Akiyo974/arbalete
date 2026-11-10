@@ -32,24 +32,16 @@ pub(super) fn peek(url: &str) {
     };
     let frame = peek_frame(&window.size());
     // Its card first, which the page is drawn in, with its scrim and controls.
-    #[cfg(target_os = "macos")]
     crate::native::peek(win().id, Some(frame));
-    #[cfg(target_os = "macos")]
-    let info = WindowInfo {
-        parent_view: match crate::native::peek_view(win().id) {
+    // Any size: the card gives the page its own.
+    let info = crate::native::page_in(
+        match crate::native::peek_view(win().id) {
             Some(view) => view,
             None => return,
         },
-        // Any size: the card gives the page its own.
-        bounds: Rect {
-            x: 0,
-            y: 0,
-            width: 800,
-            height: 600,
-        },
-        runtime_style: RuntimeStyle::ALLOY,
-        ..Default::default()
-    };
+        800,
+        600,
+    );
     let profile = displayed_profile();
     let mut context = profile_context(profile);
     let Some(browser) = browser_host_create_browser_sync(
@@ -94,7 +86,6 @@ pub(super) fn send_peek() {
         .main_frame()
         .map(|frame| CefString::from(&frame.url()).to_string())
         .unwrap_or_default();
-    #[cfg(target_os = "macos")]
     crate::native::peek_bar(
         win().id,
         &shown_url(&url),
@@ -127,7 +118,6 @@ pub(super) fn place_peek() {
     let Some(frame) = size.as_ref().map(peek_frame) else {
         return;
     };
-    #[cfg(target_os = "macos")]
     if peek_shown() {
         crate::native::peek(win().id, Some(frame));
     }
@@ -148,7 +138,6 @@ pub(super) fn close_peek() {
         return;
     }
     let Some(peek) = PEEK.take() else { return };
-    #[cfg(target_os = "macos")]
     crate::native::peek(win().id, None);
     extensions::page_closed(peek.browser.identifier());
     // Its card's view goes as it closes (BrowserLifeSpan's do_close), which CEF would otherwise

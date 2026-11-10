@@ -39,7 +39,7 @@ pub struct Settings {
     pub ninth_sidebar_item: bool,
     /// ⌘1 to ⌘9 count the favorites before the Space's tabs.
     pub count_favorites: bool,
-    /// The shortcuts changed in the settings, by menu action (mac::apply_shortcuts).
+    /// The shortcuts changed in the settings, by menu action (system::apply_shortcuts).
     pub shortcuts: BTreeMap<String, ShortcutOverride>,
     /// Where the recent items over the library's button come from, like Arc's "Show media from:":
     /// "documents", "desktop", "screenshots", "captures" and "downloads". The folders ask macOS

@@ -157,7 +157,6 @@ pub(super) fn preview_pane(index: Option<usize>) {
 /// Tells the native interface where the card is and where its pages show, a page alone or a
 /// split's, and how each stands, for their containers, bars and the focused one's outline.
 pub(super) fn send_panes() {
-    #[cfg(target_os = "macos")]
     {
         // A page in full screen shows alone.
         let tabs = if page_full_screen() {
@@ -257,9 +256,9 @@ pub(super) fn send_panes() {
             // A split's room between its pages shows the window; a page alone has the card's
             // corners.
             if tabs.is_empty() {
-                crate::mac::round_card(view, !square_card());
+                crate::system::round_card(view, !square_card());
             } else {
-                crate::mac::round_split(view);
+                crate::system::round_split(view);
             }
         }
         // Until the window can show the card, as it opens.
@@ -306,7 +305,6 @@ fn split_panes() -> Vec<(f64, f64)> {
 /// Puts the handles that resize a split's pages in the room between them, or takes them away
 /// without a split shown.
 pub(super) fn place_split_handles() {
-    #[cfg(target_os = "macos")]
     {
         let stacked = split_shown() == Some(true);
         let rects = split_rects();

@@ -28,6 +28,12 @@ idna = "1.1.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 
+# The Linux interface (app/src/gtk.rs, docs/decisions/0011-linux-interface.md): GTK 4, and its
+# X11 windows, which the pages' containers go in.
+[target.'cfg(target_os = "linux")'.dependencies]
+gdk4-x11 = "0.11.5"
+gtk4 = { version = "0.11.5", features = ["gio_v2_80", "v4_14"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 # On Windows the sandbox needs a separate bootstrap executable: not set up yet.
 cef = { workspace = true, features = ["sandbox"] }

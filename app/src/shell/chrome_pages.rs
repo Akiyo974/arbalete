@@ -391,14 +391,12 @@ wrap_window_delegate! {
                 None => window.center_window(Some(&PERMISSION_SIZE)),
             }
             // Made invisible before it shows, then again once shown, in case showing undid it.
-            #[cfg(target_os = "macos")]
             if self.hidden {
-                crate::mac::hide_window(window.window_handle());
+                crate::system::hide_window(window.window_handle());
             }
             window.show();
-            #[cfg(target_os = "macos")]
             if self.hidden {
-                crate::mac::hide_window(window.window_handle());
+                crate::system::hide_window(window.window_handle());
             }
             PERMISSION_WINDOW.set(Some(window));
         }
@@ -518,9 +516,8 @@ wrap_load_handler! {
         fn on_load_end(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, _http_status_code: i32) {
             if let (Some(browser), true) = (browser, frame.is_some_and(|frame| frame.is_main() == 1)) {
                 // The window exists for sure by now: hidden, it is made invisible again.
-                #[cfg(target_os = "macos")]
                 if let Some(host) = browser.host().filter(|_| PERMISSION_WINDOW_HIDDEN.get()) {
-                    crate::mac::hide_window(host.window_handle());
+                    crate::system::hide_window(host.window_handle());
                 }
                 extensions::chrome_task_page_loaded(browser);
             }
@@ -551,8 +548,7 @@ pub fn hide_strays(hide: bool) {
             .iter()
             .filter_map(Browser::host)
         {
-            #[cfg(target_os = "macos")]
-            crate::mac::hide_window(host.window_handle());
+            crate::system::hide_window(host.window_handle());
         }
     } else {
         post_delayed_task(ThreadId::UI, Some(&mut CloseStrays::new()), 2000);
@@ -566,9 +562,8 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            #[cfg(target_os = "macos")]
             if let Some(host) = self.browser.host().filter(|_| HIDE_STRAYS.get()) {
-                crate::mac::hide_window(host.window_handle());
+                crate::system::hide_window(host.window_handle());
             }
         }
     }

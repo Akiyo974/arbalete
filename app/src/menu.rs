@@ -11,7 +11,8 @@ use serde_json::json;
 pub enum Entry {
     Item(Item),
     Submenu(String, Vec<Entry>),
-    /// The system's Share submenu for a link, its services with their icons, like Arc's.
+    /// The system's Share submenu for a link, its services with their icons, like Arc's; an item
+    /// sharing it by email on Linux, which has no share menu.
     Share(String),
     Separator,
 }
@@ -224,7 +225,7 @@ fn tab_menu(sidebar: &Sidebar, id: NodeId, tab: &Tab) -> Vec<Entry> {
     } else {
         vec![
             copy_link(&tab.url),
-            share(&tab.url),
+            Entry::Share(tab.url.clone()),
             Entry::Separator,
             rename,
             item("mute", mute, Action::Run(Command::ToggleMute(id))),
@@ -293,15 +294,6 @@ fn tab_menu(sidebar: &Sidebar, id: NodeId, tab: &Tab) -> Vec<Entry> {
         }));
     }
     menu
-}
-
-/// Like Arc's, the system's Share submenu for a link; a single item elsewhere.
-fn share(url: &str) -> Entry {
-    if cfg!(target_os = "macos") {
-        Entry::Share(url.to_string())
-    } else {
-        item("share", "Share…", Action::Share(url.to_string()))
-    }
 }
 
 /// A split row's menu, like Arc's: the split's own items, then each tab's as a submenu.

@@ -66,6 +66,33 @@ and name it in `.config/mise.local.toml`, which is not committed:
 ARBALETE_SIGN_IDENTITY = "Arbalete Dev"
 ```
 
+### Linux
+
+Arbalete runs on Linux too, x86-64, with an interface in GTK 4
+([decision 0011](docs/decisions/0011-linux-interface.md)): on X11, or XWayland on a Wayland desktop. It needs
+GTK 4.14 or later (Ubuntu 24.04, Fedora 40, Debian 13 or later) and its development files, then mise as above:
+
+```sh
+sudo apt install build-essential curl libgtk-4-dev   # Fedora: sudo dnf install gcc curl gtk4-devel
+mise install
+mise run setup       # download CEF for Linux to ~/cef
+mise run linux-run   # bundle the app in target/bundle/linux/arbalete and run it
+```
+
+Chromium's sandbox needs its helper to belong to root, as Chrome's packages install it. Once, after the first
+`mise run linux-run` (the next ones keep it):
+
+```sh
+sudo chown root:root target/bundle/linux/arbalete/chrome-sandbox
+sudo chmod 4755 target/bundle/linux/arbalete/chrome-sandbox
+```
+
+The Linux interface has the window, the sidebar (Spaces, favorites, pinned and today's tabs, folders, splits),
+the Command Bar, the bar above the page, the menus, the keyboard shortcuts with Ctrl for ⌘, and the welcome
+window. Not yet: the settings window, the library, Little Arbalete, Peek, Easels, the Boosts' editor, extension
+popups, the import assistant and the downloads panel. CEF's Linux build leaves out the proprietary codecs (H.264,
+AAC), which some sites need for video.
+
 ### Releasing
 
 `mise run release` bundles an optimized app, signed with `ARBALETE_SIGN_IDENTITY`, in

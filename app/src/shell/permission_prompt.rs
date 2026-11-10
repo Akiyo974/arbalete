@@ -204,7 +204,6 @@ pub(super) fn shows_page(browser: &Browser, window: u32) -> bool {
 
 /// Shows the window the first request of a page it shows in the permission prompt, at the top
 /// left of the card, over the page; or hides it. The requests of closed pages go.
-#[cfg(target_os = "macos")]
 pub(super) fn sync_permission_prompt() {
     PERMISSION_REQUESTS.with_borrow_mut(|requests| {
         requests.retain(|request| request.browser.is_valid() == 1);
