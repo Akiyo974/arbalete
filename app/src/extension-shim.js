@@ -121,8 +121,21 @@
     info && typeof info === "object" && info.populate ? { ...window_, tabs } : window_;
   patch("tabs", () => {
     const get = chrome.tabs.get.bind(chrome.tabs);
+    const query = chrome.tabs.query.bind(chrome.tabs);
+    // The extension's own pages in Chromium windows, like those chrome.windows.create opens, are
+    // found too, as in Chrome: an extension finds its window by its address to close it, like
+    // Bitwarden's once a passkey is used.
+    const own = chrome.runtime.getURL("");
+    const ownTabs = (info) =>
+      query(info).then(
+        (found) => found.filter((tab) => tab.url?.startsWith(own)),
+        () => [],
+      );
     Object.assign(chrome.tabs, {
-      query: (info = {}, ...rest) => reply(rest, tabs.filter((tab) => fits(tab, info))),
+      query: (info = {}, ...rest) =>
+        ownTabs(info).then((found) =>
+          reply(rest, [...tabs.filter((tab) => fits(tab, info)), ...found]),
+        ),
       get: (id, ...rest) => {
         const tab = tabs.find((tab) => tab.id === id);
         return tab ? reply(rest, tab) : get(id, ...rest);
