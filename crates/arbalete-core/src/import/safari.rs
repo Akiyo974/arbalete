@@ -270,6 +270,10 @@ mod tests {
             let file = dir.0.join(file);
             fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
         }
+        // Root reads a file whatever its permissions, as in a container: nothing is denied then.
+        if fs::read(dir.0.join("Bookmarks.plist")).is_ok() {
+            return;
+        }
         assert!(matches!(
             read_bookmarks(&dir.0),
             Err(Error::NeedsFullDiskAccess)
