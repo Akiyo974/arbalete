@@ -70,10 +70,13 @@ ARBALETE_SIGN_IDENTITY = "Arbalete Dev"
 
 Arbalete runs on Linux too, x86-64, with an interface in GTK 4
 ([decision 0011](docs/decisions/0011-linux-interface.md)): on X11, or XWayland on a Wayland desktop. It needs
-GTK 4.14 or later (Ubuntu 24.04, Fedora 40, Debian 13 or later) and its development files, then mise as above:
+GTK 4.14 or later (Ubuntu 24.04, Fedora 40, Debian 13 or later) and its development files, and the libraries
+Chromium draws with, which a desktop usually has but a minimal system, like WSL's Ubuntu on Windows, lacks.
+Then mise as above:
 
 ```sh
-sudo apt install build-essential curl libgtk-4-dev   # Fedora: sudo dnf install gcc curl gtk4-devel
+sudo apt install build-essential curl git libgtk-4-dev libnss3 libatk-bridge2.0-0 libxcomposite1 \
+  libxdamage1 libxrandr2 libgbm1 libasound2t64 libcups2 libxkbcommon0   # Fedora: gcc curl git gtk4-devel nss
 mise install
 mise run setup       # download CEF for Linux to ~/cef
 mise run linux-run   # bundle the app in target/bundle/linux/arbalete and run it
