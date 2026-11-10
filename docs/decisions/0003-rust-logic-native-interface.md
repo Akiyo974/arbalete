@@ -20,7 +20,7 @@ it out.
   the library, the Command Bar, the panels above the page and the settings. It gets the app's state and events as
   JSON (`app/src/native.rs`) and sends commands as JSON (`app/src/command.rs`), through a C interface.
 - **Linux and Windows** come later, with an interface of their own; how it shows the desktop through the window
-  is still open.
+  is still open. Linux's is GTK 4 ([0011](0011-linux-interface.md)).
 
 The web interface was removed once macOS went native.
 
