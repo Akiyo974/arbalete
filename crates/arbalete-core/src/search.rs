@@ -96,6 +96,54 @@ pub fn encode(text: &str) -> String {
         .collect()
 }
 
+/// The address typed text opens, as the Command Bar reads it (toURL in app/macos/CommandBar.swift):
+/// itself with a scheme, a host or an IP address with `https://`, localhost with `http://`, and
+/// none for words to search for.
+pub fn address(text: &str) -> Option<String> {
+    let text = text.trim();
+    let lower = text.to_ascii_lowercase();
+    let schemes = [
+        "http://",
+        "https://",
+        "file://",
+        "ftp://",
+        "chrome://",
+        "arbalete://",
+    ];
+    let prefixes = ["about:", "data:", "mailto:", "view-source:"];
+    if schemes
+        .iter()
+        .chain(&prefixes)
+        .any(|start| lower.starts_with(start))
+    {
+        return Some(text.to_string());
+    }
+    if text.is_empty() || text.contains(char::is_whitespace) {
+        return None;
+    }
+    let host = lower.split('/').next().unwrap_or_default();
+    let (name, port) = host.split_once(':').unwrap_or((host, ""));
+    if !port.chars().all(|c| c.is_ascii_digit()) || (host.contains(':') && port.is_empty()) {
+        return None;
+    }
+    if name == "localhost" {
+        return Some(format!("http://{text}"));
+    }
+    let labels: Vec<&str> = name.split('.').collect();
+    let ip = labels.len() == 4
+        && labels
+            .iter()
+            .all(|label| !label.is_empty() && label.chars().all(|c| c.is_ascii_digit()));
+    let domain = labels.len() > 1
+        && labels[..labels.len() - 1]
+            .iter()
+            .all(|label| !label.is_empty())
+        && labels.last().is_some_and(|top| {
+            top.len() >= 2 && top.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        });
+    (ip || domain).then(|| format!("https://{text}"))
+}
+
 /// The suggestions of an engine's OpenSearch answer, `["typed text", ["suggestion", …], …]`:
 /// none when it is not one.
 pub fn suggestions(answer: &str) -> Vec<String> {
@@ -110,6 +158,37 @@ pub fn suggestions(answer: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_typed_text_as_an_address_or_words() {
+        assert_eq!(
+            address("https://a.test/x").as_deref(),
+            Some("https://a.test/x")
+        );
+        assert_eq!(address("About:blank").as_deref(), Some("About:blank"));
+        assert_eq!(
+            address("example.com").as_deref(),
+            Some("https://example.com")
+        );
+        assert_eq!(address("example.com:8080/a b"), None);
+        assert_eq!(
+            address("docs.rs/serde").as_deref(),
+            Some("https://docs.rs/serde")
+        );
+        assert_eq!(
+            address("localhost:3000").as_deref(),
+            Some("http://localhost:3000")
+        );
+        assert_eq!(
+            address("192.168.1.1").as_deref(),
+            Some("https://192.168.1.1")
+        );
+        assert_eq!(address("rust traits"), None);
+        assert_eq!(address("hello"), None);
+        assert_eq!(address("v1.2"), None);
+        assert_eq!(address("a.b:"), None);
+        assert_eq!(address(""), None);
+    }
 
     #[test]
     fn names_each_engine_in_lowercase_for_the_ui() {
